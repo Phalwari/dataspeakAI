@@ -10,7 +10,7 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.0
       - key: PYTHONPATH
-        value: "."
+        value: "backend"
       # Add other environment variables needed for production below.
       # For secrets (like API keys, Database URLs), configure them in the Render Dashboard directly.
       - key: ENVIRONMENT
