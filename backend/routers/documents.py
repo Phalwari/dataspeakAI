@@ -6,14 +6,8 @@ from dependencies import get_current_user
 import os
 import io
 
-try:
-    from pypdf import PdfReader
-    from langchain_text_splitters import RecursiveCharacterTextSplitter
-    from langchain_huggingface import HuggingFaceEmbeddings
-    from langchain_community.vectorstores import FAISS
-    has_ai_libs = True
-except ImportError:
-    has_ai_libs = False
+# Move heavy imports inside functions to prevent OOM on startup
+has_ai_libs = True 
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
@@ -32,6 +26,7 @@ def process_document(document_id: int, file_path: str, tenant_id: int, chunk_siz
             raise Exception("AI Libraries not installed")
 
         # 1. Read File
+        from pypdf import PdfReader
         text = ""
         if file_path.lower().endswith('.pdf'):
             reader = PdfReader(file_path)
@@ -53,17 +48,20 @@ def process_document(document_id: int, file_path: str, tenant_id: int, chunk_siz
                 chunk_size=chunk_size, 
                 chunk_overlap=chunk_overlap
             )
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
         chunks = text_splitter.split_text(text)
         
         # 3. Create/Load FAISS
         global embeddings_model
         if embeddings_model is None:
             # use a fast lightweight model
+            from langchain_huggingface import HuggingFaceEmbeddings
             embeddings_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
             
         index_path = f"vector_store/tenant_{tenant_id}"
         metadatas = [{"document_id": document_id, "source": doc.name} for _ in chunks]
 
+        from langchain_community.vectorstores import FAISS
         if os.path.exists(index_path):
             vectorstore = FAISS.load_local(index_path, embeddings_model, allow_dangerous_deserialization=True)
             vectorstore.add_texts(texts=chunks, metadatas=metadatas)
@@ -163,10 +161,12 @@ def delete_document(
     try:
         global embeddings_model
         if embeddings_model is None:
+            from langchain_huggingface import HuggingFaceEmbeddings
             embeddings_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         
         index_path = f"vector_store/tenant_{current_user.tenant_id}"
         if os.path.exists(index_path):
+            from langchain_community.vectorstores import FAISS
             vectorstore = FAISS.load_local(index_path, embeddings_model, allow_dangerous_deserialization=True)
             
             # Find document ids in FAISS matching document_id
@@ -205,10 +205,12 @@ def get_document_chunks(
     try:
         global embeddings_model
         if embeddings_model is None:
+            from langchain_huggingface import HuggingFaceEmbeddings
             embeddings_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
             
         index_path = f"vector_store/tenant_{current_user.tenant_id}"
         if os.path.exists(index_path):
+            from langchain_community.vectorstores import FAISS
             vectorstore = FAISS.load_local(index_path, embeddings_model, allow_dangerous_deserialization=True)
             docstore_dict = vectorstore.docstore._dict
             
@@ -237,12 +239,14 @@ def search_documents(
     try:
         global embeddings_model
         if embeddings_model is None:
+            from langchain_huggingface import HuggingFaceEmbeddings
             embeddings_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
             
         index_path = f"vector_store/tenant_{current_user.tenant_id}"
         if not os.path.exists(index_path):
              return {"results": []}
 
+        from langchain_community.vectorstores import FAISS
         vectorstore = FAISS.load_local(index_path, embeddings_model, allow_dangerous_deserialization=True)
         docs = vectorstore.similarity_search_with_score(query.query, k=3)
         
