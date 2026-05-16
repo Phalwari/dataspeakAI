@@ -108,7 +108,7 @@ def login_user(user: schemas.UserLogin, db: Session = Depends(get_db)):
         )
     
     if not db_user.is_verified:
-        raise HTTPException(status_code=400, detail="Please verify your email before logging in.")
+        raise HTTPException(status_code=403, detail="Please verify your email before logging in.")
     
     access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = auth.create_access_token(

@@ -106,6 +106,17 @@ export function EmailVerificationPage() {
       setIsResending(false);
     }
   };
+  
+  // Auto-resend if flagged
+  useEffect(() => {
+    if (searchParams.get("auto_resend") === "true" && emailParam) {
+      handleResend();
+      // Remove the flag from URL so it doesn't resend on manual refresh
+      const newParams = new URLSearchParams(searchParams);
+      newParams.delete("auto_resend");
+      navigate(`/verify-email?${newParams.toString()}`, { replace: true });
+    }
+  }, [searchParams, emailParam, navigate]);
 
   if (success) {
     return (

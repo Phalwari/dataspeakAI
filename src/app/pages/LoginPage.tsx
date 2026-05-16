@@ -70,6 +70,10 @@ export function LoginPage() {
 
       if (!response.ok) {
         const data = await response.json();
+        if (response.status === 403) {
+          navigate(`/verify-email?email=${encodeURIComponent(email)}&auto_resend=true`);
+          return;
+        }
         throw new Error(data.detail || "Login failed");
       }
 
