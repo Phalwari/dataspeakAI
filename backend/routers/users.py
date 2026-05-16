@@ -219,6 +219,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 def send_otp_email(email: str, otp_code: str, subject: str, message: str):
+    print(f"DEBUG: Starting send_otp_email for {email}")
     # Try SMTP first (Gmail, etc.)
     smtp_user = os.getenv("EMAIL_USER")
     smtp_pass = os.getenv("EMAIL_PASS")
@@ -226,6 +227,7 @@ def send_otp_email(email: str, otp_code: str, subject: str, message: str):
     smtp_port = int(os.getenv("EMAIL_PORT", 587))
 
     if smtp_user and smtp_pass:
+        print(f"DEBUG: Attempting SMTP with user: {smtp_user}")
         try:
             msg = MIMEMultipart()
             msg['From'] = f"DataSpeakAI <{smtp_user}>"
@@ -244,14 +246,15 @@ def send_otp_email(email: str, otp_code: str, subject: str, message: str):
             server.login(smtp_user, smtp_pass)
             server.send_message(msg)
             server.quit()
-            print(f"Email sent successfully to {email} via SMTP")
+            print(f"SUCCESS: Email sent to {email} via SMTP")
             return
         except Exception as e:
-            print(f"SMTP Error: {str(e)}")
+            print(f"ERROR: SMTP Failed: {str(e)}")
 
     # Fallback to Resend if SMTP fails or isn't configured
     api_key = os.getenv("RESEND_API_KEY")
     if api_key:
+        print("DEBUG: Falling back to Resend API")
         try:
             resend.api_key = api_key
             resend.Emails.send({
@@ -260,12 +263,11 @@ def send_otp_email(email: str, otp_code: str, subject: str, message: str):
                 "subject": subject,
                 "html": f"<p>{message}: <strong>{otp_code}</strong>. It expires in 10 minutes.</p>"
             })
-            print(f"Email sent successfully to {email} via Resend")
+            print(f"SUCCESS: Email sent to {email} via Resend")
         except Exception as e:
-            print(f"Resend Error: {str(e)}")
-            print(f"FALLBACK OTP for {email}: {otp_code}")
+            print(f"ERROR: Resend Failed: {str(e)}")
     else:
-        print(f"No email provider configured. FALLBACK OTP for {email}: {otp_code}")
+        print(f"CRITICAL: No email provider configured! OTP for {email} is: {otp_code}")
 
 @router.post("/forgot-password")
 def forgot_password(data: schemas.ForgotPasswordRequest, db: Session = Depends(get_db)):

@@ -14,11 +14,33 @@ export function ForgotPasswordPage() {
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState(false);
+  const [isResending, setIsResending] = useState(false);
+  const [resendMessage, setResendMessage] = useState("");
   
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  const handleResendOTP = async () => {
+    setIsResending(true);
+    setError("");
+    setResendMessage("");
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/forgot-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      if (response.ok) {
+        setResendMessage("Verification code resent successfully!");
+      } else {
+        const data = await response.json();
+        setError(data.detail || "Failed to resend code.");
+      }
+    } catch (err) {
+      setError("Connection error. Please try again later.");
+    } finally {
+      setIsResending(false);
+    }
+  };
 
   const handleOtpChange = (index: number, value: string) => {
     if (value.length > 1) {
@@ -220,6 +242,12 @@ export function ForgotPasswordPage() {
 
             {step === 2 && (
               <form onSubmit={handleVerifyOTP} className="space-y-8">
+                {resendMessage && (
+                  <div className="p-4 bg-green-50 border border-green-100 rounded-xl text-green-600 text-sm flex items-center gap-3">
+                    <div className="w-1.5 h-1.5 bg-green-600 rounded-full flex-shrink-0" />
+                    {resendMessage}
+                  </div>
+                )}
                 <div className="flex justify-between gap-2">
                   {otp.map((digit, index) => (
                     <input
@@ -235,9 +263,24 @@ export function ForgotPasswordPage() {
                     />
                   ))}
                 </div>
-                <Button type="submit" className="w-full h-14 text-lg font-semibold bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 transition-all shadow-xl shadow-blue-200" disabled={isLoading}>
-                  {isLoading ? <Loader2 className="w-6 h-6 animate-spin" /> : "Verify Code"}
-                </Button>
+                <div className="space-y-4">
+                  <Button type="submit" className="w-full h-14 text-lg font-semibold bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 transition-all shadow-xl shadow-blue-200" disabled={isLoading}>
+                    {isLoading ? <Loader2 className="w-6 h-6 animate-spin" /> : "Verify Code"}
+                  </Button>
+                  
+                  <div className="text-center">
+                    <p className="text-sm text-gray-600 mb-2">Didn't receive the code?</p>
+                    <Button 
+                      type="button"
+                      variant="outline"
+                      onClick={handleResendOTP}
+                      className="w-full h-11 border-2 hover:bg-gray-50 transition-colors"
+                      disabled={isResending}
+                    >
+                      {isResending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : "Resend Code"}
+                    </Button>
+                  </div>
+                </div>
                 <button
                   type="button"
                   onClick={() => setStep(1)}
