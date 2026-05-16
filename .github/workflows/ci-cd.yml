@@ -1,0 +1,71 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-and-test-backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./backend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          
+      # Add tests here if available, for example:
+      # - name: Run tests
+      #   run: pytest
+
+  build-and-test-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+        
+      # Add tests here if available, for example:
+      # - name: Run tests
+      #   run: npm test
+
+  deploy-backend:
+    needs: build-and-test-backend
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render Deployment
+        uses: fjogeleit/http-request-action@v1.15.0
+        with:
+          url: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          method: 'POST'
+          
+  # Frontend deployment is typically handled automatically by Vercel's GitHub integration 
+  # when a push to 'main' occurs, so a separate deploy step is not strictly required here 
+  # unless using Vercel CLI.

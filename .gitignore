@@ -1,0 +1,22 @@
+# Node.js
+node_modules/
+dist/
+dist-ssr/
+*.local
+.env
+.env.production
+
+# Python
+backend/venv/
+backend/.env
+__pycache__/
+*.py[cod]
+*$py.class
+backend/uploads/
+backend/vector_store/
+backend/app.db
+
+# IDEs
+.vscode/
+.idea/
+.DS_Store

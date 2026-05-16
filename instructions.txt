@@ -1,0 +1,1 @@
+In src/app/pages/LoginPage.tsx, remove the 'Or continue with' separator and the Google and GitHub login buttons. Make sure the remaining layout is clean.

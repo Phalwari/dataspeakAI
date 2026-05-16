@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: dataspeakai-backend
+    env: python
+    region: ohio
+    plan: free
+    buildCommand: "pip install -r backend/requirements.txt"
+    startCommand: "cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      # Add other environment variables needed for production below.
+      # For secrets (like API keys, Database URLs), configure them in the Render Dashboard directly.
+      - key: ENVIRONMENT
+        value: production

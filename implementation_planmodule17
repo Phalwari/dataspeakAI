@@ -1,0 +1,44 @@
+# Goal: Build Module 17 (Knowledge Base & RAG Document Search)
+
+This is the "Wow-Factor" module of your FYP. We will build the system that allows your business owners to upload their internal documents (PDFs, Text files), which we will process, split into chunks, embed using AI, and store in a Vector Database so their Chatbots can perform semantic search.
+
+## Proposed Changes
+
+### 1. Backend Data Modeling (`backend/models.py`)
+- **[NEW]** Create a `Document` model to track the files:
+  - `id`, `tenant_id` (ForeignKey)
+  - `name` (e.g., "Company_Handbook.pdf")
+  - `file_type` (e.g., "PDF")
+  - `size` (Integer in bytes)
+  - `status` (e.g., "Completed", "Processing", "Failed")
+  - `embeddings_count` (Integer)
+  - `created_at`
+
+### 2. New AI Dependencies (`backend/requirements.txt`)
+- **[MODIFY]** Add standard RAG libraries: `python-multipart` (for file uploads), `langchain`, `langchain-huggingface`, `pypdf`, and `faiss-cpu`. 
+*(Note: I am substituting Qdrant with FAISS because FAISS can be installed directly via Python without needing to configure Docker! This makes your FYP much easier to run and demo).*
+
+### 3. Backend Schemas & Router (`backend/routers/documents.py`)
+- **[NEW]** Router `documents.py` with endpoints:
+  - `GET /api/documents`: Fetch all documents for the current tenant.
+  - `POST /api/documents/upload`: Accepts `multipart/form-data`. Saves the file, reads the PDF text, splits it into chunks using LangChain, generates embeddings using a lightweight open-source HuggingFace model, and saves it to a local FAISS index!
+  - `DELETE /api/documents/{id}`: Deletes the document.
+
+### 4. Frontend Integration
+- **[MODIFY]** `KnowledgeBasePage.tsx`: Fetch and display real documents from the DB instead of mock data.
+- **[MODIFY]** `UploadDocumentsPage.tsx`: Wire up the File dropzone to actually send the selected files to the FastAPI backend using `FormData`.
+
+## User Review Required
+
+> [!TIP]
+> The first time you upload a document, the Python backend will download the HuggingFace embedding model (usually ~100MB). It might take a few extra seconds on the very first upload, but subsequent uploads will be lightning fast!
+
+> [!WARNING]
+> Because we are adding the new `Document` model, I will need to drop and recreate the SQLite database (`app.db`) one last time. 
+
+## Verification Plan
+1. Delete `app.db` to apply the schema.
+2. Sign up and navigate to the Knowledge Base page.
+3. Go to "Upload Documents" and upload a sample PDF or Text file.
+4. Verify the frontend progress bar completes and the backend terminal shows the text extraction and FAISS indexing succeeding.
+5. Verify the Knowledge Base table correctly displays the new file with its exact chunk size (embeddings count) and "Completed" status!

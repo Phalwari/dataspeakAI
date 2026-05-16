@@ -1,0 +1,36 @@
+# Walkthrough: Module 17 - RAG Knowledge Base
+
+We have successfully completed **Module 17: RAG Knowledge Base**. The SaaS Dashboard now has a fully functional Retrieval-Augmented Generation (RAG) pipeline allowing users to upload documents and index them for the AI chatbot.
+
+## What Was Accomplished
+
+1. **Backend Infrastructure (`routers/documents.py`)**
+   - Created a new router to handle document uploads using `UploadFile`.
+   - Integrated **PyPDF** to extract text from PDF files and standard Python file I/O for `.txt` files.
+   - Implemented semantic chunking using LangChain's `RecursiveCharacterTextSplitter`.
+   - Integrated **Sentence Transformers** (`all-MiniLM-L6-v2`) and **FAISS** to generate embeddings locally and store them in tenant-specific vector databases (`vector_store/tenant_{id}`).
+   - Handled background processing using FastAPI's `BackgroundTasks` so the UI remains responsive during vectorization.
+
+2. **Database Models & Schemas**
+   - Added a `Document` model in `models.py` with fields like `file_type`, `size`, `status` (Processing, Completed, Failed), and `embeddings_count`.
+   - Updated `schemas.py` with corresponding `DocumentBase` and `DocumentResponse`.
+
+3. **Frontend Integration (`KnowledgeBasePage.tsx` & `UploadDocumentsPage.tsx`)**
+   - Wired up the file upload logic to send `multipart/form-data` payloads securely with the JWT token.
+   - Replaced mock data in the Knowledge Base table with live data fetched from the API.
+   - Implemented a 5-second polling interval in the `useEffect` hook to dynamically update the processing status (`Processing` -> `Completed`).
+   - Connected the summary metric cards at the top of the page (Total Documents, Total Embeddings, Storage Used) to calculate dynamically based on the user's actual vector database statistics.
+
+## Verification
+
+The system was verified using a browser subagent:
+- We successfully started the frontend (`npm run dev`) and backend (`uvicorn`) servers.
+- A sample text document was uploaded via the UI.
+- The document was successfully received by the backend, vectorized without errors using `sentence-transformers`, and stored in FAISS.
+- The frontend table correctly updated to show the **Completed** status and the calculated number of embeddings.
+
+![Successful Vectorization Recording](/C:/Users/Umer/.gemini/antigravity/brain/2319d180-9586-468f-8a8d-711de499b7c0/module17_rag_test_1778096007876.webp)
+
+## Next Steps
+
+With the Knowledge Base foundation laid out, we are now ready to tackle the actual Chat Interface and OpenAI integration (RAG pipeline execution) or any other module the user prefers.

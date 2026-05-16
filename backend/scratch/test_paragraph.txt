@@ -1,0 +1,5 @@
+Paragraph 1: This is the first paragraph of our test document. It contains some basic information about RAG chunking strategies. We want to see if the splitter correctly identifies the double newline as a separator.
+
+Paragraph 2: This is the second paragraph. It is separated from the first one by two newline characters. In paragraph-based chunking, this should ideally be kept together or split at this boundary if it exceeds the chunk size.
+
+Paragraph 3: Finally, this is the third paragraph. We are testing the integration of the RecursiveCharacterTextSplitter with specific separators in the DataSpeakAI backend.
