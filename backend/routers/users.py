@@ -271,6 +271,7 @@ def send_otp_email(email: str, otp_code: str, subject: str, message: str):
 
 @router.post("/forgot-password")
 def forgot_password(data: schemas.ForgotPasswordRequest, db: Session = Depends(get_db)):
+    print(f"DEBUG: Forgot Password request received for {data.email}")
     db_user = db.query(models.User).filter(models.User.email == data.email).first()
     if not db_user:
         # We don't want to reveal if a user exists or not for security
