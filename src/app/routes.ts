@@ -94,3 +94,4 @@ export const router = createBrowserRouter([
     Component: AdminPanel,
   },
 ]);
+
