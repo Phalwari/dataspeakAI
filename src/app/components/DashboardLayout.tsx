@@ -50,16 +50,24 @@ export function DashboardLayout() {
     const fetchProfile = async () => {
       try {
         const token = localStorage.getItem("token");
-        if (!token) return;
+        if (!token) {
+          navigate("/login");
+          return;
+        }
 
         // Fetch User
         const userRes = await fetch(`${API_BASE_URL}/api/auth/me`, {
           headers: { Authorization: `Bearer ${token}` }
         });
-        if (userRes.ok) {
-          const userData = await userRes.json();
-          setUserName(userData.full_name || userData.email);
+        
+        if (!userRes.ok) {
+          localStorage.removeItem("token");
+          navigate("/login");
+          return;
         }
+
+        const userData = await userRes.json();
+        setUserName(userData.full_name || userData.email);
 
         // Fetch Tenant
         const tenantRes = await fetch(`${API_BASE_URL}/api/tenant/current`, {
