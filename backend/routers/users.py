@@ -15,7 +15,8 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 @router.post("/register", response_model=schemas.UserResponse)
 def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     # Check if user already exists
-    db_user = db.query(models.User).filter(models.User.email == user.email).first()
+    user_email = user.email.lower()
+    db_user = db.query(models.User).filter(models.User.email == user_email).first()
     if db_user:
         raise HTTPException(status_code=400, detail="Email already registered")
     
@@ -49,7 +50,7 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
 
         hashed_password = auth.get_password_hash(user.password)
         new_user = models.User(
-            email=user.email,
+            email=user_email,
             full_name=user.full_name,
             hashed_password=hashed_password,
             tenant_id=tenant_id,
@@ -74,11 +75,11 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
         # Generate and send verification OTP
         otp_code = str(random.randint(100000, 999999))
         expires_at = datetime.utcnow() + timedelta(minutes=10)
-        otp_entry = models.PasswordResetOTP(email=user.email, otp_code=otp_code, expires_at=expires_at)
+        otp_entry = models.PasswordResetOTP(email=user_email, otp_code=otp_code, expires_at=expires_at)
         db.add(otp_entry)
         db.commit()
         
-        send_otp_email(user.email, otp_code, "Verify your email", "Your verification code is")
+        send_otp_email(user_email, otp_code, "Verify your email", "Your verification code is")
 
         return {
             "id": new_user.id,
@@ -99,7 +100,8 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
 
 @router.post("/login", response_model=schemas.Token)
 def login_user(user: schemas.UserLogin, db: Session = Depends(get_db)):
-    db_user = db.query(models.User).filter(models.User.email == user.email).first()
+    user_email = user.email.lower()
+    db_user = db.query(models.User).filter(models.User.email == user_email).first()
     if not db_user or not auth.verify_password(user.password, db_user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -219,7 +221,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 def send_otp_email(email: str, otp_code: str, subject: str, message: str):
-    print(f"DEBUG: Starting send_otp_email for {email}")
+    print(f"DEBUG: Starting send_otp_email for {email}", flush=True)
     # Try SMTP first (Gmail, etc.)
     smtp_user = os.getenv("EMAIL_USER")
     smtp_pass = os.getenv("EMAIL_PASS")
@@ -227,7 +229,7 @@ def send_otp_email(email: str, otp_code: str, subject: str, message: str):
     smtp_port = int(os.getenv("EMAIL_PORT", 587))
 
     if smtp_user and smtp_pass:
-        print(f"DEBUG: Attempting SMTP with user: {smtp_user}")
+        print(f"DEBUG: Attempting SMTP with user: {smtp_user}", flush=True)
         try:
             msg = MIMEMultipart()
             msg['From'] = f"DataSpeakAI <{smtp_user}>"
@@ -246,15 +248,15 @@ def send_otp_email(email: str, otp_code: str, subject: str, message: str):
             server.login(smtp_user, smtp_pass)
             server.send_message(msg)
             server.quit()
-            print(f"SUCCESS: Email sent to {email} via SMTP")
+            print(f"SUCCESS: Email sent to {email} via SMTP", flush=True)
             return
         except Exception as e:
-            print(f"ERROR: SMTP Failed: {str(e)}")
+            print(f"ERROR: SMTP Failed: {str(e)}", flush=True)
 
     # Fallback to Resend if SMTP fails or isn't configured
     api_key = os.getenv("RESEND_API_KEY")
     if api_key:
-        print("DEBUG: Falling back to Resend API")
+        print("DEBUG: Falling back to Resend API", flush=True)
         try:
             resend.api_key = api_key
             resend.Emails.send({
@@ -263,17 +265,19 @@ def send_otp_email(email: str, otp_code: str, subject: str, message: str):
                 "subject": subject,
                 "html": f"<p>{message}: <strong>{otp_code}</strong>. It expires in 10 minutes.</p>"
             })
-            print(f"SUCCESS: Email sent to {email} via Resend")
+            print(f"SUCCESS: Email sent to {email} via Resend", flush=True)
         except Exception as e:
-            print(f"ERROR: Resend Failed: {str(e)}")
+            print(f"ERROR: Resend Failed: {str(e)}", flush=True)
     else:
-        print(f"CRITICAL: No email provider configured! OTP for {email} is: {otp_code}")
+        print(f"CRITICAL: No email provider configured! OTP for {email} is: {otp_code}", flush=True)
 
 @router.post("/forgot-password")
 def forgot_password(data: schemas.ForgotPasswordRequest, db: Session = Depends(get_db)):
-    print(f"DEBUG: Forgot Password request received for {data.email}")
-    db_user = db.query(models.User).filter(models.User.email == data.email).first()
+    user_email = data.email.lower()
+    print(f"DEBUG: Forgot Password request received for '{user_email}'", flush=True)
+    db_user = db.query(models.User).filter(models.User.email == user_email).first()
     if not db_user:
+        print(f"DEBUG: User not found in database: '{user_email}'", flush=True)
         # We don't want to reveal if a user exists or not for security
         return {"message": "If an account exists with that email, an OTP has been sent."}
     
@@ -282,16 +286,21 @@ def forgot_password(data: schemas.ForgotPasswordRequest, db: Session = Depends(g
     expires_at = datetime.utcnow() + timedelta(minutes=10)
     
     # Save OTP to database
-    otp_entry = models.PasswordResetOTP(
-        email=data.email,
-        otp_code=otp_code,
-        expires_at=expires_at
-    )
-    db.add(otp_entry)
-    db.commit()
+    try:
+        otp_entry = models.PasswordResetOTP(
+            email=user_email,
+            otp_code=otp_code,
+            expires_at=expires_at
+        )
+        db.add(otp_entry)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"ERROR: Database error saving OTP: {str(e)}", flush=True)
+        raise HTTPException(status_code=500, detail="Database error generating OTP")
     
     # Send Email via Resend
-    send_otp_email(data.email, otp_code, "Your Password Reset OTP", "Your OTP for password reset is")
+    send_otp_email(user_email, otp_code, "Your Password Reset OTP", "Your OTP for password reset is")
     
     return {"message": "If an account exists with that email, an OTP has been sent."}
 
