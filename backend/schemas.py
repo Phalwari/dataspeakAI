@@ -129,7 +129,10 @@ class DocumentBase(BaseModel):
     size: int
     status: str
     embeddings_count: int
-
+    line_count: int = 0
+    paragraph_count: int = 0
+    table_count: int = 0
+    image_count: int = 0
 class DocumentResponse(DocumentBase):
     id: int
     tenant_id: int

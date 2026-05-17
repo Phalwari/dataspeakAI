@@ -13,6 +13,7 @@ import {
   Clock,
   Plus,
   Eye,
+  Info,
 } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
@@ -49,6 +50,8 @@ export function KnowledgeBasePage() {
   const [selectedDocument, setSelectedDocument] = useState<any>(null);
   const [documentChunks, setDocumentChunks] = useState<any[]>([]);
   const [isChunksLoading, setIsChunksLoading] = useState(false);
+  
+  const [selectedStatsDocument, setSelectedStatsDocument] = useState<any>(null);
 
   const [testQuery, setTestQuery] = useState("");
   const [testResults, setTestResults] = useState<any[]>([]);
@@ -337,6 +340,10 @@ export function KnowledgeBasePage() {
                             <Eye className="w-4 h-4 mr-2" />
                             View Embeddings
                           </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => setSelectedStatsDocument(doc)}>
+                            <Info className="w-4 h-4 mr-2" />
+                            View Details
+                          </DropdownMenuItem>
                           <DropdownMenuItem>
                             <RefreshCw className="w-4 h-4 mr-2" />
                             Re-index
@@ -451,6 +458,49 @@ export function KnowledgeBasePage() {
                   No matching results found. Try asking something else or upload more documents.
                 </div>
               ) : null}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* View Details Dialog */}
+      <Dialog open={!!selectedStatsDocument} onOpenChange={(open) => !open && setSelectedStatsDocument(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Document Details</DialogTitle>
+            <DialogDescription>
+              Detailed statistics and metadata for {selectedStatsDocument?.name}
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="mt-4 space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="p-4 bg-gray-50 rounded-lg border border-gray-100">
+                <p className="text-sm text-gray-500 mb-1">File Type</p>
+                <p className="font-medium">{selectedStatsDocument?.file_type}</p>
+              </div>
+              <div className="p-4 bg-gray-50 rounded-lg border border-gray-100">
+                <p className="text-sm text-gray-500 mb-1">File Size</p>
+                <p className="font-medium">
+                  {selectedStatsDocument ? (selectedStatsDocument.size / 1024).toFixed(2) : 0} KB
+                </p>
+              </div>
+              <div className="p-4 bg-gray-50 rounded-lg border border-gray-100">
+                <p className="text-sm text-gray-500 mb-1">Total Sentences</p>
+                <p className="font-medium">{selectedStatsDocument?.line_count || 0}</p>
+              </div>
+              <div className="p-4 bg-gray-50 rounded-lg border border-gray-100">
+                <p className="text-sm text-gray-500 mb-1">Total Paragraphs</p>
+                <p className="font-medium">{selectedStatsDocument?.paragraph_count || 0}</p>
+              </div>
+              <div className="p-4 bg-gray-50 rounded-lg border border-gray-100">
+                <p className="text-sm text-gray-500 mb-1">Total Tables</p>
+                <p className="font-medium">{selectedStatsDocument?.table_count || 0}</p>
+              </div>
+              <div className="p-4 bg-gray-50 rounded-lg border border-gray-100">
+                <p className="text-sm text-gray-500 mb-1">Total Images</p>
+                <p className="font-medium">{selectedStatsDocument?.image_count || 0}</p>
+              </div>
             </div>
           </div>
         </DialogContent>

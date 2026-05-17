@@ -1,0 +1,8 @@
+This is paragraph one of the test document. It contains two sentences.
+Here is the second paragraph. It contains three lines of text.
+Line two of paragraph two.
+Line three of paragraph two.
+
+And this is paragraph three, which is the final paragraph.
+It should be counted as three paragraphs total.
+There should be around 8 lines total in this file.

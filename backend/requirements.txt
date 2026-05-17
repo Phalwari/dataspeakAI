@@ -18,3 +18,5 @@ google-auth
 resend
 requests
 python-dotenv
+pdfplumber
+pymupdf

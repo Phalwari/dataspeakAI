@@ -109,6 +109,10 @@ class Document(Base):
     size = Column(Integer, default=0)
     status = Column(String, default="Processing") # Completed, Processing, Failed
     embeddings_count = Column(Integer, default=0)
+    line_count = Column(Integer, default=0)
+    paragraph_count = Column(Integer, default=0)
+    table_count = Column(Integer, default=0)
+    image_count = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     tenant = relationship("Tenant")
     chunks = relationship("DocumentChunk", back_populates="document", cascade="all, delete-orphan")

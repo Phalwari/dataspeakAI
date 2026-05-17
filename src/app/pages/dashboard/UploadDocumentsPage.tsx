@@ -244,11 +244,17 @@ export function UploadDocumentsPage() {
                   <SelectContent>
                     <SelectItem value="fixed">Fixed Size</SelectItem>
                     <SelectItem value="paragraph">Paragraph-based</SelectItem>
+                    <SelectItem value="line">Line-based</SelectItem>
+                    <SelectItem value="sentence">Sentence-based</SelectItem>
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-gray-600">
                   {chunkingStrategy === "paragraph" 
                     ? "Splits text by double newlines (\n\n) to preserve paragraph context." 
+                    : chunkingStrategy === "line"
+                    ? "Splits text by single newlines (\n) to preserve line context."
+                    : chunkingStrategy === "sentence"
+                    ? "Splits text by punctuation (. ? !) to preserve sentence context."
                     : "Splits text into fixed token sizes regardless of content structure."}
                 </p>
               </div>
