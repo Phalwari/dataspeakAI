@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
 import { API_BASE_URL } from "../../config/api";
-import { Plus, CheckCircle, XCircle, Settings, Trash2, Database, Table, Search, Loader2 } from "lucide-react";
+import { Plus, CheckCircle, XCircle, Settings, Trash2, Database, Table, Search, Loader2, Sparkles } from "lucide-react";
 import { Button } from "../../components/ui/button";
+import { QueryChatPanel } from "../../components/QueryChatPanel";
+
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
@@ -81,6 +83,20 @@ export function DatabasesPage() {
   const [isFetchingData, setIsFetchingData] = useState(false);
   const [tableStats, setTableStats] = useState<{rows: number, columns: number} | null>(null);
   const [explorerError, setExplorerError] = useState("");
+
+  // AI Query Chat Modal State
+  const [isQueryModalOpen, setIsQueryModalOpen] = useState(false);
+  const [queryDbId, setQueryDbId] = useState<number | undefined>(undefined);
+
+  const openAiQuery = (db?: any) => {
+    if (db) {
+      setQueryDbId(db.id);
+    } else if (databases.length > 0) {
+      setQueryDbId(databases[0].id);
+    }
+    setIsQueryModalOpen(true);
+  };
+
 
   const fetchDatabases = async () => {
     const token = localStorage.getItem("token");
@@ -273,13 +289,23 @@ export function DatabasesPage() {
           </p>
         </div>
 
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogTrigger asChild>
-            <Button className="gap-2">
-              <Plus className="w-4 h-4" />
-              Add Database
-            </Button>
-          </DialogTrigger>
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            className="gap-2 border-blue-200 text-blue-700 bg-blue-50/50 hover:bg-blue-100"
+            onClick={() => openAiQuery()}
+          >
+            <Sparkles className="w-4 h-4 text-blue-600" />
+            AI Query Assistant
+          </Button>
+
+          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+            <DialogTrigger asChild>
+              <Button className="gap-2">
+                <Plus className="w-4 h-4" />
+                Add Database
+              </Button>
+            </DialogTrigger>
           <DialogContent className="sm:max-w-[550px]">
             <DialogHeader>
               <DialogTitle>Add New Database</DialogTitle>
@@ -358,6 +384,8 @@ export function DatabasesPage() {
           </DialogContent>
         </Dialog>
       </div>
+    </div>
+
 
       {/* Database List */}
       <div className="grid gap-6">
@@ -418,6 +446,15 @@ export function DatabasesPage() {
                 </div>
 
                 <div className="flex items-center gap-2">
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={() => openAiQuery(db)}
+                    className="gap-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm hover:from-blue-700 hover:to-indigo-700"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    Query AI
+                  </Button>
                   <Button variant="outline" size="sm" onClick={() => openExplorer(db)}>
                     View Data
                   </Button>
@@ -567,6 +604,17 @@ export function DatabasesPage() {
         </DialogContent>
           );
         })()}
+      </Dialog>
+
+      {/* Conversational NL-to-SQL Query Modal */}
+      <Dialog open={isQueryModalOpen} onOpenChange={setIsQueryModalOpen}>
+        <DialogContent className="sm:max-w-[85vw] h-[85vh] p-0 overflow-hidden flex flex-col">
+          <QueryChatPanel
+            databases={databases}
+            defaultDatabaseId={queryDbId}
+            onClose={() => setIsQueryModalOpen(false)}
+          />
+        </DialogContent>
       </Dialog>
     </div>
   );

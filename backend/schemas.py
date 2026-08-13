@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr
-from typing import Optional
+from typing import Optional, List, Any
 from datetime import datetime
 
 class TenantBase(BaseModel):
@@ -133,6 +133,14 @@ class DocumentBase(BaseModel):
     paragraph_count: int = 0
     table_count: int = 0
     image_count: int = 0
+    progress: float = 0.0
+    error_message: Optional[str] = None
+    total_pages: int = 0
+    pages_processed: int = 0
+    visual_pages: int = 0
+    celery_task_id: Optional[str] = None
+    embedding_model: Optional[str] = "all-MiniLM-L6-v2"
+
 class DocumentResponse(DocumentBase):
     id: int
     tenant_id: int
@@ -141,8 +149,35 @@ class DocumentResponse(DocumentBase):
     class Config:
         from_attributes = True
 
+class DocumentChunkResponse(BaseModel):
+    id: int
+    document_id: int
+    content: str
+    overlap_chars: int
+    chunk_index: int
+    page_number: Optional[int] = None
+    content_type: str = "text"
+    section_heading: Optional[str] = None
+    reference_id: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
 class SearchQuery(BaseModel):
     query: str
+    top_k: Optional[int] = 5
+    synthesize: Optional[bool] = True
+    document_ids: Optional[List[int]] = None
+    content_types: Optional[List[str]] = None
+    page_range: Optional[List[int]] = None # [min_page, max_page]
+    search_mode: Optional[str] = "hybrid"
+    re_rank: Optional[bool] = False
+
+class SearchSynthesisResponse(BaseModel):
+    query: str
+    answer: Optional[str] = None
+    results: List[dict] = []
 
 class GithubLoginRequest(BaseModel):
     code: str
@@ -165,5 +200,21 @@ class EmailVerificationRequest(BaseModel):
 
 class ResendVerificationRequest(BaseModel):
     email: EmailStr
+
+class NLQueryRequest(BaseModel):
+    database_id: int
+    query: str
+
+class NLQueryResponse(BaseModel):
+    query: str
+    generated_sql: str
+    explanation: str
+    columns: List[str] = []
+    rows: List[dict] = []
+    row_count: int = 0
+    execution_time_ms: float = 0.0
+    status: str
+    error_detail: Optional[str] = None
+
 
 

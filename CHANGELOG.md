@@ -17,6 +17,46 @@ To maintain seamless multi-developer and AI agent collaboration:
 
 ## [Unreleased]
 
+### Added — Phase 1 & 2: Extraction Engine & Hybrid Search
+- **Multimodal Document Extraction Pipeline & Structure-Aware Router (`backend/ingestion/`)**:
+  - Implemented structure-aware pre-flight evaluation routing digital text pages to fast CPU text parsers and escalating scanned/image pages to Google Gemini 2.5 Flash VLM OCR.
+  - Added native multi-format support for `.pdf`, `.docx`, `.xlsx`, `.pptx`, `.csv`, `.html`, `.md`, and `.txt` files.
+  - Implemented streaming file upload handling in `backend/routers/documents.py` with 100MB chunked disk writing and post-processing file cleanup.
+  - Created HTML table matrix generation with placeholder anchoring (`[[TABLE_REF_001]]`) inside narrative text streams.
+- **Hybrid Dense-Sparse RAG Search & Reciprocal Rank Fusion (`backend/search/`)**:
+  - Created BM25Okapi sparse keyword index manager (`backend/search/bm25_index.py`) per tenant.
+  - Implemented Reciprocal Rank Fusion (`backend/search/hybrid.py`) combining dense FAISS embeddings with sparse BM25 scores.
+  - Added metadata pre-filtering (document IDs, content types, page numbers) to `/api/documents/search`.
+- **Extended Database Models & Pydantic Schemas**:
+  - Added `progress`, `error_message`, `total_pages`, `pages_processed`, `visual_pages` to `Document` model.
+  - Added `page_number`, `content_type`, `section_heading`, `reference_id` to `DocumentChunk` model.
+
+### Added — Phase 3: Frontend Progress & Search Filters
+- **Per-File Progress Tracking & Dual Progress Bars (`UploadDocumentsPage.tsx`)**:
+  - Replaced global single-jump progress state with `FileUploadState` tracking per-file HTTP upload progress via `XMLHttpRequest` and backend processing progress via 3-second polling.
+  - Added dual progress bars (blue for HTTP upload, green for backend processing).
+  - Added VLM vision badge (`🔍 {visualPages} pages sent to AI vision`) when visual pages are extracted.
+  - Added individual file error banners with `Retry` action buttons.
+  - Replaced embedding model dropdown with static label: `Sentence Transformers (all-MiniLM-L6-v2)`.
+- **Granular Search Filters & Progress Visualization (`KnowledgeBasePage.tsx`)**:
+  - Added search filter panel inside Test AI Query dialog: document multi-select, content type toggles (Text 📄, Table 📊, Image 🖼️), page range inputs, Hybrid vs. Semantic search mode switch.
+  - Added inline progress bar for documents with `Processing` status in the main table.
+  - Wired `Re-index` context menu button to `POST /api/documents/{id}/reindex` with Sonner toast notifications.
+  - Added red error message subtitles for documents in `Failed` status.
+
+### Added — Phase 4: Scalability & Hardening
+- **Celery Task Queue & Async Processing (`backend/celery_app.py`, `backend/ingestion/task_queue.py`)**:
+  - Configured Celery with Redis broker/backend and `BackgroundTasks` fallback when Redis unavailable.
+  - Wrapped document ingestion and reindexing into retriable Celery tasks with isolated DB sessions.
+  - Added `celery_task_id` and `embedding_model` fields to `Document` model.
+- **Document Reindexing Endpoint (`backend/routers/documents.py`)**:
+  - Added `POST /api/documents/{id}/reindex` for on-demand re-embedding from stored chunks.
+- **Search Mode Control & Cross-Encoder Re-Ranking (`backend/search/hybrid.py`)**:
+  - Added `search_mode` ("hybrid"/"semantic") and `re_rank` flags to `SearchQuery` schema.
+  - Implemented MS-MARCO Cross-Encoder re-ranking for improved retrieval precision.
+- **Embedding Model Migration Tool (`backend/scripts/migrate_embeddings.py`)**:
+  - CLI script to re-embed all tenant chunks with target model (default: `BAAI/bge-small-en-v1.5`), rebuild FAISS & BM25 indices, with `--dry-run` mode.
+
 ### Planned / In Progress
 - Implementation of remaining 25 enterprise database schema tables into `backend/models.py`.
 - Dynamic SQL query generator with advanced schema-aware guardrails and parameterization.

@@ -1,10 +1,17 @@
+import sys
+import os
+
+# Ensure backend directory is in sys.path when imported from root or elsewhere
+backend_dir = os.path.dirname(os.path.abspath(__file__))
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import models
 from database import engine
-from routers import users, tenants, databases, api_keys, chatbot_config, documents
+from routers import users, tenants, databases, api_keys, chatbot_config, documents, query, analytics
 from dotenv import load_dotenv
-import os
 
 load_dotenv()
 
@@ -28,6 +35,9 @@ app.include_router(databases.router)
 app.include_router(api_keys.router)
 app.include_router(chatbot_config.router)
 app.include_router(documents.router)
+app.include_router(query.router)
+app.include_router(analytics.router)
+
 
 @app.get("/")
 def read_root():

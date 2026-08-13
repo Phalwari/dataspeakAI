@@ -8,13 +8,16 @@ import time
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 
+from crypto import encrypt_password, decrypt_password
+
 router = APIRouter(prefix="/api/databases", tags=["databases"])
 
 def get_connection_url(db_conn: models.DatabaseConnection):
+    raw_password = decrypt_password(db_conn.password)
     if db_conn.db_type == "postgresql":
-        return f"postgresql://{db_conn.username}:{db_conn.password}@{db_conn.host}/{db_conn.database}"
-    elif db_conn.db_type == "mysql":
-        return f"mysql+pymysql://{db_conn.username}:{db_conn.password}@{db_conn.host}/{db_conn.database}"
+        return f"postgresql://{db_conn.username}:{raw_password}@{db_conn.host}/{db_conn.database}"
+    elif db_conn.db_type in ("mysql", "mariadb"):
+        return f"mysql+pymysql://{db_conn.username}:{raw_password}@{db_conn.host}/{db_conn.database}"
     elif db_conn.db_type == "sqlite":
         return f"sqlite:///{db_conn.database}"
     return None
@@ -56,7 +59,7 @@ def add_database(
         db_type=db_conn.db_type,
         host=db_conn.host,
         username=db_conn.username,
-        password=db_conn.password,
+        password=encrypt_password(db_conn.password),
         database=db_conn.database,
         status="connected" # Assume connected initially or after successful test
     )
@@ -86,15 +89,6 @@ def delete_database(
     db.commit()
     return {"message": "Database deleted successfully"}
 
-from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.exc import SQLAlchemyError
-
-def get_connection_url(db_conn: models.DatabaseConnection):
-    if db_conn.db_type == "postgresql":
-        return f"postgresql://{db_conn.username}:{db_conn.password}@{db_conn.host}/{db_conn.database}"
-    elif db_conn.db_type == "mysql" or db_conn.db_type == "mariadb":
-        return f"mysql+pymysql://{db_conn.username}:{db_conn.password}@{db_conn.host}/{db_conn.database}"
-    return None
 
 @router.get("/{db_id}/tables")
 def get_database_tables(
@@ -148,11 +142,18 @@ def get_table_data(
 
     try:
         engine = create_engine(connection_url)
+        inspector = inspect(engine)
+        valid_tables = inspector.get_table_names()
+        if table_name not in valid_tables:
+            raise HTTPException(status_code=400, detail="Invalid table name")
+
         with engine.connect() as conn:
             result = conn.execute(text(f"SELECT * FROM {table_name} LIMIT 100"))
             columns = result.keys()
             data = [dict(zip(columns, row)) for row in result]
             return data
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to fetch data: {str(e)}")
 
@@ -221,6 +222,9 @@ def get_table_stats(
         from sqlalchemy.pool import NullPool
         engine = create_engine(connection_url, poolclass=NullPool)
         inspector = inspect(engine)
+        valid_tables = inspector.get_table_names()
+        if table_name not in valid_tables:
+            raise HTTPException(status_code=400, detail="Invalid table name")
         
         # Get column count
         columns = inspector.get_columns(table_name)
@@ -233,6 +237,8 @@ def get_table_stats(
             
         engine.dispose()
         return {"rows": row_count, "columns": col_count}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to fetch table stats: {str(e)}")
 

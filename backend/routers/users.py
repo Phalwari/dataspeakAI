@@ -125,9 +125,13 @@ import os
 @router.post("/github-login", response_model=schemas.Token)
 def github_login(data: schemas.GithubLoginRequest, db: Session = Depends(get_db)):
     try:
-        # Exchange code for access token
-        client_id = os.getenv("GITHUB_CLIENT_ID", "Ov23liPRgons4RlFv7FU")
-        client_secret = os.getenv("GITHUB_CLIENT_SECRET", "067e59b3c050792898954f727be0dbdbfc5c590a")
+        client_id = os.getenv("GITHUB_CLIENT_ID")
+        client_secret = os.getenv("GITHUB_CLIENT_SECRET")
+        if not client_id or not client_secret:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="GitHub OAuth credentials (GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET) are not configured."
+            )
         
         token_response = sync_requests.post(
             "https://github.com/login/oauth/access_token",
@@ -195,6 +199,9 @@ def github_login(data: schemas.GithubLoginRequest, db: Session = Depends(get_db)
         
         return {"access_token": access_token, "token_type": "bearer", "user": db_user}
         
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
