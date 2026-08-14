@@ -216,5 +216,68 @@ class NLQueryResponse(BaseModel):
     status: str
     error_detail: Optional[str] = None
 
+class MessageResponse(BaseModel):
+    id: int
+    conversation_id: int
+    sender_role: str
+    content: str
+    query_type: Optional[str] = "rag"
+    metadata_json: Optional[dict] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class ConversationResponse(BaseModel):
+    id: int
+    tenant_id: int
+    user_id: Optional[int] = None
+    title: str
+    platform: str
+    created_at: datetime
+    updated_at: datetime
+    messages: Optional[List[MessageResponse]] = []
+
+    class Config:
+        from_attributes = True
+
+class ConversationListItem(BaseModel):
+    id: int
+    title: str
+    platform: str
+    created_at: datetime
+    updated_at: datetime
+    last_message: Optional[str] = None
+    message_count: int = 0
+
+class ConversationUpdate(BaseModel):
+    title: str
+
+class ChatRequest(BaseModel):
+    conversation_id: Optional[int] = None
+    query: str
+    source_preference: Optional[str] = "auto" # "auto" | "documents" | "database"
+    database_id: Optional[int] = None # Optional override if specific DB is targeted
+
+class SourceCitation(BaseModel):
+    document_name: str
+    page_number: Optional[int] = None
+    content_type: str = "text"
+    reference_id: Optional[str] = None
+    snippet: str
+    score: Optional[float] = 0.0
+
+class ChatResponse(BaseModel):
+    conversation_id: int
+    message_id: int
+    user_message_id: int
+    query: str
+    answer: str
+    query_type: str # "rag" | "sql" | "hybrid"
+    sources: List[SourceCitation] = []
+    sql_data: Optional[NLQueryResponse] = None
+    created_at: datetime
+
+
 
 

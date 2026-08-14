@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Float
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Float, JSON
 from sqlalchemy.orm import relationship
 from database import Base
 import datetime
@@ -168,4 +168,34 @@ class QueryLog(Base):
     tenant = relationship("Tenant")
     user = relationship("User")
     database = relationship("DatabaseConnection")
+
+class Conversation(Base):
+    __tablename__ = "conversations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    title = Column(String, default="New Conversation")
+    platform = Column(String, default="web") # web, widget, api
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    tenant = relationship("Tenant")
+    user = relationship("User")
+    messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=False)
+    sender_role = Column(String(20), nullable=False) # user, assistant, system
+    content = Column(Text, nullable=False)
+    sanitized_content = Column(Text, nullable=True)
+    query_type = Column(String(20), default="rag") # rag, sql, hybrid
+    metadata_json = Column(JSON, nullable=True) # citations, SQL query, execution time, etc.
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    conversation = relationship("Conversation", back_populates="messages")
+
 

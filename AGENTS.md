@@ -236,6 +236,17 @@ backend/
 * `GEMINI_API_KEY` — Google Gemini API key for visual chart and PDF analysis.
 * `GITHUB_CLIENT_ID` — GitHub OAuth Application Client ID.
 * `GITHUB_CLIENT_SECRET` — GitHub OAuth Application Client Secret.
+* `DEFAULT_ADMIN_EMAIL` — (Optional override) Default dev superadmin email (default: `admin@dataspeak.ai`).
+* `DEFAULT_ADMIN_PASSWORD` — (Optional override) Default dev superadmin password (default: `AdminPassword123!`).
+
+### 4.5 Development Superadmin Seeding & Production Hardening Checklist
+
+> 🔒 **PRODUCTION DEPLOYMENT NOTICE:** For multi-developer local workflow ease, a pre-verified development superadmin account (`admin@dataspeak.ai` / `AdminPassword123!`) auto-seeds on backend startup via `backend/scripts/seed_admin.py` and has a quick-fill button on `LoginPage.tsx`.
+>
+> **When preparing for production deployment, you MUST execute the following steps:**
+> 1. **Disable Auto-Seeding on Startup:** In [`backend/main.py`](file:///d:/dataspeak/backend/main.py), remove or comment out the `seed_superadmin()` block (or gate it behind `ENVIRONMENT != "production"`).
+> 2. **Remove Quick-Fill Button on UI:** In [`src/app/pages/LoginPage.tsx`](file:///d:/dataspeak/src/app/pages/LoginPage.tsx), remove the `<div className="mb-4 p-3 bg-blue-50/80...">` Default Admin auto-fill card.
+> 3. **Delete/Update Default DB Credentials:** In the production database, either delete the user `admin@dataspeak.ai` or change its password to a cryptographically secure value via your secrets manager.
 
 ---
 

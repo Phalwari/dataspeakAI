@@ -17,6 +17,26 @@ To maintain seamless multi-developer and AI agent collaboration:
 
 ## [Unreleased]
 
+- **Default Superadmin Seed & Auto-Initialization (`backend/scripts/seed_admin.py`, `backend/main.py`, `LoginPage.tsx`)**:
+  - Implemented automatic database seeding on startup ensuring a default verified Superadmin user (`admin@dataspeak.ai` / `AdminPassword123!`) and default tenant exist out-of-the-box.
+  - Added an interactive **"⚡ Auto-fill Default Admin"** shortcut button on the frontend login page for fast multi-developer testing without re-registering.
+  - *Production Hardening Note:* For production release, see [`AGENTS.md` Section 4.5](file:///d:/dataspeak/AGENTS.md) for instructions to disable auto-seeding in `main.py`, remove the login autofill card, and rotate the credentials.
+- **Conversational Data Layer & Models (`backend/models.py`, `backend/schemas.py`)**:
+  - Implemented `Conversation` (sessions, auto-generated titles, timestamps) and `Message` (turns, roles, query_type, metadata_json) SQLAlchemy models and Pydantic schemas.
+- **Intelligent Query Router & Auto Database Selection (`backend/services/query_router.py`)**:
+  - Developed multi-stage query intent classifier supporting heuristic keyword checks, schema metadata introspection, user preference overrides (`auto`, `documents`, `database`), and Google Gemini 2.5 Flash fallback.
+  - Implemented automatic database connection selection (Option C) matching user queries to relevant database schemas.
+- **Unified Chat API Endpoint (`backend/routers/chat.py`)**:
+  - Built `POST /api/chat` supporting multi-turn conversational context windows (up to 8 turns), grounded RAG hybrid retrieval (FAISS + BM25 + RRF + Cross-Encoder re-ranking), safe NL-to-SQL execution, and multi-source Hybrid synthesis.
+  - Added full conversation session management endpoints (`GET /api/conversations`, `GET /api/conversations/{id}`, `PATCH /api/conversations/{id}`, `DELETE /api/conversations/{id}`).
+- **Conversational AI Assistant Workspace (`src/app/pages/dashboard/ChatPage.tsx`)**:
+  - Built responsive 3-panel chat interface with conversation history sidebar, search filter, inline rename/delete, prompt suggestions, and engine switcher.
+  - Added rich response rendering with engine status badges, syntax-highlighted SQL data tables, collapsible source citation cards, and modal chunk inspection.
+  - Registered `/dashboard/chat` in router and updated navigation in `DashboardLayout.tsx`.
+- **Architectural Documentation (`docs/architecture/`)**:
+  - [`docs/architecture/RAG_SYSTEM_ARCHITECTURE.md`](file:///d:/dataspeak/docs/architecture/RAG_SYSTEM_ARCHITECTURE.md): Complete technical breakdown of multi-modal ingestion, table matrix preservation, recursive chunking, dual FAISS/BM25 indexing, intelligent query routing, and 5-stage hybrid retrieval.
+  - [`docs/architecture/conversational_retrieval_architecture.md`](file:///d:/dataspeak/docs/architecture/conversational_retrieval_architecture.md): Conversational AI Assistant workflow and data flow specification.
+
 ### Added — Phase 1 & 2: Extraction Engine & Hybrid Search
 - **Multimodal Document Extraction Pipeline & Structure-Aware Router (`backend/ingestion/`)**:
   - Implemented structure-aware pre-flight evaluation routing digital text pages to fast CPU text parsers and escalating scanned/image pages to Google Gemini 2.5 Flash VLM OCR.

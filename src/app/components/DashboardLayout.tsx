@@ -30,12 +30,13 @@ import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { name: "AI Assistant (Chat)", href: "/dashboard/chat", icon: MessageSquare },
   { name: "Databases", href: "/dashboard/databases", icon: Database },
   { name: "Knowledge Base", href: "/dashboard/knowledge-base", icon: BookOpen },
   { name: "Analytics & Visualization", href: "/dashboard/analytics", icon: BarChart3 },
   { name: "AI Insights", href: "/dashboard/ai-insights", icon: Lightbulb },
   { name: "API Keys", href: "/dashboard/api-keys", icon: Key },
-  { name: "Chatbot / AI Assistant", href: "/dashboard/chatbot", icon: MessageSquare },
+  { name: "Chatbot Widget", href: "/dashboard/chatbot", icon: MessageSquareCode },
   { name: "Usage", href: "/dashboard/usage", icon: Activity },
   { name: "Logs", href: "/dashboard/logs", icon: FileText },
   { name: "Settings", href: "/dashboard/settings", icon: Settings },

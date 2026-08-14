@@ -13,6 +13,7 @@ import { AnalyticsPage } from "./pages/dashboard/AnalyticsPage";
 import { AIInsightsPage } from "./pages/dashboard/AIInsightsPage";
 import { ApiKeysPage } from "./pages/dashboard/ApiKeysPage";
 import { ChatbotWidgetPage } from "./pages/dashboard/ChatbotWidgetPage";
+import { ChatPage } from "./pages/dashboard/ChatPage";
 import { UsagePage } from "./pages/dashboard/UsagePage";
 import { LogsPage } from "./pages/dashboard/LogsPage";
 import { SettingsPage } from "./pages/dashboard/SettingsPage";
@@ -46,6 +47,10 @@ export const router = createBrowserRouter([
       {
         index: true,
         Component: DashboardOverview,
+      },
+      {
+        path: "chat",
+        Component: ChatPage,
       },
       {
         path: "databases",
