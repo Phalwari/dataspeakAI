@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import models
 from database import engine
-from routers import users, tenants, databases, api_keys, chatbot_config, documents
+from routers import users, tenants, databases, api_keys, chatbot_config, documents, analytics
 from dotenv import load_dotenv
 import os
 
@@ -28,6 +28,8 @@ app.include_router(databases.router)
 app.include_router(api_keys.router)
 app.include_router(chatbot_config.router)
 app.include_router(documents.router)
+app.include_router(analytics.router)
+
 
 @app.get("/")
 def read_root():

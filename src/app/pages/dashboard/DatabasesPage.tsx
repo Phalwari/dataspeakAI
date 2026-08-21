@@ -311,31 +311,43 @@ export function DatabasesPage() {
                 </Select>
               </div>
 
+              {dbType !== "sqlite" && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="db-host">Host</Label>
+                    <Input
+                      id="db-host"
+                      placeholder="localhost:5432"
+                      value={host}
+                      onChange={(e) => setHost(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="db-username">Username</Label>
+                      <Input id="db-username" placeholder="admin" value={username} onChange={(e) => setUsername(e.target.value)} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="db-password">Password</Label>
+                      <Input id="db-password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} />
+                    </div>
+                  </div>
+                </>
+              )}
+
               <div className="space-y-2">
-                <Label htmlFor="db-host">Host</Label>
-                <Input
-                  id="db-host"
-                  placeholder="localhost:5432"
-                  value={host}
-                  onChange={(e) => setHost(e.target.value)}
+                <Label htmlFor="db-database">
+                  {dbType === "sqlite" ? "Full SQLite File Path" : "Technical Database Name"}
+                </Label>
+                <Input 
+                  id="db-database" 
+                  placeholder={dbType === "sqlite" ? "e.g. C:\\Users\\...\\chinook.db" : "e.g. my_database"} 
+                  value={database} 
+                  onChange={(e) => setDatabase(e.target.value)} 
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="db-username">Username</Label>
-                  <Input id="db-username" placeholder="admin" value={username} onChange={(e) => setUsername(e.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="db-password">Password</Label>
-                  <Input id="db-password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="db-database">Technical Database Name</Label>
-                <Input id="db-database" placeholder="e.g. my_database" value={database} onChange={(e) => setDatabase(e.target.value)} />
-              </div>
 
               {testMessage && (
                 <div className={`p-3 rounded text-sm ${testStatus === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Float, JSON, Text
 from sqlalchemy.orm import relationship
 from database import Base
 import datetime
@@ -137,3 +137,73 @@ class PasswordResetOTP(Base):
     otp_code = Column(String, nullable=False)
     expires_at = Column(DateTime, nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class SchemaRegistry(Base):
+    __tablename__ = "schema_registry"
+
+    id = Column(Integer, primary_key=True, index=True)
+    connection_id = Column(Integer, ForeignKey("database_connections.id"), nullable=False)
+    table_name = Column(String, nullable=False, index=True)
+    column_name = Column(String, nullable=False, index=True)
+    data_type = Column(String, nullable=False)
+    is_measure = Column(Boolean, default=False)
+    is_dimension = Column(Boolean, default=False)
+    is_time_axis = Column(Boolean, default=False)
+    min_value = Column(Float, nullable=True)
+    max_value = Column(Float, nullable=True)
+    mean_value = Column(Float, nullable=True)
+    null_percentage = Column(Float, default=0.0)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+class KpiDefinition(Base):
+    __tablename__ = "kpi_definitions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    connection_id = Column(Integer, ForeignKey("database_connections.id"), nullable=False)
+    kpi_title = Column(String, nullable=False)
+    aggregation_function = Column(String, default="SUM") # SUM, AVG, COUNT, MAX, MIN
+    target_column = Column(String, nullable=False)
+    dimension_column = Column(String, nullable=True)
+    time_column = Column(String, nullable=True)
+    default_chart_type = Column(String, default="Line") # Line, Bar, Donut, Scatter
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class DashboardLayout(Base):
+    __tablename__ = "dashboard_layouts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    layout_name = Column(String, default="Default Layout")
+    widget_positions = Column(JSON, nullable=True)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+class AiInsight(Base):
+    __tablename__ = "ai_insights"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    category = Column(String, default="General") # Sales, Revenue, Customer, Support, Inventory
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=False)
+    severity = Column(String, default="warning") # warning, alert, critical, success, opportunity
+    confidence_score = Column(Integer, default=90)
+    trend = Column(String, default="up") # up, down, neutral
+    sparkline_values = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class ExecutedQuery(Base):
+    __tablename__ = "executed_queries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    database_id = Column(Integer, ForeignKey("database_connections.id"), nullable=True)
+    raw_query = Column(Text, nullable=True)
+    sql_generated = Column(Text, nullable=True)
+    execution_time_ms = Column(Float, default=0.0)
+    rows_returned = Column(Integer, default=0)
+    status = Column(String, default="success") # success, failed, blocked
+    error_message = Column(Text, nullable=True)
+    executed_at = Column(DateTime, default=datetime.datetime.utcnow)
+
