@@ -17,6 +17,13 @@ To maintain seamless multi-developer and AI agent collaboration:
 
 ## [Unreleased]
 
+- **Master Engineering Roadmap & Task Tracker ([`todo.md`](file:///d:/dataspeak/todo.md))**:
+  - Established canonical project-wide backlog organized into sequential prioritized phases (P0 to P3): Phase 1 (Frontend Analytics Wiring), Phase 2 (Embeddable Widget), Phase 3 (AI Insights Engine), Phase 4 (Enterprise Database Schemas), Phase 5 (Interactive ERD Generator), and Phase 6 (Production & Billing Hardening).
+  - Defined mandatory 4-step task lifecycle protocol for AI agents and human developers.
+  - Added dedicated Archived / Completed Tasks tracking section.
+- **AI Agent Protocol & Instruction Standardization ([`AGENTS.md`](file:///d:/dataspeak/AGENTS.md), [`Guidelines.md`](file:///d:/dataspeak/docs/setup/Guidelines.md), [`AI_TASK_TEMPLATE.md`](file:///d:/dataspeak/docs/templates/AI_TASK_TEMPLATE.md))**:
+  - Codified Section 5.5 in `AGENTS.md`: Mandatory rules requiring agents to mark tasks as `[x]`, append completion metadata, move completed items to the Archived section in `todo.md`, and log updates under `## [Unreleased]` in `CHANGELOG.md`.
+  - Updated `Guidelines.md` and `AI_TASK_TEMPLATE.md` to enforce `todo.md` and `CHANGELOG.md` synchronization across all delegated agent tasks.
 - **Default Superadmin Seed & Auto-Initialization (`backend/scripts/seed_admin.py`, `backend/main.py`, `LoginPage.tsx`)**:
   - Implemented automatic database seeding on startup ensuring a default verified Superadmin user (`admin@dataspeak.ai` / `AdminPassword123!`) and default tenant exist out-of-the-box.
   - Added an interactive **"⚡ Auto-fill Default Admin"** shortcut button on the frontend login page for fast multi-developer testing without re-registering.

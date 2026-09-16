@@ -276,10 +276,30 @@ Before taking any action, modifying source files, or implementing features, ever
 
 ### 5.4 Step-by-Step Verification Workflow
 After making any code changes, perform the following verification steps:
-1. **Frontend Build Check:** Run Vite build check (`npm run build`) to ensure React components compile without TypeScript or syntax errors.
+1. **Frontend Build Check:** Run Vite build check (`cmd.exe /c "npm run build"`) to ensure React components compile without TypeScript or syntax errors.
 2. **Backend Startup Check:** Confirm FastAPI backend initializes cleanly (`uvicorn main:app --reload` or test execution).
 3. **API & Model Consistency:** Ensure Pydantic schemas in `backend/schemas.py` match SQLAlchemy models in `backend/models.py` and React page state.
 4. **Handoff Generation:** Create a self-contained 5-component handoff report (`Observation`, `Logic Chain`, `Caveats`, `Conclusion`, `Verification Method`) in `handoff.md`.
+
+### 5.5 Task Lifecycle, `todo.md` & `CHANGELOG.md` Maintenance Protocol (MANDATORY)
+
+Every AI coding agent is strictly required to keep [`todo.md`](file:///d:/dataspeak/todo.md) and [`CHANGELOG.md`](file:///d:/dataspeak/CHANGELOG.md) synchronized with ongoing and completed work:
+
+1. **Task Selection from `todo.md`**:
+   * Prior to writing code, check [`todo.md`](file:///d:/dataspeak/todo.md) for pending tasks (`- [ ]`) in priority sequence (P0 → P1 → P2 → P3) or target the user-specified task.
+   * Verify target files, acceptance criteria, and constraints in `todo.md` before proceeding.
+
+2. **Completing a Task & Archiving in `todo.md`**:
+   * Once a task is implemented and verified (via `cmd.exe /c "npm run build"` or backend verification):
+     * Mark the task checkbox as completed: `- [x]`.
+     * Append completion metadata: `[Completed: YYYY-MM-DD | <Agent/Role> | <Summary of outcome>]`.
+     * **Move the completed task line out of the active phase** and into the `## 📦 Archived / Completed Tasks` section at the bottom of [`todo.md`](file:///d:/dataspeak/todo.md).
+     * The active phase lists in `todo.md` must only contain remaining, uncompleted tasks (`- [ ]`).
+
+3. **Logging in `CHANGELOG.md`**:
+   * Immediately upon completing a task, record a descriptive bullet point under `## [Unreleased]` in [`CHANGELOG.md`](file:///d:/dataspeak/CHANGELOG.md).
+   * Group entries under standard Keep a Changelog categories: `### Added`, `### Changed`, `### Fixed`, or `### Security`.
+   * Reference affected components, files, and endpoints.
 
 ---
 *End of AGENTS.md — DataSpeakAI AI Agent Context Standard*
