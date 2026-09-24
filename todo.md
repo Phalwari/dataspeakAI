@@ -46,7 +46,14 @@ Every AI agent working on this repository **MUST** adhere to this 4-step workflo
   - **Details:** Replace static mock constants (`stats`, `queryData`, `databaseActivity`, `recentQueries`) with live data fetched from `GET /api/analytics/overview`. Add loading skeletons and error states with Sonner toast feedback.
   - **Acceptance Criteria:** Real-time KPI counts (queries, databases, documents, API calls), 7-day query timeline chart, and recent query table render live tenant data.
 
+<<<<<<< HEAD
 
+=======
+- [ ] **Task 1.2 — Wire Analytics & Visualization Page to Live Trends API**
+  - **Target Files:** [`src/app/pages/dashboard/AnalyticsPage.tsx`](file:///d:/dataspeak/src/app/pages/dashboard/AnalyticsPage.tsx), [`backend/routers/analytics.py`](file:///d:/dataspeak/backend/routers/analytics.py)
+  - **Details:** Replace static arrays (`queryTrendsData`, `topTablesData`, `databaseDistribution`, `dataGrowthData`) with `GET /api/analytics/trends`. Connect database filter dropdown and date range selector to backend query params.
+  - **Acceptance Criteria:** Recharts graphs display live query trends, top queried tables, database type distribution, latency, and success rates.
+>>>>>>> origin/main
 
 - [ ] **Task 1.3 — Wire Query Logs Page with Pagination, Search & Filtering**
   - **Target Files:** [`src/app/pages/dashboard/LogsPage.tsx`](file:///d:/dataspeak/src/app/pages/dashboard/LogsPage.tsx), [`backend/routers/analytics.py`](file:///d:/dataspeak/backend/routers/analytics.py)
@@ -180,6 +187,7 @@ Every AI agent working on this repository **MUST** adhere to this 4-step workflo
 
 ## 📦 Archived / Completed Tasks
 
+<<<<<<< HEAD
 - [x] **Task 1.2 — Analytics & Visualization Page: Full Frontend Overhaul & Domain Mapping Wizard**
   - *Completed:* 2026-09-24 | Antigravity AI Engineer
   - *Summary:* Removed all static mock arrays (`queryTrendsData`, `topTablesData`, `databaseDistribution`, `dataGrowthData`). Decomposed 863-line AnalyticsPage.tsx monolith into 9 focused components: `ChartRenderer`, `AnalyticsHeader`, `KpiSummaryStrip`, `LiveExplorerCanvas`, `AISynthesizedGrid`, `DomainSetupBanner`, `SchemaHealthPanel`, `AIInsightsSummaryCard`, `DomainMappingWizard`. Added 3-step guided Domain Mapping Wizard surfacing `/domains`, `/suggest-mapping`, `/apply-mapping` endpoints. Added inline AI Insights card and Schema Health panel. Build: ✓ 2762 modules, 0 errors.
@@ -223,6 +231,9 @@ Every AI agent working on this repository **MUST** adhere to this 4-step workflo
 - [x] **Phase 1.5D.2: Atomic Regeneration Safety & Dimension Enforcement**
   - *Completed:* 2026-09-23 | Antigravity AI Engineer
   - *Summary:* Fixed zero-valid regeneration dashboard wipeout risk by validating in-memory before deletion; unified KPI + layout replacement in a single atomic transaction with rollback; rejected cross-table dimensions pending relationship engine; enforced tenant connection ownership defense; verified 105/105 tests passing.
+=======
+*(When completing a task from the roadmap above, mark with `[x]`, append completion metadata, and move here.)*
+>>>>>>> origin/main
 
 - [x] **Conversational AI Assistant Workspace & Unified Chat Engine**
   - *Completed:* 2026-08-08 | Antigravity AI Orchestrator

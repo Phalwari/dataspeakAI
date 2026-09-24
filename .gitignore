@@ -14,16 +14,7 @@ __pycache__/
 *$py.class
 backend/uploads/
 backend/vector_store/
-# Databases & Test Artifacts
-*.db
-*.sqlite
-*.sqlite3
 backend/app.db
-temp_test*
-
-# Scratch & Archives
-scratch/
-*.zip
 
 # IDEs
 .vscode/
