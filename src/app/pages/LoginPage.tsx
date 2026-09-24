@@ -1,12 +1,11 @@
 import { Link, useNavigate } from "react-router";
-import { MessageSquareCode } from "lucide-react";
+import { MessageSquareCode, Github, ShieldCheck } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { useState, useEffect } from "react";
 import { API_BASE_URL } from "../config/api";
-import { Github } from "lucide-react";
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -14,6 +13,11 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+
+  const fillAdminCredentials = () => {
+    setEmail("admin@dataspeak.ai");
+    setPassword("AdminPassword123!");
+  };
 
   const handleGithubLogin = () => {
     const clientId = "Ov23liPRgons4RlFv7FU"; // Replace with your GitHub Client ID
@@ -126,6 +130,26 @@ export function LoginPage() {
               <div className="relative flex justify-center text-xs uppercase">
                 <span className="bg-white px-2 text-gray-500">Or continue with email</span>
               </div>
+            </div>
+
+            {/* Quick Demo Superadmin Button */}
+            <div className="mb-4 p-3 bg-blue-50/80 border border-blue-200 rounded-xl flex items-center justify-between gap-2">
+              <div className="text-left">
+                <div className="text-xs font-semibold text-blue-900 flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
+                  Default Admin User
+                </div>
+                <div className="text-[11px] text-blue-700">admin@dataspeak.ai</div>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={fillAdminCredentials}
+                className="h-7 text-xs bg-white hover:bg-blue-100 border-blue-300 text-blue-700 font-medium"
+              >
+                Auto-fill
+              </Button>
             </div>
 
             <form className="space-y-4" onSubmit={handleLogin}>

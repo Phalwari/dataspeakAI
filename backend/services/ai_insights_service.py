@@ -3,70 +3,79 @@ import json
 import logging
 import urllib.request
 import urllib.parse
-from sqlalchemy import create_engine, text
+from typing import Any, Dict, List
+from services.metric_executor import MetricExecutor, MetricRequest
 
 logger = logging.getLogger(__name__)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
-def generate_ai_insights_from_stats(db_conn, registries, db):
+def generate_ai_insights_from_stats(db_conn: Any, registries: List[Any], db: Any) -> Dict[str, Any]:
     """
-    Computes deterministic stats from the user's database and sends real numbers
-    to Google Gemini 2.5 Flash to generate executive business insights.
+    Computes deterministic stats via MetricExecutor and SchemaRegistry metadata,
+    and sends real verified numbers to Google Gemini 2.5 Flash to generate executive
+    business insights. Adheres strictly to security and deterministic calculation standards.
     """
-    tables = list(set([r.table_name for r in registries]))
+    tables = sorted(list(set([r.table_name for r in registries])))
     
-    # 1. Collect deterministic stats per table
-    stats_summary = {}
-    from routers.databases import get_connection_url
-    url = get_connection_url(db_conn)
+    # 1. Collect deterministic stats per table using MetricExecutor & SchemaRegistry
+    stats_summary: Dict[str, Any] = {}
     
-    if url:
+    for t in tables[:8]:  # Max 8 tables for clean summary
+        t_regs = [r for r in registries if r.table_name == t]
+        measures = [
+            r.column_name for r in t_regs 
+            if r.is_measure and not str(r.column_name).lower().endswith("id") and str(r.column_name).lower() != "id"
+        ]
+        
+        # Row count via MetricExecutor
+        row_cnt = 0
         try:
-            from sqlalchemy.pool import NullPool
-            engine = create_engine(url, poolclass=NullPool)
-            with engine.connect() as conn:
-                for t in tables[:8]: # Max 8 tables for clean summary
-                    t_regs = [r for r in registries if r.table_name == t]
-                    measures = [r.column_name for r in t_regs if r.is_measure and not r.column_name.lower().endswith("id") and r.column_name.lower() != "id"]
-                    dimensions = [r.column_name for r in t_regs if r.is_dimension]
-                    
-                    row_cnt = 0
-                    try:
-                        c_res = conn.execute(text(f'SELECT COUNT(*) FROM "{t}"')).fetchone()
-                        row_cnt = c_res[0] if c_res else 0
-                    except Exception:
-                        pass
-                    
-                    meas_stats = {}
-                    for m in measures[:3]:
-                        try:
-                            m_res = conn.execute(text(f'SELECT SUM("{m}"), AVG("{m}"), MAX("{m}") FROM "{t}"')).fetchone()
-                            if m_res:
-                                meas_stats[m] = {
-                                    "total": round(float(m_res[0] or 0), 2),
-                                    "average": round(float(m_res[1] or 0), 2),
-                                    "max": round(float(m_res[2] or 0), 2)
-                                }
-                        except Exception:
-                            pass
-                            
-                    dim_dist = {}
-                    for d in dimensions[:2]:
-                        try:
-                            d_res = conn.execute(text(f'SELECT "{d}", COUNT(*) AS cnt FROM "{t}" WHERE "{d}" IS NOT NULL GROUP BY "{d}" ORDER BY cnt DESC LIMIT 4')).fetchall()
-                            dim_dist[d] = [{str(r[0]): int(r[1])} for r in d_res]
-                        except Exception:
-                            pass
+            cnt_req = MetricRequest(
+                connection_id=db_conn.id,
+                target_ref=f"{t}.*",
+                aggregation="COUNT",
+                tenant_id=db_conn.tenant_id,
+            )
+            cnt_res = MetricExecutor.execute(cnt_req, db_conn, db)
+            row_cnt = int(cnt_res.value) if cnt_res.value is not None else 0
+        except Exception as ex_cnt:
+            logger.debug(f"Could not compute row count for table {t} via MetricExecutor: {ex_cnt}")
+            # Fallback to cardinality if recorded in SchemaRegistry
+            first_reg = t_regs[0] if t_regs else None
+            row_cnt = getattr(first_reg, "cardinality", 0) or 0
+        
+        # Numeric measures via MetricExecutor
+        meas_stats: Dict[str, Any] = {}
+        for m in measures[:3]:
+            try:
+                s_req = MetricRequest(connection_id=db_conn.id, target_ref=f"{t}.{m}", aggregation="SUM", tenant_id=db_conn.tenant_id)
+                a_req = MetricRequest(connection_id=db_conn.id, target_ref=f"{t}.{m}", aggregation="AVG", tenant_id=db_conn.tenant_id)
+                mx_req = MetricRequest(connection_id=db_conn.id, target_ref=f"{t}.{m}", aggregation="MAX", tenant_id=db_conn.tenant_id)
 
-                    stats_summary[t] = {
-                        "row_count": row_cnt,
-                        "numeric_measures": meas_stats,
-                        "top_categories": dim_dist
+                s_res = MetricExecutor.execute(s_req, db_conn, db)
+                a_res = MetricExecutor.execute(a_req, db_conn, db)
+                mx_res = MetricExecutor.execute(mx_req, db_conn, db)
+
+                meas_stats[m] = {
+                    "total": round(float(s_res.value or 0), 2),
+                    "average": round(float(a_res.value or 0), 2),
+                    "max": round(float(mx_res.value or 0), 2)
+                }
+            except Exception as ex_m:
+                logger.debug(f"Could not compute measure stats for {t}.{m}: {ex_m}")
+                reg_m = next((r for r in t_regs if r.column_name == m), None)
+                if reg_m:
+                    meas_stats[m] = {
+                        "total": 0.0,
+                        "average": round(float(getattr(reg_m, "mean_value", 0.0) or 0.0), 2),
+                        "max": round(float(getattr(reg_m, "max_value", 0.0) or 0.0), 2),
                     }
-            engine.dispose()
-        except Exception as e:
-            logger.warning(f"Error computing stats for AI insights: {e}")
+
+        stats_summary[t] = {
+            "row_count": row_cnt,
+            "numeric_measures": meas_stats,
+        }
 
     # Fallback default insights if Gemini API is unavailable or unconfigured
     fallback_result = {

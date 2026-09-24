@@ -69,14 +69,17 @@ The AI agent must produce the following concrete deliverables:
 1. **Pre-Task Inspection**: Re-read target files using `view_file` to confirm current imports, lines, and types.
 2. **Execute Modifications**: Make precise code changes using atomic file replacement tools.
 3. **Verify Implementation**: Execute verification commands and validate API responses or UI compilation.
-4. **Document & Log**: Update `CHANGELOG.md` (unreleased section), create a session log in `docs/sessions/`, and write `handoff.md`.
+4. **Document & Log**:
+   - Update `todo.md`: Mark task as completed (`[x]`), add completion metadata, and move it into `## 📦 Archived / Completed Tasks`.
+   - Update `CHANGELOG.md`: Add a descriptive bullet point under `## [Unreleased]` with appropriate Keep a Changelog category.
+   - Create a session log in `docs/sessions/` and write `handoff.md`.
 
 ---
 
 ## 6. Verification Steps & Commands
 The AI agent must execute and document the following verification checks:
 
-- [ ] **Frontend Build Verification**: Run `npm run build` from `d:\dataspeak` to confirm React TypeScript compilation with 0 errors.
+- [ ] **Frontend Build Verification**: Run `cmd.exe /c "npm run build"` from `d:\dataspeak` to confirm React TypeScript compilation with 0 errors.
 - [ ] **Backend Startup & Syntax Check**: Confirm FastAPI backend initializes cleanly (`python -c "import backend.main"` or pytest).
 - [ ] **API & Schema Consistency**: Confirm Pydantic schemas match SQLAlchemy model definitions and frontend interface types.
 - [ ] **Security Inspection**: Verify all SQL execution blocks use parameterized queries (`sqlalchemy.text()`).
@@ -87,6 +90,8 @@ The AI agent must execute and document the following verification checks:
 The task will be considered complete ONLY when:
 - [ ] All required deliverables are implemented cleanly without syntax or lint errors.
 - [ ] All verification steps have been executed and passed.
+- [ ] `todo.md` is updated: the completed task is checked `[x]`, timestamped, and moved to the Archived / Completed Tasks section.
+- [ ] `CHANGELOG.md` is updated with a summary entry under `## [Unreleased]`.
 - [ ] `progress.md` in `.agents/[agent_folder]/` is updated with completed status.
 - [ ] Self-contained 5-component handoff report (`handoff.md`) is written to `.agents/[agent_folder]/handoff.md` (containing: Observation, Logic Chain, Caveats, Conclusion, Verification Method).
 - [ ] Completion message is sent to the parent caller with a summary of changes and paths to generated artifacts.

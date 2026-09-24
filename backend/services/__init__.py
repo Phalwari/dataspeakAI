@@ -1,1 +1,1 @@
-# DataSpeakAI Analytics Services Package
+# DataSpeakAI Services Package

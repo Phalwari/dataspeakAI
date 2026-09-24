@@ -1,4 +1,6 @@
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
+import { useEffect, useState } from "react";
+import { API_BASE_URL } from "../../config/api";
 import {
   Users,
   Database,
@@ -184,6 +186,53 @@ const systemHealth = [
 ];
 
 export function AdminPanel() {
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
+  const [authorized, setAuthorized] = useState(false);
+
+  useEffect(() => {
+    const checkAdminAccess = async () => {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        navigate("/dashboard");
+        return;
+      }
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) {
+          navigate("/dashboard");
+          return;
+        }
+        const user = await res.json();
+        if (user.role !== "Admin") {
+          navigate("/dashboard");
+          return;
+        }
+        setAuthorized(true);
+      } catch (err) {
+        navigate("/dashboard");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    checkAdminAccess();
+  }, [navigate]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 text-gray-600 font-medium">
+        Checking authorization...
+      </div>
+    );
+  }
+
+  if (!authorized) {
+    return null;
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Top Bar */}

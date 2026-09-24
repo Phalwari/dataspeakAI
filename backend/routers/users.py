@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from typing import cast, Any
 import models, schemas, auth
 from database import get_db
 from google.oauth2 import id_token
@@ -11,6 +12,7 @@ import os
 import resend
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
 
 @router.post("/register", response_model=schemas.UserResponse)
 def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
@@ -34,7 +36,7 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
                 raise HTTPException(status_code=400, detail="This invite was sent to a different email address")
             
             # Security Check: Ensure invite hasn't expired
-            if invite.expires_at < datetime.utcnow():
+            if invite.expires_at < datetime.now(timezone.utc):
                 raise HTTPException(status_code=400, detail="This invitation has expired")
 
             tenant_id = invite.tenant_id
@@ -74,7 +76,7 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
         
         # Generate and send verification OTP
         otp_code = str(random.randint(100000, 999999))
-        expires_at = datetime.utcnow() + timedelta(minutes=10)
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
         otp_entry = models.PasswordResetOTP(email=user_email, otp_code=otp_code, expires_at=expires_at)
         db.add(otp_entry)
         db.commit()
@@ -125,9 +127,13 @@ import os
 @router.post("/github-login", response_model=schemas.Token)
 def github_login(data: schemas.GithubLoginRequest, db: Session = Depends(get_db)):
     try:
-        # Exchange code for access token
-        client_id = os.getenv("GITHUB_CLIENT_ID", "Ov23liPRgons4RlFv7FU")
-        client_secret = os.getenv("GITHUB_CLIENT_SECRET", "067e59b3c050792898954f727be0dbdbfc5c590a")
+        client_id = os.getenv("GITHUB_CLIENT_ID")
+        client_secret = os.getenv("GITHUB_CLIENT_SECRET")
+        if not client_id or not client_secret:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="GitHub OAuth credentials (GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET) are not configured."
+            )
         
         token_response = sync_requests.post(
             "https://github.com/login/oauth/access_token",
@@ -195,6 +201,9 @@ def github_login(data: schemas.GithubLoginRequest, db: Session = Depends(get_db)
         
         return {"access_token": access_token, "token_type": "bearer", "user": db_user}
         
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
@@ -203,12 +212,14 @@ from dependencies import get_current_user
 
 @router.post("/change-password")
 def change_password(data: schemas.UserChangePassword, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    if not auth.verify_password(data.current_password, current_user.hashed_password):
+    current_hash = str(current_user.hashed_password or "")
+    if not auth.verify_password(data.current_password, current_hash):
         raise HTTPException(status_code=400, detail="Incorrect current password")
     
-    current_user.hashed_password = auth.get_password_hash(data.new_password)
+    setattr(current_user, "hashed_password", auth.get_password_hash(data.new_password))
     db.commit()
     return {"message": "Password updated successfully"}
+
 
 @router.get("/me", response_model=schemas.UserResponse)
 def get_user_me(current_user: models.User = Depends(get_current_user)):
@@ -259,17 +270,19 @@ def send_otp_email(email: str, otp_code: str, subject: str, message: str):
         print("DEBUG: Falling back to Resend API", flush=True)
         try:
             resend.api_key = api_key
-            resend.Emails.send({
+            resend_payload: Any = {
                 "from": "DataSpeakAI <onboarding@resend.dev>",
                 "to": email,
                 "subject": subject,
                 "html": f"<p>{message}: <strong>{otp_code}</strong>. It expires in 10 minutes.</p>"
-            })
+            }
+            resend.Emails.send(resend_payload)
             print(f"SUCCESS: Email sent to {email} via Resend", flush=True)
         except Exception as e:
             print(f"ERROR: Resend Failed: {str(e)}", flush=True)
     else:
         print(f"CRITICAL: No email provider configured! OTP for {email} is: {otp_code}", flush=True)
+
 
 @router.post("/forgot-password")
 def forgot_password(data: schemas.ForgotPasswordRequest, db: Session = Depends(get_db)):
@@ -283,7 +296,7 @@ def forgot_password(data: schemas.ForgotPasswordRequest, db: Session = Depends(g
     
     # Generate 6-digit OTP
     otp_code = str(random.randint(100000, 999999))
-    expires_at = datetime.utcnow() + timedelta(minutes=10)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
     
     # Save OTP to database
     try:
@@ -309,7 +322,7 @@ def verify_otp(data: schemas.VerifyOTPRequest, db: Session = Depends(get_db)):
     otp_entry = db.query(models.PasswordResetOTP).filter(
         models.PasswordResetOTP.email == data.email,
         models.PasswordResetOTP.otp_code == data.otp_code,
-        models.PasswordResetOTP.expires_at > datetime.utcnow()
+        models.PasswordResetOTP.expires_at > datetime.now(timezone.utc)
     ).first()
     
     if not otp_entry:
@@ -323,7 +336,7 @@ def reset_password(data: schemas.ResetPasswordRequest, db: Session = Depends(get
     otp_entry = db.query(models.PasswordResetOTP).filter(
         models.PasswordResetOTP.email == data.email,
         models.PasswordResetOTP.otp_code == data.otp_code,
-        models.PasswordResetOTP.expires_at > datetime.utcnow()
+        models.PasswordResetOTP.expires_at > datetime.now(timezone.utc)
     ).first()
     
     if not otp_entry:
@@ -346,7 +359,7 @@ def verify_email(data: schemas.EmailVerificationRequest, db: Session = Depends(g
     otp_entry = db.query(models.PasswordResetOTP).filter(
         models.PasswordResetOTP.email == data.email,
         models.PasswordResetOTP.otp_code == data.otp_code,
-        models.PasswordResetOTP.expires_at > datetime.utcnow()
+        models.PasswordResetOTP.expires_at > datetime.now(timezone.utc)
     ).first()
     
     if not otp_entry:
@@ -373,7 +386,7 @@ def resend_verification(data: schemas.ResendVerificationRequest, db: Session = D
     
     # Generate and send new verification OTP
     otp_code = str(random.randint(100000, 999999))
-    expires_at = datetime.utcnow() + timedelta(minutes=10)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
     
     # Clean up old OTPs for this email if any
     db.query(models.PasswordResetOTP).filter(models.PasswordResetOTP.email == data.email).delete()

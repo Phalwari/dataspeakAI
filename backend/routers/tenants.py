@@ -87,9 +87,9 @@ def invite_member(
     db.add(new_invite)
     db.commit()
 
-    # In a real app, you would send an email here.
-    # We return the link so the frontend can display it.
-    invite_link = f"http://localhost:5173/signup?invite_token={token}"
+    import os
+    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
+    invite_link = f"{frontend_url}/signup?invite_token={token}"
     return {"invite_link": invite_link, "email": invite.email}
 
 @router.delete("/members/{user_id}")

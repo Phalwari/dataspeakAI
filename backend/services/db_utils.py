@@ -20,8 +20,8 @@ def decrypt_password(enc_pwd: str) -> str:
         # Fallback if stored in plain text prior to encryption
         return enc_pwd
 
-def get_connection_url(db_conn: models.DatabaseConnection) -> str:
-    pwd = decrypt_password(db_conn.password)
+def get_connection_url(db_conn: models.DatabaseConnection) -> str | None:
+    pwd = decrypt_password(str(db_conn.password or ""))
     if db_conn.db_type == "postgresql":
         return f"postgresql://{db_conn.username}:{pwd}@{db_conn.host}/{db_conn.database}"
     elif db_conn.db_type in ("mysql", "mariadb"):

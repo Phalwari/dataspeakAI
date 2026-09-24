@@ -1,0 +1,4 @@
+langgraph==0.2.28
+langchain-google-genai==2.0.4
+langchain-core==0.3.15
+pydantic==2.9.2

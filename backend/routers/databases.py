@@ -7,42 +7,10 @@ from dependencies import get_current_user
 import time
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import SQLAlchemyError
-
-import os, base64, hashlib
-from cryptography.fernet import Fernet
+from services.db_utils import get_connection_url, encrypt_password, decrypt_password
+from services.db_pool import get_engine
 
 router = APIRouter(prefix="/api/databases", tags=["databases"])
-
-ENCRYPTION_SECRET = os.getenv("SECRET_KEY", "dataspeakai-default-encryption-secret-key-32b")
-_FERNET_KEY = base64.urlsafe_b64encode(hashlib.sha256(ENCRYPTION_SECRET.encode()).digest())
-_fernet = Fernet(_FERNET_KEY)
-
-def encrypt_password(plain_pwd: str) -> str:
-    if not plain_pwd:
-        return plain_pwd
-    return _fernet.encrypt(plain_pwd.encode()).decode()
-
-def decrypt_password(enc_pwd: str) -> str:
-    if not enc_pwd:
-        return enc_pwd
-    try:
-        return _fernet.decrypt(enc_pwd.encode()).decode()
-    except Exception:
-        # Fallback if stored in plain text prior to encryption
-        return enc_pwd
-
-def get_connection_url(db_conn: models.DatabaseConnection):
-    pwd = decrypt_password(db_conn.password)
-    if db_conn.db_type == "postgresql":
-        return f"postgresql://{db_conn.username}:{pwd}@{db_conn.host}/{db_conn.database}"
-    elif db_conn.db_type in ("mysql", "mariadb"):
-        return f"mysql+pymysql://{db_conn.username}:{pwd}@{db_conn.host}/{db_conn.database}"
-    elif db_conn.db_type == "sqlite":
-        path = (db_conn.database if db_conn.database else db_conn.host) or ""
-        path = path.strip('"\'').replace("\\", "/")
-        return f"sqlite:///{path}"
-    return None
-
 
 
 @router.get("", response_model=List[schemas.DatabaseConnectionResponse])
@@ -67,6 +35,7 @@ def get_databases(
         
     return databases
 
+
 @router.post("", response_model=schemas.DatabaseConnectionResponse)
 def add_database(
     db_conn: schemas.DatabaseConnectionCreate,
@@ -84,7 +53,7 @@ def add_database(
         username=db_conn.username,
         password=encrypt_password(db_conn.password),
         database=db_conn.database,
-        status="connected" # Assume connected initially or after successful test
+        status="connected"
     )
     db.add(new_db)
     db.commit()
@@ -113,8 +82,8 @@ def delete_database(
     db.commit()
     return {"message": "Database deleted successfully"}
 
-@router.get("/{db_id}/tables")
 
+@router.get("/{db_id}/tables")
 def get_database_tables(
     db_id: int,
     current_user: models.User = Depends(get_current_user),
@@ -130,15 +99,15 @@ def get_database_tables(
 
     connection_url = get_connection_url(db_conn)
     if not connection_url:
-        # For simulated types, return mock tables
         return ["users", "orders", "products", "customers"]
 
     try:
-        engine = create_engine(connection_url)
+        engine = get_engine(connection_url)
         inspector = inspect(engine)
         return inspector.get_table_names()
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to fetch tables: {str(e)}")
+
 
 @router.get("/{db_id}/tables/{table_name}/data")
 def get_table_data(
@@ -157,7 +126,6 @@ def get_table_data(
 
     connection_url = get_connection_url(db_conn)
     if not connection_url:
-        # For simulated types, return mock data
         return [
             {"id": 1, "name": "Mock Item 1", "status": "active"},
             {"id": 2, "name": "Mock Item 2", "status": "inactive"},
@@ -165,14 +133,22 @@ def get_table_data(
         ]
 
     try:
-        engine = create_engine(connection_url)
+        engine = get_engine(connection_url)
+        inspector = inspect(engine)
+        valid_tables = inspector.get_table_names()
+        if table_name not in valid_tables:
+            raise HTTPException(status_code=400, detail="Invalid table name")
+
         with engine.connect() as conn:
-            result = conn.execute(text(f"SELECT * FROM {table_name} LIMIT 100"))
+            result = conn.execute(text(f'SELECT * FROM "{table_name}" LIMIT 100'))
             columns = result.keys()
             data = [dict(zip(columns, row)) for row in result]
             return data
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to fetch data: {str(e)}")
+
 
 @router.get("/{db_id}/stats")
 def get_database_stats(
@@ -190,7 +166,6 @@ def get_database_stats(
 
     connection_url = get_connection_url(db_conn)
     if not connection_url:
-        # Mock stats for simulated types
         return {
             "table_count": 4,
             "tables": [
@@ -202,8 +177,7 @@ def get_database_stats(
         }
 
     try:
-        from sqlalchemy.pool import NullPool
-        engine = create_engine(connection_url, poolclass=NullPool)
+        engine = get_engine(connection_url)
         inspector = inspect(engine)
         table_names = inspector.get_table_names()
         
@@ -220,11 +194,10 @@ def get_database_stats(
             "table_count": len(table_names),
             "tables": tables_info
         }
-
-        
         return stats
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to fetch stats: {str(e)}")
+
 
 @router.get("/{db_id}/tables/{table_name}/stats")
 def get_table_stats(
@@ -246,23 +219,25 @@ def get_table_stats(
         return {"rows": 0, "columns": 0}
 
     try:
-        from sqlalchemy.pool import NullPool
-        engine = create_engine(connection_url, poolclass=NullPool)
+        engine = get_engine(connection_url)
         inspector = inspect(engine)
+        valid_tables = inspector.get_table_names()
+        if table_name not in valid_tables:
+            raise HTTPException(status_code=400, detail="Invalid table name")
         
-        # Get column count
         columns = inspector.get_columns(table_name)
         col_count = len(columns)
         
-        # Get row count
         with engine.connect() as conn:
-            row_count_res = conn.execute(text(f"SELECT COUNT(*) FROM {table_name}"))
+            row_count_res = conn.execute(text(f'SELECT COUNT(*) FROM "{table_name}"'))
             row_count = row_count_res.scalar()
             
-        engine.dispose()
         return {"rows": row_count, "columns": col_count}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to fetch table stats: {str(e)}")
+
 
 @router.post("/test")
 def test_database_connection(
@@ -281,9 +256,7 @@ def test_database_connection(
         path = (db_conn.database if db_conn.database else db_conn.host) or ""
         path = path.strip('"\'').replace("\\", "/")
         connection_url = f"sqlite:///{path}"
-
     else:
-        # Simulate other types for MVP
         time.sleep(1)
         return {"status": "success", "message": f"Connection simulated for {db_conn.db_type}"}
         
@@ -299,4 +272,3 @@ def test_database_connection(
         raise HTTPException(status_code=400, detail=f"Connection failed: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"An error occurred: {str(e)}")
-

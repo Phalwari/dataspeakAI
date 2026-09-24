@@ -1,61 +1,63 @@
-**Add your own guidelines here**
-<!--
+# DataSpeakAI — System & Engineering Guidelines
 
-System Guidelines
+Welcome to the **DataSpeakAI** engineering and developer guidelines. This document outlines general engineering standards, design system rules, and task lifecycle management for human contributors and AI agents.
 
-Use this file to provide the AI with rules and guidelines you want it to follow.
-This template outlines a few examples of things you can add. You can add your own sections and format it to suit your needs
+---
 
-TIP: More context isn't always better. It can confuse the LLM. Try and add the most important rules you need
+## 1. Core Engineering & Agent Standards
 
-# General guidelines
+All developers and AI agents must follow the canonical project standards defined in:
+* **[`AGENTS.md`](file:///d:/dataspeak/AGENTS.md)**: AI Agent Context Standard, Security Guidelines, and Architecture Maps.
+* **[`todo.md`](file:///d:/dataspeak/todo.md)**: Master Engineering Roadmap & Task Tracker.
+* **[`CHANGELOG.md`](file:///d:/dataspeak/CHANGELOG.md)**: Release and session tracking.
 
-Any general rules you want the AI to follow.
-For example:
+### 1.1 Task Lifecycle & `todo.md` Protocol
+* **Task Claiming**: Check [`todo.md`](file:///d:/dataspeak/todo.md) before starting any task. Target the highest priority uncompleted item (`- [ ]`).
+* **Task Completion**: Upon finishing and verifying work (via `cmd.exe /c "npm run build"` or backend tests):
+  1. Mark checkbox as complete: `- [x]`.
+  2. Append completion metadata: `[Completed: YYYY-MM-DD | <Agent/Role> | <Summary>]`.
+  3. **Move the completed task** out of the active phase list into the `## 📦 Archived / Completed Tasks` section at the bottom of [`todo.md`](file:///d:/dataspeak/todo.md).
+  4. Log the feature or fix under `## [Unreleased]` in [`CHANGELOG.md`](file:///d:/dataspeak/CHANGELOG.md).
 
-* Only use absolute positioning when necessary. Opt for responsive and well structured layouts that use flexbox and grid by default
-* Refactor code as you go to keep code clean
-* Keep file sizes small and put helper functions and components in their own files.
+### 1.2 Mandatory Security Rules
+* **Parameterized SQL**: Never use string interpolation, f-strings, or string concatenation with user input in database queries. Always use SQLAlchemy parameterized `text()` constructs.
+* **No Plaintext Passwords**: Database connection credentials must always be encrypted using Fernet (`backend/crypto.py`).
+* **No Hardcoded Secrets**: Secrets and API keys must be loaded via environment variables or `.env`.
 
---------------
+---
 
-# Design system guidelines
-Rules for how the AI should make generations look like your company's design system
+## 2. Frontend & UI Guidelines
 
-Additionally, if you select a design system to use in the prompt box, you can reference
-your design system's components, tokens, variables and components.
-For example:
+### 2.1 Layout & Responsiveness
+* Prefer responsive flexbox and grid layouts (`flex`, `grid`, `gap-*`, `max-w-*`). Avoid arbitrary fixed widths or absolute positioning unless specifically required for overlay elements (modals, dropdowns, tooltips).
+* Use standard Tailwind CSS v4 design tokens and CSS variables defined in `src/styles/theme.css`.
+* Follow component standards in `src/app/components/ui/` (Radix primitives styled with Tailwind).
 
-* Use a base font-size of 14px
-* Date formats should always be in the format “Jun 10”
-* The bottom toolbar should only ever have a maximum of 4 items
-* Never use the floating action button with the bottom toolbar
-* Chips should always come in sets of 3 or more
-* Don't use a dropdown if there are 2 or fewer options
+### 2.2 Notifications & User Feedback
+* Always provide asynchronous user feedback using Sonner toast notifications:
+  * Success: `toast.success("Connection verified successfully")`
+  * Error: `toast.error("Failed to load schema: " + err.message)`
+* Avoid silent promise rejections or unhandled catch blocks.
 
-You can also create sub sections and add more specific details
-For example:
+### 2.3 Verification Commands
+* **Build Check**: `cmd.exe /c "npm run build"` must succeed before committing code changes.
 
+---
 
-## Button
-The Button component is a fundamental interactive element in our design system, designed to trigger actions or navigate
-users through the application. It provides visual feedback and clear affordances to enhance user experience.
+## 3. Backend & API Guidelines
 
-### Usage
-Buttons should be used for important actions that users need to take, such as form submissions, confirming choices,
-or initiating processes. They communicate interactivity and should have clear, action-oriented labels.
+### 3.1 Architecture & Endpoints
+* Build FastAPI routers under `backend/routers/` and bind them in `backend/main.py`.
+* Validate all request and response bodies with Pydantic v2 schemas in `backend/schemas.py`.
+* Return explicit HTTP status codes (`HTTPException(status_code=..., detail=...)`).
 
-### Variants
-* Primary Button
-  * Purpose : Used for the main action in a section or page
-  * Visual Style : Bold, filled with the primary brand color
-  * Usage : One primary button per section to guide users toward the most important action
-* Secondary Button
-  * Purpose : Used for alternative or supporting actions
-  * Visual Style : Outlined with the primary color, transparent background
-  * Usage : Can appear alongside a primary button for less important actions
-* Tertiary Button
-  * Purpose : Used for the least important actions
-  * Visual Style : Text-only with no border, using primary color
-  * Usage : For actions that should be available but not emphasized
--->
+### 3.2 Database Session Management
+* Always use the `get_db` dependency for database sessions:
+  ```python
+  from database import get_db
+  from sqlalchemy.orm import Session
+  
+  @router.get("/api/endpoint")
+  def my_endpoint(db: Session = Depends(get_db)):
+      ...
+  ```

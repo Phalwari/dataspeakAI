@@ -1,74 +1,91 @@
-# Milestone 2 Gate Verification Handoff Report — Challenger M2-1
+# 5-Component Handoff Report: Milestone 2 Empirical Challenge Audit
+
+**Agent:** challenger_m2_1  
+**Working Directory:** `d:\dataspeak\.agents\challenger_m2_1\`  
+**Date:** 2026-08-05  
+**Verdict:** **APPROVE**
+
+---
 
 ## 1. Observation
-- **Empirical Build Execution**:
-  - Executed `cmd /c "npm run build"` in `d:\dataspeak`.
-  - Command output:
-    ```
-    > @figma/my-make-file@0.0.1 build
-    > vite build
 
-    vite v6.3.5 building for production...
-    transforming...
-    ✓ 2350 modules transformed.
-    rendering chunks...
-    computing gzip size...
-    dist/index.html                     0.53 kB │ gzip:   0.33 kB
-    dist/assets/index-BYRXCTKK.css    117.12 kB │ gzip:  18.54 kB
-    dist/assets/index-CS8UMlsR.js   1,050.47 kB │ gzip: 296.30 kB
-    ✓ built in 5.44s
-    ```
-  - Result: Exit code 0, 0 errors.
+1. **Backend Import Verification**:
+   - Executed: `python -c "import backend.main; print('Backend import successful')"`
+   - Output: `Backend import successful` (Exit code: 0).
+   - Confirms `backend/main.py` compiles cleanly without circular dependency or import syntax errors.
 
-- **File Relocation & Readability Verification**:
-  - Listed and inspected all 4 target `docs/` subdirectories:
-    1. `docs/architecture/` (5 files, total 35.1 KB):
-       - `TECHNICAL_ANALYSIS_AND_ROADMAP.md` (19,717 bytes)
-       - `WORKFLOW.md` (3,257 bytes)
-       - `activity_diagrams.md` (5,749 bytes)
-       - `database_connection_workflow.md` (3,194 bytes)
-       - `fyp_phase1_plan.md` (3,194 bytes)
-    2. `docs/database/` (4 files, total 864.6 KB):
-       - `DataSpeakAI_Complete_EERD.md` (7,431 bytes)
-       - `Database_ERD.md` (11,923 bytes)
-       - `Full_Project_Schemas.sql` (10,471 bytes)
-       - `dataspeakai_complete_eerd_visual_1778525676843.png` (834,871 bytes)
-    3. `docs/setup/` (5 files, total 8.3 KB):
-       - `Guidelines.md` (2,620 bytes)
-       - `SETUP_GUIDE.md` (2,121 bytes)
-       - `SETUP_GUIDE_v4.md` (1,191 bytes)
-       - `instructions.txt` (155 bytes)
-       - `setup_guide_v5.md` (2,226 bytes)
-    4. `docs/reports/` (6 files, total 20.2 KB):
-       - `ATTRIBUTIONS.md` (291 bytes)
-       - `Ingestion_Summary.md` (6,478 bytes)
-       - `implementation_planmodule17` (2,789 bytes)
-       - `mockup_analysis.md` (3,461 bytes)
-       - `project_implementation_report_30.md` (4,599 bytes)
-       - `walkthroughmodule17` (2,655 bytes)
-  - All 20 files exist, are readable, non-empty, and intact.
+2. **SQL Guardrail Stress Test (`validate_read_only_sql` in `backend/services/sql_engine.py`)**:
+   - Created and executed empirical test suite `d:\dataspeak\.agents\challenger_m2_1\test_m2.py` testing 40 distinct query vectors.
+   - **Valid SELECT & CTE Queries Allowed (10/10 passed)**:
+     - Basic `SELECT * FROM users` -> `(True, '')`
+     - Cased `SELECT id, name FROM users WHERE role = 'Admin'` -> `(True, '')`
+     - Common Table Expressions `WITH cte AS (SELECT * FROM orders) SELECT * FROM cte` -> `(True, '')`
+     - Aggregation `SELECT user_id, COUNT(*) FROM orders GROUP BY user_id HAVING COUNT(*) > 5 ORDER BY user_id DESC` -> `(True, '')`
+     - Subquery filters `SELECT * FROM users WHERE email LIKE '%@example.com'` -> `(True, '')`
+     - Trailing semicolon `SELECT * FROM users;` -> `(True, '')`
+     - Whitespace padded `  SELECT   *  FROM   users  ;  ` -> `(True, '')`
+     - Block comments `/* comment */ SELECT * FROM users` -> `(True, '')`
+     - Inline comments `SELECT * FROM users -- inline comment` -> `(True, '')`
+     - Complex multi-JOIN CTE `WITH u AS (...), o AS (...) SELECT ... JOIN ...` -> `(True, '')`
+   - **Malicious / Mutation / Injection Queries Blocked (30/30 passed)**:
+     - Direct DML `DELETE FROM users WHERE 1=1` -> Blocked (`"Only read-only SELECT or WITH (CTE) queries are permitted."`)
+     - DDL `DROP TABLE users`, `ALTER TABLE users ADD COLUMN secret TEXT`, `TRUNCATE TABLE logs`, `CREATE TABLE evil (id INT)` -> Blocked
+     - DML `UPDATE users SET role = 'admin'`, `INSERT INTO users (email) VALUES ('hacker@evil.com')`, `REPLACE INTO users VALUES (1, 'test')` -> Blocked
+     - Advanced DML `MERGE INTO ...`, `UPSERT INTO ...` -> Blocked
+     - Stored Procedure / Execution `EXEC sp_executesql`, `EXECUTE ('DELETE FROM users')` -> Blocked
+     - Database Attach/Detach `ATTACH DATABASE 'evil.db' AS evil`, `DETACH DATABASE evil` -> Blocked
+     - Semicolon Chaining / Stacked Queries `SELECT * FROM users; DROP TABLE users`, `SELECT * FROM users; DELETE FROM users;`, `SELECT 1;\nUPDATE users SET name='x';` -> Blocked (`"Multiple SQL statements separated by semicolons are strictly forbidden."`)
+     - CTE Mutation Exploits `WITH deleted AS (DELETE FROM users RETURNING *) SELECT * FROM deleted` -> Blocked (`"Forbidden keyword detected: 'DELETE'. Read-only SELECT operations only."`)
+     - Casing Evasion `dElEtE fRoM uSeRs` -> Blocked
+     - Non-SELECT Starters `EXPLAIN SELECT * FROM users`, `SHOW TABLES`, `GRANT ALL ON users TO public`, `SHUTDOWN` -> Blocked
 
-- **Root Cleanliness & Code References**:
-  - `d:\dataspeak` root contains no misplaced `.md`, `.sql`, `.png`, or `.txt` documentation files.
-  - Empty `guidelines/` directory is removed.
-  - Grep search across `src/` and `backend/` for relocated filenames yielded 0 hardcoded path dependencies or broken imports.
+3. **Live Database Schema Introspection & Execution**:
+   - Introspected local `app.db` schema: extracted 2,558 characters of schema context.
+   - Executed `execute_safe_sql(conn, "SELECT * FROM users;")`: executed successfully returning 0 rows in 1.89 ms with columns `['id', 'email', 'hashed_password', 'full_name', 'role', 'is_active', 'is_verified', 'tenant_id', 'created_at']`.
+   - Executed `execute_safe_sql(conn, "DELETE FROM users;")`: successfully caught `ValueError: SQL Guardrail Violation: Only read-only SELECT or WITH (CTE) queries are permitted.`.
+
+4. **Frontend Build Check**:
+   - Executed `cmd /c "npm run build"`.
+   - Output: Vite production build completed with code 0 (`dist/assets/index-CQUH73VP.js` built).
+
+---
 
 ## 2. Logic Chain
-1. **Build Integrity**: Ran `npm run build` directly via shell to verify Vite compilation. The project built cleanly in 5.44s with exit code 0, transforming 2350 modules into bundle artifacts under `dist/`. No runtime or build dependencies broke.
-2. **Directory & File Structure Integrity**: Confirmed that all 20 relocated files requested by R1 are present in their designated `docs/` subdirectories (`architecture`, `database`, `setup`, `reports`) and readable.
-3. **Cleanliness & Isolation**: Confirmed root directory retains only runtime and project configuration files (`package.json`, `vite.config.ts`, `index.html`, `AGENTS.md`, `CHANGELOG.md`, etc.), isolating documentation cleanly.
-4. **Codebase Impact Analysis**: Checked `src/` and `backend/` for references to relocated documentation files. Found zero broken references or path coupling.
+
+1. **Import Integrity**: `backend.main` imports all routers (including `routers/query.py`) and services (`services/sql_engine.py`). Successful execution of `python -c "import backend.main"` confirms no unresolved symbols or broken module imports exist.
+2. **Sanitization Logic**: `validate_read_only_sql` first strips SQL inline/block comments (`--` and `/* ... */`), then enforces string termination/count rules on semicolons to prevent stacked query injection (`SELECT 1; DROP TABLE users`). It enforces that the clean statement starts with `SELECT` or `WITH`, and scans the normalized upper-case query for forbidden DDL/DML keywords (`INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `TRUNCATE`, `CREATE`, `RENAME`, `GRANT`, `REVOKE`, `REPLACE`, `EXEC`, `EXECUTE`, `SHUTDOWN`, `MERGE`, `UPSERT`, `ATTACH`, `DETACH`).
+3. **Defense in Depth**: Even when wrapped inside complex CTEs (e.g. `WITH deleted AS (DELETE FROM users ...) SELECT * FROM deleted`), keyword regex scanning flags `DELETE` and halts execution before any SQL reaches the database engine.
+4. **Execution Safety**: `execute_safe_sql` re-validates queries before execution, wraps non-limited queries with a subquery wrapper `SELECT * FROM (<query>) AS safe_limit_wrapper LIMIT 100`, and calculates execution time.
+
+---
 
 ## 3. Caveats
-No caveats. Empirical testing confirms complete compliance and build stability.
+
+- **String Literals Containing Forbidden Keywords**: `validate_read_only_sql` performs keyword regex matching across the entire normalized uppercase query. If a legitimate SELECT query contains a string literal equal to a forbidden keyword (e.g. `SELECT * FROM logs WHERE action = 'DELETE'`), the validator will fail-closed and reject the query. This is a conservative security trade-off that prioritizes mutation prevention over query flexibility.
+- **Dialect Specific Non-Standard Commands**: Statements like `SHOW TABLES` (MySQL) or `PRAGMA table_info()` (SQLite) do not start with `SELECT` or `WITH` and are rejected by design. Standard `SELECT` queries against `information_schema` should be used instead.
+
+---
 
 ## 4. Conclusion
-VERDICT: **APPROVE**
 
-Milestone 2 directory restructuring and documentation consolidation meets all acceptance criteria with zero build breakage and 100% file integrity.
+Milestone 2 (Conversational NL-to-SQL Query Engine) successfully passes all empirical stress tests, security guardrails, live database executions, and import checks. 
+
+**Explicit Verdict: APPROVE**
+
+---
 
 ## 5. Verification Method
-To independently verify:
-1. Run `cmd /c "npm run build"` in `d:\dataspeak`. Verify exit code 0.
-2. Run `Get-ChildItem -Path d:\dataspeak\docs -Recurse` in PowerShell to list all 20 relocated files.
-3. Run `Get-ChildItem -Path d:\dataspeak -File` in PowerShell to confirm root directory cleanliness.
+
+To independently verify these empirical results:
+
+1. Run the empirical stress test runner script:
+   ```powershell
+   python d:\dataspeak\.agents\challenger_m2_1\test_m2.py
+   ```
+   *Expected output*: `ALL EMPIRICAL TESTS PASSED SUCCESSFULLY!` (Exit code: 0).
+
+2. Verify backend import:
+   ```powershell
+   python -c "import backend.main; print('Backend OK')"
+   ```
+   *Expected output*: `Backend OK` (Exit code: 0).

@@ -17,6 +17,210 @@ To maintain seamless multi-developer and AI agent collaboration:
 
 ## [Unreleased]
 
+- **Analytics Page Full Frontend Overhaul — Task 1.2 (`src/app/pages/dashboard/AnalyticsPage.tsx`, `src/app/components/analytics/`)**:
+  - **Monolith Decomposition:** Rewrote 863-line `AnalyticsPage.tsx` into a ~250-line orchestrator composing 9 focused child components. All original data-fetch logic (`fetchDatabases`, `fetchDashboardData`, `runInteractiveQuery`, `handleTriggerProfile`) preserved 100% unchanged.
+  - **Mock Data Removal (Task 1.2):** Eliminated all static mock arrays (`queryTrendsData`, `topTablesData`, `databaseDistribution`, `dataGrowthData`). Page now derives all display data from live backend API responses.
+  - **ChartRenderer (`components/analytics/ChartRenderer.tsx`):** Unified Recharts wrapper eliminating all repeated chart JSX. Supports `bar`, `line`, `area`, `donut`, `scatter`, `horizontal_bar` with dark-mode tooltip styling.
+  - **AnalyticsHeader (`components/analytics/AnalyticsHeader.tsx`):** Premium dark header bar with `business_domain` badge, `used_fallback` amber warning, profiling status, DB selector, date range picker, Re-profile button, and "Setup Domain ⚡" wizard trigger.
+  - **KpiSummaryStrip (`components/analytics/KpiSummaryStrip.tsx`):** Glassmorphic animated 4-KPI row (Total, Average, Max, Count) with mini sparklines, per-card color glow, and Framer Motion stagger entrance.
+  - **LiveExplorerCanvas (`components/analytics/LiveExplorerCanvas.tsx`):** Redesigned dark glass explorer panel with SQL chip preview, chart type pill toggles, copy-to-clipboard, and `AnimatePresence` chart transitions.
+  - **AISynthesizedGrid (`components/analytics/AISynthesizedGrid.tsx`):** AI chart grid with per-card chart type toggle (Bar/Line/Area), validation warning accordion, fallback badge, scalar KPI card rendering, and error state display (`error_code`).
+  - **DomainSetupBanner (`components/analytics/DomainSetupBanner.tsx`):** Full-width gradient CTA banner shown when `kpis.length === 0`, guides users to the wizard.
+  - **SchemaHealthPanel (`components/analytics/SchemaHealthPanel.tsx`):** Collapsible schema accordion surfacing `schema_summary` data (never visualized before) — null% color bars, cardinality pills, data type badges, role dots (Measure/Dimension/Time), filter tabs.
+  - **AIInsightsSummaryCard (`components/analytics/AIInsightsSummaryCard.tsx`):** Inline Gemini AI Insights card calling existing `GET/POST /api/analytics/connections/{id}/ai-insights` endpoints with 429 cooldown timer, collapsible expanded view, and key metrics grid.
+  - **DomainMappingWizard (`components/analytics/DomainMappingWizard.tsx`):** ⭐ 3-step guided setup drawer surfacing previously unused backend APIs (`GET /domains` → `POST /suggest-mapping` → `POST /apply-mapping`) — domain card grid, mapping confidence badges (Auto/Review/Manual), per-row column override dropdowns, "Accept All High-Confidence" bulk action, confirm panel with animated success state.
+  - **CSS Tokens:** Added analytics palette variables (`--analytics-blue`, `--analytics-violet`, etc.) and glass surface tokens to `src/styles/theme.css`.
+  - **Build Verification:** `npm run build` → ✓ 2762 modules transformed, 0 errors, exit code 0.
+  - **Backend:** Zero backend files modified.
+
+- **Phase 2F & 2F.1: Deterministic Dashboard Layout & Composition Engine (`backend/services/dashboard_layout_engine.py`, `tests/test_phase2f_dashboard_layout_engine.py`)**:
+  - **Deterministic 12-Column Grid Composition:** Created `compose_dashboard_layout()` deterministically aggregating `MetricRecipe[]`, `ChartRecommendation[]`, and `Mapping[metric_id, FilterRecommendationResult]` into a typed `DashboardLayoutPlan` without SQL execution, customer DB queries, MetricExecutor/DerivedMetricExecutor invocations, LLMs, persistence, ORM mutations, or frontend changes.
+  - **Single-Table Composition Boundary:** Strictly enforced that all recipes, charts, and filter recommendations entering one dashboard layout must resolve to the exact same source table. Multi-table mixes fail fast with `DashboardLayoutError("Phase 2 dashboard composition supports exactly one source table. Multi-table composition requires Phase 3.")`.
+  - **Derived Metric Chart Capability Guard (Phase 2F.1):** Enforced that `RatioMetricRecipe` and `DifferenceMetricRecipe` strictly require `chart.chart_type == "KPI"`. Grouped chart recommendations (`Line`, `Bar`) for derived recipes fail fast with `DashboardLayoutError("Derived metrics currently support scalar KPI placement only.")`.
+  - **KPI Card & Chart Placement Rules:** Every `MetricRecipe` receives exactly one `KpiCardPlacement` (`col_span=3`, 4 per row) preserving input order. Metrics with `chart_type="KPI"` do not produce a duplicate chart placement; metrics with `Line` (`grouping_kind="time"`) or `Bar` (`grouping_kind="dimension"`) produce a separate `ChartPlacement` (`col_span=6`, 2 per row).
+  - **Chart Completeness & Cross-Table Grouping Guard:** Requires exactly one chart recommendation per metric with matching title. Grouping column references must belong to the verified source table; cross-table groupings fail fast with `DashboardLayoutError("Cross-table chart placement requires a validated relationship path.")`.
+  - **Provenance-Preserving Filter Results & Global Deduplication:** Accepted `Mapping[str, FilterRecommendationResult]` ensuring unambiguous metric attribution. Flattened and deduplicated identical filters with deterministic sorting (priority first: date range priority 1 before select priority 2; then discovery order). Conflicting filter IDs or conflicting same-column configurations fail fast. Cross-table filter references are rejected.
+  - **Comprehensive Test Suite:** Added 34 comprehensive test cases covering grid constants, recipe order preservation, ratio/difference KPI card isolation, derived Line/Bar rejections, chart/filter cross-table rejections, filter deduplication, conflicting definition rejection, and proof of zero SQL/LLM/executor execution. Total regression suite reached 309 passing tests with 0 failures and 0 Pyright errors.
+
+
+
+- **Phase 2E: Deterministic Filter Recommendation Engine (`backend/services/filter_recommender.py`, `tests/test_phase2e_filter_recommender.py`)**:
+  - **Deterministic Execution-Free Filter Recommendations:** Created `recommend_filters()` recommending structured `DateRangeFilterRecommendation` (`>=` start, `<=` end) and `SelectFilterRecommendation` (`operator="IN"`) directly from SchemaRegistry metadata and confirmed column references without executing SQL, calling LLMs, or querying customer DB values.
+  - **Derived Metric Filter Support:** Enabled filter recommendations for `RatioMetricRecipe` and `DifferenceMetricRecipe` (e.g. AOV and Gross Profit with `orders.status` or `orders.created_at`), fully aligned with Phase 2C runtime filter propagation across all atomic operands.
+  - **Cardinality & Identifier Guards:** Automatically skips identifier-like columns (`is_primary_key=True` or `semantic_type in {"ID", "UUID", "IDENTIFIER", "PRIMARY_KEY"}`), columns with missing cardinality, or non-informative cardinality (< 2 distinct values). Recommends bounded `select` dropdowns for cardinality between 2 and 50; defers cardinality > 50 for future searchable filters.
+  - **Strict Same-Table Boundary:** Enforces qualified `table.column` references and rejects cross-table filter references (`FilterRecommendationError("Cross-table filter recommendation requires a validated relationship path.")`) with zero join guessing.
+  - **Deterministic Ordering & Deduplication:** Ensures time filter appears first, followed by dimensions in supplied order, deduplicating repeated columns and suppressing duplicate dimensional filters when a time filter is already active on the same column.
+  - **Comprehensive Test Suite:** Added 30 unit and security tests in `tests/test_phase2e_filter_recommender.py` covering atomic and derived recipes, boundary thresholds (cardinality 0, 1, 2, 50, 51, None), identifier safety, cross-table rejection, and proof of zero option-value fetching or SQL/LLM invocation. Total regression suite reached 275 passing tests with 0 failures and 0 Pyright errors.
+
+
+- **Phase 2D: Deterministic Chart Recommendation Engine (`backend/services/chart_recommender.py`, `tests/test_phase2d_chart_recommender.py`)**:
+  - **Deterministic Rule-Based Recommender:** Created `recommend_chart()` synthesizing typed `MetricRecipe` inputs, SchemaRegistry metadata, and explicit confirmed grouping references into typed `ChartRecommendation` instances without LLM calls, DB queries, SQL generation, or persistence.
+  - **Conservative 3-Chart Topology:** Restricted supported chart types strictly to `KPI`, `Line`, and `Bar`. Deferred advanced visualizations (Pie, Donut, Scatter, Area, Heatmap, etc.) pending cardinality and visualization suitability rules.
+  - **Derived Metric Scalar Isolation:** Enforced that `RatioMetricRecipe` and `DifferenceMetricRecipe` (e.g. AOV, Gross Profit) strictly recommend `chart_type="KPI"` with `grouping_kind="none"` and `group_by_ref=None`, even if grouping context is passed, because Phase 2C derived execution is scalar-only.
+  - **Deterministic Atomic Mapping Rules:** Atomic recipes with explicit same-table `time_ref` map to `Line` (`grouping_kind="time"`); with explicit same-table `dimension_ref` map to `Bar` (`grouping_kind="dimension"`); if both are passed, `time_ref` deterministically takes precedence; without grouping maps to `KPI` (`grouping_kind="none"`).
+  - **Strict Grouping Reference Validation:** Enforced qualified `table.column` syntax, existence in verified `SchemaRegistry`, and single-table containment. Cross-table references fail fast with `ChartRecommendationError("Cross-table chart grouping requires a validated relationship path.")`. Zero column-name substring guessing (`if "date" in col`).
+  - **Comprehensive Test Suite:** Added 27 unit and security tests in `tests/test_phase2d_chart_recommender.py` covering scalar KPIs, line charts, bar charts, time precedence, derived recipe scalar confinement, cross-table and unqualified rejection, and verification of zero SQL/LLM invocation. Total regression suite reached 245 passing tests with 0 failures and 0 Pyright errors.
+
+
+- **Phase 2C.1: Derived Execution Boundary Hardening (`backend/services/derived_metric_executor.py`, `tests/test_phase2c1_execution_boundary.py`)**:
+  - **Single-Table Runtime Filter Boundary Enforcement:** Added `_get_recipe_table()` and `_validate_runtime_filters()` to strictly enforce that external `MetricFilter` criteria supplied to `execute_metric_recipe()` are qualified (`table.column`) and target the exact single source table of the recipe. Cross-table filters (e.g., `customers.region` on an `orders` recipe) raise `DerivedMetricExecutionError("Cross-table runtime filters require a validated relationship path.")` before any database queries or `MetricExecutor` calls are made.
+  - **Unqualified Filter Guard:** Unqualified filter column references (e.g. `status = "completed"`) fail fast with `DerivedMetricExecutionError("Runtime metric filters must use qualified table.column references.")`.
+  - **Non-Finite Numeric Guard:** Hardened `_ensure_numeric()` to reject non-finite float values (`NaN`, `+inf`, `-inf`) via `math.isfinite()`, raising `DerivedMetricExecutionError("Derived metric component '<role>' returned a non-finite numeric value.")`. Added post-arithmetic finite guards on division and difference operations. Non-finite values are never converted to 0, `None`, or sentinel values.
+  - **Preserved Core Invariants:** Preserved strict `None` vs real zero (`0`, `0.0`) semantics, `status="undefined", value=None` for zero denominator, no raw SQL, no joins, no eval/exec, and zero rounding in the calculation layer.
+  - **Comprehensive Test Suite:** Added 15 focused execution boundary, numeric safety, and overflow result tests in `tests/test_phase2c1_execution_boundary.py`. Full regression test suite passed cleanly with 218 tests passing, 0 failures, and 0 Pyright errors.
+
+
+- **Phase 2C: Deterministic Metric Recipe Executor (`backend/services/derived_metric_executor.py`, `tests/test_phase2c_derived_metric_executor.py`)**:
+  - **MetricExecutor Sole Calculation Authority:** Built `execute_metric_recipe()` executing Atomic, Ratio, and Difference metric recipes without raw SQL generation, joins, eval, or formula string execution. All database interactions delegate strictly to `MetricExecutor.execute()` per atomic operand.
+  - **Safe Ratio & Difference Composition:** Executes numerator and denominator (or left and right) independently through `MetricExecutor`. Division by zero evaluates strictly to `status="undefined", value=None` without defaulting to 1; missing operand data evaluates to `status="no_data", value=None` without fabricating zeros. Legitimate numeric zeros (`0`, `0.0`) are strictly preserved.
+  - **Zero Rounding in Calculation Layer:** Maximum floating point precision is retained (e.g. `1000.0 / 3 = 333.3333333333333`) leaving formatting to the presentation layer.
+  - **Strict Defense-in-Depth:** Enforces tenant ownership checks (`db_conn.tenant_id == tenant_id`, `db_conn.id == connection_id`), connection-boundary revalidation (`validate_recipe_for_connection`), scalar output checks, and numeric type validation (explicitly rejecting booleans, dates, and text).
+  - **Runtime Filter Propagation:** Propagates external `MetricFilter` criteria consistently to all atomic operands of derived recipes.
+  - **Comprehensive Test Suite:** Added 29 focused unit and security tests in `tests/test_phase2c_derived_metric_executor.py` verifying exact AOV (`250.0`), Gross Profit (`450.0`), filtered values (`150.0` and `140.0`), call counts, and zero/null semantics. Full test suite reached 203 passing tests with 0 failures and 0 Pyright errors.
+
+- **Phase 2B.2: Template Formula Fidelity Guard (`backend/services/metric_recipe_generator.py`, `tests/test_phase2b2_formula_fidelity.py`)**:
+  - **Strict Atomic Formula Grammar:** Implemented `_SIMPLE_ATOMIC_FORMULA_RE` to parse only exact single-variable atomic aggregations (`SUM`, `AVG`, `MIN`, `MAX`, `COUNT`, `COUNT_DISTINCT`) over a single placeholder `{variable}`. Rejects multi-variable, division, subtraction, `WHERE` predicates, and `CASE` expressions.
+  - **3-Way Metadata Agreement Verification:** Enforced that `formula_template`, declared `aggregation`, and `required_variables` must strictly agree in count, operation, and variable name. Any divergence produces a structured `DeferredRecipeRule`.
+  - **Decoupled from Private Registry:** Replaced import of private `_DOMAIN_REGISTRY` with canonical public `get_domain_template()` helper, safely handling generic fallbacks and unknown domains.
+  - **Deferred Metric Lifecycle:** Added `DeferredRecipeRule` to `RecipeRule` union. Generator converts deferred rules into structured `SkippedMetric` instances with explanatory reasons instead of silently dropping unsupported template semantics.
+  - **Formula Fidelity Test Suite:** Added 15 focused tests in `tests/test_phase2b2_formula_fidelity.py`, verifying simple formula acceptance, whitespace tolerance, mismatch deferral, multi-variable/division/subtraction/filter rejection, and public template retrieval. Full test suite reached 174 passing tests with 0 failures and 0 Pyright errors.
+
+- **Phase 2B.1: Semantic Substitution Removal & Domain Template Alignment (`backend/services/metric_recipe_generator.py`, `tests/test_phase2b1_recipe_semantics.py`)**:
+  - **Eliminated Concept Substitution & Mapping Fallbacks:** Purged all `fallback_mapping_keys` (`mrr -> revenue`, `appointment_id -> encounter_id`, `amount -> transaction_amount`). If an explicitly requested business variable is missing in the confirmed mapping, the metric is cleanly skipped (`MissingMappingError`) with zero silent semantic guessing.
+  - **Single Source of Truth via Domain Templates:** Refactored `metric_recipe_generator.py` to source atomic KPI rules (`title`, `required_variables`, `aggregation`, `format`, `description`) directly from `domain_templates.py` via `build_domain_recipe_rules()`. Eliminated manual duplication and prevented catalog drift.
+  - **Canonical Metric ID Preservation:** Fixed Average Order Value to preserve its canonical domain template ID `metric_id="aov"` instead of `average_order_value`.
+  - **Active Subscriptions Filter Guard:** Added `FILTER_REQUIRED_METRIC_IDS = {"active_subscriptions"}` to explicitly skip `active_subscriptions` with a structured reason until filter-aware recipes are supported in the recipe contract, preventing misleading `COUNT_DISTINCT(subscription_id)` metrics.
+  - **Narrowed Exception Handling:** Removed bare `ValueError` from the rule generation catch block. Only expected contract errors (`ValidationError`, `MetricRecipeValidationError`, `MissingMappingError`) are converted to `SkippedMetric`; programmer bugs propagate and fail tests loudly.
+  - **API Hardening:** Removed `rules` parameter from public `generate_metric_recipes()` function signature, exposing `_generate_metric_recipes_from_rules()` internally for test fixtures.
+  - **Regression & Semantic Test Suites:** Added 12 focused semantic regression tests in `tests/test_phase2b1_recipe_semantics.py`. Full test suite reached 159 passing tests across Phase 1.5, Phase 2A, Phase 2B, and Phase 2B.1 with 0 failures and 0 Pyright errors.
+
+- **Phase 2B: Deterministic KPI Metric Recipe Generator (`backend/services/metric_recipe_generator.py`, `tests/test_phase2b_metric_recipe_generator.py`)**:
+  - **Deterministic Recipe Synthesis:** Built `generate_metric_recipes()` transforming explicitly confirmed semantic mappings into typed, validated `MetricRecipe` instances (Atomic, Ratio, Difference) using structured domain recipe rules without LLM dependencies.
+  - **Zero Inference & Zero Fuzzy Matching:** Operates strictly on confirmed mapping keys. Missing dependencies cleanly skip metrics with descriptive, structured reasons (`SkippedMetric`) rather than inventing columns or falling back to generic/demo defaults.
+  - **Domain Isolation:** Unknown or generic domains never fall back to e-commerce; generic telemetry data generates zero hallucinated business metrics.
+  - **Phase 2A Registry Validation Integration:** Every candidate recipe is validated against `SchemaRegistry` and canonical semantic guards (blocking arithmetic on IDs, blocking `SUM` on percentages, rejecting cross-table derived operands).
+  - **Comprehensive Test Suite:** Added 21 focused unit and regression tests in `tests/test_phase2b_metric_recipe_generator.py`, verifying deterministic ordering, stability across repeated runs, absence of arbitrary `sql`/`formula` fields, and alignment between `AggregationType` and `ALLOWED_AGGREGATIONS`. Total regression suite reached 147 passing tests with 0 failures.
+
+- **Phase 2A: Typed Metric Recipe Contract (`backend/services/metric_recipes.py`, `tests/test_phase2a_metric_recipe_contract.py`)**:
+  - **Deterministic Metric Recipe Language:** Created typed Pydantic models for Atomic, Ratio, and Difference metric recipes (`StrictRecipeModel` with `extra="forbid"`) that reject arbitrary executable formulas, free-form strings, Python eval, and raw SQL.
+  - **Canonical Aggregation Alignment:** Strictly enforces canonical aggregation whitelist (`SUM`, `AVG`, `MIN`, `MAX`, `COUNT`, `COUNT_DISTINCT`) reused directly from `services.metric_semantics.ALLOWED_AGGREGATIONS`, with wildcards constrained to `COUNT`.
+  - **Safe Ratio & Difference Semantics:** Mandates explicit `zero_division: Literal["null"]` for ratios and enforces single-table boundary across operands until Phase 3 relationship engine.
+  - **Schema-Aware & Connection-Aware Validation:** Implemented `validate_recipe_against_registry` and `validate_recipe_for_connection` leveraging `parse_column_ref()` and `validate_metric_aggregation()` to enforce identifier guards and percentage/rate non-additive guards prior to future execution.
+  - **Deterministic JSON Round-Trip:** Provided stable serialization functions `metric_recipe_to_dict` and `metric_recipe_to_json` with sorted keys.
+  - **Test Suite:** Added 21 comprehensive contract and validation tests in `tests/test_phase2a_metric_recipe_contract.py`, bringing the total regression suite to 126 passing tests with zero regressions.
+
+- **Phase 1.5D.2: Atomic Regeneration Safety & Dimension Enforcement (`backend/routers/analytics.py`, `tests/test_phase1_5d2_atomic_regeneration.py`)**:
+  - **Preserve Working Dashboard on Zero-Valid Regeneration:** Validates all candidate agent KPI specifications in memory prior to issuing any database statements. If zero valid KPIs remain, aborts replacement cleanly without deleting existing `KpiDefinition` records or altering `DashboardLayout`.
+  - **Atomic KPI + DashboardLayout Replacement:** Unified deletion of obsolete definitions, insertion of new definitions, and creation/update of `DashboardLayout` inside a single transactional block with a single `db.commit()` and `db.rollback()` on error. Cache invalidation executes strictly after successful commit.
+  - **Reject Cross-Table Dimensions:** Enforced that optional secondary/dimension columns must belong to the exact same table as the primary metric. Cross-table dimensions (`orders.total_amount` by `customers.region`) are omitted (`dimension_column=None`) with a structured warning until the Phase 3 relationship engine exists, preserving the primary metric without inventing joins.
+  - **Tenant Connection Ownership Defense:** Verified `connection_id` belongs to `tenant_id` via `DatabaseConnection` before accessing `SchemaRegistry` during agent persistence.
+  - **Documented SQLite Nullable Mismatch:** Cataloged SQLite's physical DDL (`aggregation_function` nullable) vs SQLAlchemy ORM (`nullable=False`) as migration debt for the production Alembic baseline while application writers enforce non-null values.
+  - **Comprehensive Test Suite:** Added 11 focused atomic regeneration tests in `tests/test_phase1_5d2_atomic_regeneration.py`, with 105/105 tests passing cleanly across the entire suite.
+
+- **Phase 1.5D.1: Complete Removal of Silent KPI Fallbacks (`backend/routers/analytics.py`, `tests/test_phase1_5d1_silent_fallback_removal.py`)**:
+  - **Eliminated Silent Aggregation Fallback:** Hardened `run_agent_pipeline_sync` to read `aggregation_function` explicitly. Any missing, empty, or unsupported aggregation (`GROWTH`, `DIFFERENCE`, `COMPUTED`, `RATIO`, `PERCENT_CHANGE`) is strictly dropped with a structured log warning instead of silently converting to `COUNT` or `SUM`.
+  - **Eliminated Fake Target Column Fallbacks:** Removed all fallback logic defaulting missing tables or columns to `"orders.total_amount"`. Enforced strict `SchemaRegistry` whitelisting for both table and column names before KPI construction.
+  - **Zero Valid KPIs Handling:** If all agent KPI specifications fail validation, the system cleanly logs a warning, deletes obsolete definitions, and persists zero KPIs without fabricating demo data or silently invoking an unrelated business-domain fallback.
+  - **Comprehensive Test Suite:** Added 20 new tests in `tests/test_phase1_5d1_silent_fallback_removal.py` bringing the total regression suite to 94 passing tests.
+
+- **Phase 1.5D: Contract Alignment, Legacy Cleanup & Production Readiness Gate (`backend/routers/analytics.py`, `backend/services/metric_adapter.py`, `backend/services/metric_executor.py`, `backend/services/ai_insights_service.py`, `backend/services/db_migration.py`, `src/app/pages/dashboard/AIInsightsPage.tsx`, `src/app/pages/dashboard/AnalyticsPage.tsx`, `tests/test_phase1_5d_readiness_gate.py`)**:
+  - **AI Insights Contract Realignment:** Separated into `POST /api/analytics/connections/{id}/ai-insights/generate` (explicit synthesis, tenant-authorized, cached in `cache_service`) and `GET /api/analytics/connections/{id}/ai-insights` (read-only cached retrieval; returns `status: "not_generated"` if not run, never silently calls LLM).
+  - **Hypothetical Field Removal:** Purged dead compatibility logic in `metric_adapter.py` checking speculative attributes (`source_table`, `table_name`).
+  - **Strict Filter Contract:** Hardened `MetricExecutor` so `operator="IN"` strictly requires a collection (`list`/`tuple`/`set`) while scalar operators reject collections. Empty `IN` clauses compile cleanly to `1 = 0`.
+  - **Semantic Frontend Stat Labels:** Dynamically updated summary cards in `AnalyticsPage.tsx` to render mathematically accurate labels (`Total Records` for `*`, `Distinct Count` for `COUNT_DISTINCT`, `Non-null Count` for `COUNT(col)`, `Sample Count` for numeric measures).
+  - **Schema Parity Migration:** Synchronized 11 missing columns for `documents` and `document_chunks` in `db_migration.py` and executed non-destructive schema migrations across both SQLite databases.
+
+- **Master Engineering Roadmap & Task Tracker ([`todo.md`](file:///d:/dataspeak/todo.md))**:
+  - Established canonical project-wide backlog organized into sequential prioritized phases (P0 to P3): Phase 1 (Frontend Analytics Wiring), Phase 2 (Embeddable Widget), Phase 3 (AI Insights Engine), Phase 4 (Enterprise Database Schemas), Phase 5 (Interactive ERD Generator), and Phase 6 (Production & Billing Hardening).
+  - Defined mandatory 4-step task lifecycle protocol for AI agents and human developers.
+  - Added dedicated Archived / Completed Tasks tracking section.
+- **AI Agent Protocol & Instruction Standardization ([`AGENTS.md`](file:///d:/dataspeak/AGENTS.md), [`Guidelines.md`](file:///d:/dataspeak/docs/setup/Guidelines.md), [`AI_TASK_TEMPLATE.md`](file:///d:/dataspeak/docs/templates/AI_TASK_TEMPLATE.md))**:
+  - Codified Section 5.5 in `AGENTS.md`: Mandatory rules requiring agents to mark tasks as `[x]`, append completion metadata, move completed items to the Archived section in `todo.md`, and log updates under `## [Unreleased]` in `CHANGELOG.md`.
+  - Updated `Guidelines.md` and `AI_TASK_TEMPLATE.md` to enforce `todo.md` and `CHANGELOG.md` synchronization across all delegated agent tasks.
+
+- **Pyright / Pylance Static Typing Hardening & Test Isolation (`backend/routers/analytics.py`, `backend/services/document_db_profiler.py`, `backend/services/metric_adapter.py`, `backend/services/cache_service.py`, `tests/`, `scratch/`)**:
+  - **Analytics Router Typing:** Explicitly cast `current_user.tenant_id` (`Column[int]`) to integer `t_id` across `trigger_schema_profile`, `get_profile_status`, `get_dashboard_data`, `execute_dashboard_query`, `invalidate_dashboard_cache`, `get_connection_ai_insights`, `get_suggested_mappings`, and `apply_user_confirmed_mapping`, eliminating all Pyright type mismatch errors on `get_owned_connection` and `MetricRequest`.
+  - **Document DB Profiler Type Fixes:** In `backend/services/document_db_profiler.py`, resolved `Column[int]` passes by casting connection IDs to `int`, correctly stringified Mongo/Firestore host and database arguments, typed client handles, and removed redundant `str()` calls in `flatten_document`.
+  - **Metric Adapter Typing:** Cast `kpi.connection_id` and `kpi.tenant_id` in `MetricRequest` initialization.
+  - **Cache Isolation in Integration Tests:** Added `clear()` method to `InMemoryCacheService` and invoked it inside `c_integration_setup` fixtures to eliminate cross-test cache contamination between test modules.
+  - **Scratch Scripts Typing:** Converted `int(col)` calls to `cast(int, col)` across scratch diagnostics and hardening scripts.
+
+- **Phase 1.5C: Live Dashboard & Ad-Hoc Analytics Migration to Canonical MetricExecutor (`backend/services/metric_adapter.py`, `backend/routers/analytics.py`, `tests/test_phase1_5c_dashboard_executor_integration.py`)**:
+  - **Metric Adapter Layer (`services/metric_adapter.py`):** Created dedicated bridge converting persisted `KpiDefinition` models into canonical `MetricRequest` objects. Normalizes `orders.all` to `orders.*` and resolves bare row-count `"all"` targets deterministically from verified contextual anchors (`dimension_column`, `time_column`, single-table `domain_mapping`, or single-table schemas). Raises `LegacyKpiIncompatibleError` without guessing on ambiguous multi-table datasets.
+  - **Live Dashboard Migration (`routers/analytics.py`):** Refactored `GET /dashboard/{connection_id}` to compute all KPI and live chart values through `MetricExecutor.execute()`. Removed legacy hand-rolled SQL loop that previously hardcoded `SUM(...)` on all measures regardless of aggregation type.
+  - **Ad-Hoc Query Migration (`routers/analytics.py`):** Refactored `POST /dashboard/{connection_id}/query` to execute chart series and summary statistics (`total`, `average`, `max`, `min`, `count`) through `MetricExecutor`.
+  - **Strict Semantic Protection:** Enforced HTTP 400 rejection for non-whitelisted aggregations (`MEDIAN`), identifier aggregations (`SUM(order_id)`), cross-table metric combinations, and unknown schema elements.
+  - **Frontend Contract Preservation:** Kept 100% backward compatibility for all keys consumed by `AnalyticsPage.tsx`.
+  - **Comprehensive Integration Suite (`tests/test_phase1_5c_dashboard_executor_integration.py`):** Verified 13/13 tests covering exact numbers (`SUM=1000.0`, `AVG=250.0`, `COUNT=4`, `COUNT_DISTINCT=3`, status breakdown `completed=300.0`, `shipped=300.0`, `cancelled=400.0`), legacy `"all"` deterministic resolution, isolation from legacy calculation functions, and cross-tenant protection.
+
+  - **Universal Schema Profiler Enhancement (`services/schema_profiler.py`):** Added primary key inspection (`get_pk_constraint`), foreign key tracking (`get_foreign_keys`), and normalized semantic typing (`ID`, `UUID`, `DATE`, `DATETIME`, `NUMERIC_MEASURE`, `CURRENCY/AMOUNT`, `CATEGORY`, `TEXT`, `BOOLEAN`, `UNKNOWN`).
+  - **Extensible Domain Template Registry (`services/domain_templates.py`):** Created optimization templates for E-Commerce, SaaS, Healthcare, Logistics, and Finance, plus an extensible registry enabling runtime domain registration without core engine alterations.
+  - **Robust Generic / Custom Fallback:** Built an architecture supporting arbitrary business datasets and unknown relational schemas. Conservative inference selects additive measures, timestamps, and low-cardinality dimensions without inventing hallucinated concepts or assuming numeric columns represent revenue.
+  - **Type-Aware Mapping Matcher (`services/mapping_matcher.py`):** Developed heuristic column-to-variable matching with ID/UUID protection, unit-price vs. total revenue penalization, cardinality checks, confidence scoring (0.0 to 1.0), and plain-English reasoning.
+  - **Guided Reliability API Endpoints (`backend/routers/analytics.py`):** Added `GET /api/analytics/domains`, `POST /api/analytics/connections/{id}/suggest-mapping`, and `POST /api/analytics/connections/{id}/apply-mapping`. Validates columns against SchemaRegistry and produces deterministic `KpiDefinition` and `DashboardLayout` records with zero fabricated data.
+  - **Comprehensive Verification Suite (`scratch/test_guided_mapping_engine.py`):** Validated semantic types, domain suggestions, unit price guards, FK detection, unknown custom dataset generic fallback, column rejection, and deterministic KPI generation.
+
+- **Default Superadmin Seed & Auto-Initialization (`backend/scripts/seed_admin.py`, `backend/main.py`, `LoginPage.tsx`)**:
+
+  - Implemented automatic database seeding on startup ensuring a default verified Superadmin user (`admin@dataspeak.ai` / `AdminPassword123!`) and default tenant exist out-of-the-box.
+  - Added an interactive **"⚡ Auto-fill Default Admin"** shortcut button on the frontend login page for fast multi-developer testing without re-registering.
+  - *Production Hardening Note:* For production release, see [`AGENTS.md` Section 4.5](file:///d:/dataspeak/AGENTS.md) for instructions to disable auto-seeding in `main.py`, remove the login autofill card, and rotate the credentials.
+- **Conversational Data Layer & Models (`backend/models.py`, `backend/schemas.py`)**:
+  - Implemented `Conversation` (sessions, auto-generated titles, timestamps) and `Message` (turns, roles, query_type, metadata_json) SQLAlchemy models and Pydantic schemas.
+- **Intelligent Query Router & Auto Database Selection (`backend/services/query_router.py`)**:
+  - Developed multi-stage query intent classifier supporting heuristic keyword checks, schema metadata introspection, user preference overrides (`auto`, `documents`, `database`), and Google Gemini 2.5 Flash fallback.
+  - Implemented automatic database connection selection (Option C) matching user queries to relevant database schemas.
+- **Unified Chat API Endpoint (`backend/routers/chat.py`)**:
+  - Built `POST /api/chat` supporting multi-turn conversational context windows (up to 8 turns), grounded RAG hybrid retrieval (FAISS + BM25 + RRF + Cross-Encoder re-ranking), safe NL-to-SQL execution, and multi-source Hybrid synthesis.
+  - Added full conversation session management endpoints (`GET /api/conversations`, `GET /api/conversations/{id}`, `PATCH /api/conversations/{id}`, `DELETE /api/conversations/{id}`).
+- **Conversational AI Assistant Workspace (`src/app/pages/dashboard/ChatPage.tsx`)**:
+  - Built responsive 3-panel chat interface with conversation history sidebar, search filter, inline rename/delete, prompt suggestions, and engine switcher.
+  - Added rich response rendering with engine status badges, syntax-highlighted SQL data tables, collapsible source citation cards, and modal chunk inspection.
+  - Registered `/dashboard/chat` in router and updated navigation in `DashboardLayout.tsx`.
+- **Architectural Documentation (`docs/architecture/`)**:
+  - [`docs/architecture/RAG_SYSTEM_ARCHITECTURE.md`](file:///d:/dataspeak/docs/architecture/RAG_SYSTEM_ARCHITECTURE.md): Complete technical breakdown of multi-modal ingestion, table matrix preservation, recursive chunking, dual FAISS/BM25 indexing, intelligent query routing, and 5-stage hybrid retrieval.
+  - [`docs/architecture/conversational_retrieval_architecture.md`](file:///d:/dataspeak/docs/architecture/conversational_retrieval_architecture.md): Conversational AI Assistant workflow and data flow specification.
+
+### Added — Phase 1 & 2: Extraction Engine & Hybrid Search
+- **Multimodal Document Extraction Pipeline & Structure-Aware Router (`backend/ingestion/`)**:
+  - Implemented structure-aware pre-flight evaluation routing digital text pages to fast CPU text parsers and escalating scanned/image pages to Google Gemini 2.5 Flash VLM OCR.
+  - Added native multi-format support for `.pdf`, `.docx`, `.xlsx`, `.pptx`, `.csv`, `.html`, `.md`, and `.txt` files.
+  - Implemented streaming file upload handling in `backend/routers/documents.py` with 100MB chunked disk writing and post-processing file cleanup.
+  - Created HTML table matrix generation with placeholder anchoring (`[[TABLE_REF_001]]`) inside narrative text streams.
+- **Hybrid Dense-Sparse RAG Search & Reciprocal Rank Fusion (`backend/search/`)**:
+  - Created BM25Okapi sparse keyword index manager (`backend/search/bm25_index.py`) per tenant.
+  - Implemented Reciprocal Rank Fusion (`backend/search/hybrid.py`) combining dense FAISS embeddings with sparse BM25 scores.
+  - Added metadata pre-filtering (document IDs, content types, page numbers) to `/api/documents/search`.
+- **Extended Database Models & Pydantic Schemas**:
+  - Added `progress`, `error_message`, `total_pages`, `pages_processed`, `visual_pages` to `Document` model.
+  - Added `page_number`, `content_type`, `section_heading`, `reference_id` to `DocumentChunk` model.
+
+### Added — Phase 3: Frontend Progress & Search Filters
+- **Per-File Progress Tracking & Dual Progress Bars (`UploadDocumentsPage.tsx`)**:
+  - Replaced global single-jump progress state with `FileUploadState` tracking per-file HTTP upload progress via `XMLHttpRequest` and backend processing progress via 3-second polling.
+  - Added dual progress bars (blue for HTTP upload, green for backend processing).
+  - Added VLM vision badge (`🔍 {visualPages} pages sent to AI vision`) when visual pages are extracted.
+  - Added individual file error banners with `Retry` action buttons.
+  - Replaced embedding model dropdown with static label: `Sentence Transformers (all-MiniLM-L6-v2)`.
+- **Granular Search Filters & Progress Visualization (`KnowledgeBasePage.tsx`)**:
+  - Added search filter panel inside Test AI Query dialog: document multi-select, content type toggles (Text 📄, Table 📊, Image 🖼️), page range inputs, Hybrid vs. Semantic search mode switch.
+  - Added inline progress bar for documents with `Processing` status in the main table.
+  - Wired `Re-index` context menu button to `POST /api/documents/{id}/reindex` with Sonner toast notifications.
+  - Added red error message subtitles for documents in `Failed` status.
+
+### Added — Phase 4: Scalability & Hardening
+- **Celery Task Queue & Async Processing (`backend/celery_app.py`, `backend/ingestion/task_queue.py`)**:
+  - Configured Celery with Redis broker/backend and `BackgroundTasks` fallback when Redis unavailable.
+  - Wrapped document ingestion and reindexing into retriable Celery tasks with isolated DB sessions.
+  - Added `celery_task_id` and `embedding_model` fields to `Document` model.
+- **Document Reindexing Endpoint (`backend/routers/documents.py`)**:
+  - Added `POST /api/documents/{id}/reindex` for on-demand re-embedding from stored chunks.
+- **Search Mode Control & Cross-Encoder Re-Ranking (`backend/search/hybrid.py`)**:
+  - Added `search_mode` ("hybrid"/"semantic") and `re_rank` flags to `SearchQuery` schema.
+  - Implemented MS-MARCO Cross-Encoder re-ranking for improved retrieval precision.
+- **Embedding Model Migration Tool (`backend/scripts/migrate_embeddings.py`)**:
+  - CLI script to re-embed all tenant chunks with target model (default: `BAAI/bge-small-en-v1.5`), rebuild FAISS & BM25 indices, with `--dry-run` mode.
+
 ### Planned / In Progress
 - Implementation of remaining 25 enterprise database schema tables into `backend/models.py`.
 - Dynamic SQL query generator with advanced schema-aware guardrails and parameterization.

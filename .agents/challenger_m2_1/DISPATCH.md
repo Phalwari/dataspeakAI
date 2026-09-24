@@ -1,17 +1,9 @@
-# DISPATCH — Challenger M2-1
+## 2026-08-05T22:17:06+05:00
+You are challenger_m2_1.
+Your working directory is d:\dataspeak\.agents\challenger_m2_1\.
+Please read d:\dataspeak\.agents\ORIGINAL_REQUEST.md, d:\dataspeak\PROJECT.md, and d:\dataspeak\.agents\worker_m2\handoff.md.
 
-Target: Empirical verification of Milestone 2 directory restructuring
-Working directory: d:\dataspeak\.agents\challenger_m2_1
-
-Task:
-1. Empirically verify that `npm run build` or Vite build check succeeds and no relative asset/file paths in `src/` or `backend/` are broken by doc relocation.
-2. Confirm all 20 relocated files exist at their target `docs/` paths and are intact.
-3. Output your verdict (`APPROVE` or `REJECT`) with empirical test results in `d:\dataspeak\.agents\challenger_m2_1\handoff.md`.
-
-## 2026-08-05T07:03:00Z
-Task for Milestone 2 Challenger Gate Verification:
-1. Run empirical verification commands (`cmd /c "npm run build"` or check build settings) to confirm zero build breakage.
-2. Check that all 20 relocated files exist and are readable in their target `docs/` paths.
-3. Output your verdict (`APPROVE` or `REJECT`) with empirical findings in `d:\dataspeak\.agents\challenger_m2_1\handoff.md`.
-4. Update `progress.md` and send a message to parent (ID: 5bc856d2-3ebe-45e9-b94a-98db14383434) when done.
-
+Empirically test and stress test Milestone 2 changes:
+- Test `validate_read_only_sql` in `backend/services/sql_engine.py` against both valid SELECT queries and malicious SQL injection/mutation statements (DELETE, DROP, UPDATE, INSERT, ALTER, semicolon chaining).
+- Test backend import `python -c "import backend.main"`.
+State explicit verdict APPROVE or REJECT in your report at d:\dataspeak\.agents\challenger_m2_1\handoff.md and send a summary message.

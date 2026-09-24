@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr
-from typing import Optional
+from typing import Optional, List, Any, Dict
 from datetime import datetime
 
 class TenantBase(BaseModel):
@@ -36,7 +36,6 @@ class InviteCreate(BaseModel):
 class InviteResponse(BaseModel):
     invite_link: str
     email: EmailStr
-
 
 class UserLogin(BaseModel):
     email: EmailStr
@@ -133,6 +132,14 @@ class DocumentBase(BaseModel):
     paragraph_count: int = 0
     table_count: int = 0
     image_count: int = 0
+    progress: float = 0.0
+    error_message: Optional[str] = None
+    total_pages: int = 0
+    pages_processed: int = 0
+    visual_pages: int = 0
+    celery_task_id: Optional[str] = None
+    embedding_model: Optional[str] = "all-MiniLM-L6-v2"
+
 class DocumentResponse(DocumentBase):
     id: int
     tenant_id: int
@@ -141,8 +148,35 @@ class DocumentResponse(DocumentBase):
     class Config:
         from_attributes = True
 
+class DocumentChunkResponse(BaseModel):
+    id: int
+    document_id: int
+    content: str
+    overlap_chars: int
+    chunk_index: int
+    page_number: Optional[int] = None
+    content_type: str = "text"
+    section_heading: Optional[str] = None
+    reference_id: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
 class SearchQuery(BaseModel):
     query: str
+    top_k: Optional[int] = 5
+    synthesize: Optional[bool] = True
+    document_ids: Optional[List[int]] = None
+    content_types: Optional[List[str]] = None
+    page_range: Optional[List[int]] = None
+    search_mode: Optional[str] = "hybrid"
+    re_rank: Optional[bool] = False
+
+class SearchSynthesisResponse(BaseModel):
+    query: str
+    answer: Optional[str] = None
+    results: List[dict] = []
 
 class GithubLoginRequest(BaseModel):
     code: str
@@ -172,9 +206,14 @@ class SchemaRegistryResponse(BaseModel):
     table_name: str
     column_name: str
     data_type: str
+    semantic_type: Optional[str] = "UNKNOWN"
+    is_primary_key: Optional[bool] = False
+    is_foreign_key: Optional[bool] = False
+    foreign_key_target: Optional[str] = None
     is_measure: bool
     is_dimension: bool
     is_time_axis: bool
+    cardinality: Optional[int] = None
     min_value: Optional[float] = None
     max_value: Optional[float] = None
     mean_value: Optional[float] = None
@@ -182,6 +221,7 @@ class SchemaRegistryResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
 
 class KpiDefinitionResponse(BaseModel):
     id: int
@@ -193,6 +233,8 @@ class KpiDefinitionResponse(BaseModel):
     dimension_column: Optional[str] = None
     time_column: Optional[str] = None
     default_chart_type: str
+    priority: Optional[int] = 1
+    reasoning: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -206,7 +248,6 @@ class DashboardQueryRequest(BaseModel):
     limit: Optional[int] = 10
     date_range: Optional[str] = "30days"
     filters: Optional[dict] = None
-
 
 class AiInsightResponse(BaseModel):
     id: int
@@ -222,4 +263,125 @@ class AiInsightResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class NLQueryRequest(BaseModel):
+    database_id: int
+    query: str
+
+class NLQueryResponse(BaseModel):
+    query: str
+    generated_sql: str
+    explanation: str
+    columns: List[str] = []
+    rows: List[dict] = []
+    row_count: int = 0
+    execution_time_ms: float = 0.0
+    status: str
+    error_detail: Optional[str] = None
+
+class MessageResponse(BaseModel):
+    id: int
+    conversation_id: int
+    sender_role: str
+    content: str
+    query_type: Optional[str] = "rag"
+    metadata_json: Optional[dict] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class ConversationResponse(BaseModel):
+    id: int
+    tenant_id: int
+    user_id: Optional[int] = None
+    title: str
+    platform: str
+    created_at: datetime
+    updated_at: datetime
+    messages: Optional[List[MessageResponse]] = []
+
+    class Config:
+        from_attributes = True
+
+class ConversationListItem(BaseModel):
+    id: int
+    title: str
+    platform: str
+    created_at: datetime
+    updated_at: datetime
+    last_message: Optional[str] = None
+    message_count: int = 0
+
+class ConversationUpdate(BaseModel):
+    title: str
+
+class ChatRequest(BaseModel):
+    conversation_id: Optional[int] = None
+    query: str
+    source_preference: Optional[str] = "auto"
+    database_id: Optional[int] = None
+
+class SourceCitation(BaseModel):
+    document_name: str
+    page_number: Optional[int] = None
+    content_type: str = "text"
+    reference_id: Optional[str] = None
+    snippet: str
+    score: Optional[float] = 0.0
+
+class ChatResponse(BaseModel):
+    conversation_id: int
+    message_id: int
+    user_message_id: int
+    query: str
+    answer: str
+    query_type: str
+    sources: List[SourceCitation] = []
+    sql_data: Optional[NLQueryResponse] = None
+    created_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Guided Reliability Dashboard Intelligence Schemas
+# ---------------------------------------------------------------------------
+
+class DomainTemplateResponse(BaseModel):
+    id: str
+    name: str
+    description: str
+    is_fallback: bool = False
+    variable_count: int
+    kpi_count: int
+
+
+class SuggestMappingRequest(BaseModel):
+    domain: Optional[str] = "generic"
+
+
+class MappingSuggestionItem(BaseModel):
+    variable: str
+    display_name: str
+    description: str
+    required: bool
+    column: Optional[str] = None  # e.g. "orders.total_amount"
+    confidence: float
+    semantic_type: Optional[str] = "UNKNOWN"
+    reasoning: str
+
+
+class SuggestMappingResponse(BaseModel):
+    domain: str
+    domain_name: str
+    is_fallback: bool
+    suggestions: List[MappingSuggestionItem]
+    available_columns: List[dict]
+    warnings: List[str] = []
+
+
+class ApplyMappingRequest(BaseModel):
+    domain: str
+    mappings: Dict[str, Optional[str]]  # e.g. {"revenue": "orders.total_amount", "order_date": "orders.created_at"}
+    chart_preferences: Optional[List[str]] = None
+    confirmed_by_user: Optional[bool] = False  # Explicit user confirmation flag
 

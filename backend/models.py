@@ -1,7 +1,10 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Float, JSON, Text
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Float, JSON
 from sqlalchemy.orm import relationship
 from database import Base
-import datetime
+from datetime import datetime, timezone
+
+def utc_now():
+    return datetime.now(timezone.utc)
 
 class Tenant(Base):
     __tablename__ = "tenants"
@@ -11,7 +14,7 @@ class Tenant(Base):
     website = Column(String, nullable=True)
     industry = Column(String, nullable=True)
     address = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
     users = relationship("User", back_populates="tenant")
 
@@ -26,7 +29,7 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
     tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
     tenant = relationship("Tenant", back_populates="users")
 
@@ -48,7 +51,7 @@ class TenantInvite(Base):
     database_ids = Column(String, nullable=True) # Comma-separated list of database IDs
     expires_at = Column(DateTime, nullable=False)
     is_accepted = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
     tenant = relationship("Tenant")
 
@@ -61,10 +64,10 @@ class DatabaseConnection(Base):
     db_type = Column(String, nullable=False)
     host = Column(String, nullable=False)
     username = Column(String, nullable=False)
-    password = Column(String, nullable=False) # In production, this MUST be encrypted
+    password = Column(String, nullable=False) # Encrypted at rest using Fernet
     database = Column(String, nullable=False)
     status = Column(String, default="connected")
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
     
     tenant = relationship("Tenant")
 
@@ -79,7 +82,7 @@ class ApiKey(Base):
     status = Column(String, default="active") # active, revoked
     total_requests = Column(Integer, default=0)
     last_used_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
     
     tenant = relationship("Tenant")
 
@@ -95,7 +98,7 @@ class ChatbotConfig(Base):
     welcome_delay = Column(Integer, default=3)
     max_history = Column(Integer, default=10)
     sound_enabled = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
     
     tenant = relationship("Tenant")
 
@@ -113,7 +116,14 @@ class Document(Base):
     paragraph_count = Column(Integer, default=0)
     table_count = Column(Integer, default=0)
     image_count = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    progress = Column(Float, default=0.0)         # 0.0 to 1.0 processing progress
+    error_message = Column(Text, nullable=True)    # Diagnostic info on failure
+    total_pages = Column(Integer, default=0)       # Total pages in document
+    pages_processed = Column(Integer, default=0)   # Pages completed so far
+    visual_pages = Column(Integer, default=0)      # Pages that required VLM processing
+    celery_task_id = Column(String, nullable=True)
+    embedding_model = Column(String, default="all-MiniLM-L6-v2")
+    created_at = Column(DateTime, default=utc_now)
     tenant = relationship("Tenant")
     chunks = relationship("DocumentChunk", back_populates="document", cascade="all, delete-orphan")
 
@@ -124,8 +134,12 @@ class DocumentChunk(Base):
     document_id = Column(Integer, ForeignKey("documents.id"), nullable=False)
     content = Column(String, nullable=False)
     overlap_chars = Column(Integer, default=0)
-    chunk_index = Column(Integer, nullable=False) # Good practice to keep chunks in order
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    chunk_index = Column(Integer, nullable=False)
+    page_number = Column(Integer, nullable=True)
+    content_type = Column(String, default="text")       # "text" | "table" | "image"
+    section_heading = Column(String, nullable=True)
+    reference_id = Column(String, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
     
     document = relationship("Document", back_populates="chunks")
 
@@ -136,7 +150,7 @@ class PasswordResetOTP(Base):
     email = Column(String, index=True, nullable=False)
     otp_code = Column(String, nullable=False)
     expires_at = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
 class SchemaRegistry(Base):
     __tablename__ = "schema_registry"
@@ -146,14 +160,19 @@ class SchemaRegistry(Base):
     table_name = Column(String, nullable=False, index=True)
     column_name = Column(String, nullable=False, index=True)
     data_type = Column(String, nullable=False)
+    semantic_type = Column(String, default="UNKNOWN", nullable=True) # ID, UUID, DATE, DATETIME, NUMERIC_MEASURE, CURRENCY/AMOUNT, CATEGORY, TEXT, BOOLEAN, UNKNOWN
+    is_primary_key = Column(Boolean, default=False)
+    is_foreign_key = Column(Boolean, default=False)
+    foreign_key_target = Column(String, nullable=True) # e.g. "customers.id"
     is_measure = Column(Boolean, default=False)
     is_dimension = Column(Boolean, default=False)
     is_time_axis = Column(Boolean, default=False)
+    cardinality = Column(Integer, nullable=True)
     min_value = Column(Float, nullable=True)
     max_value = Column(Float, nullable=True)
     mean_value = Column(Float, nullable=True)
     null_percentage = Column(Float, default=0.0)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
 class KpiDefinition(Base):
     __tablename__ = "kpi_definitions"
@@ -162,21 +181,30 @@ class KpiDefinition(Base):
     tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
     connection_id = Column(Integer, ForeignKey("database_connections.id"), nullable=False)
     kpi_title = Column(String, nullable=False)
-    aggregation_function = Column(String, default="SUM") # SUM, AVG, COUNT, MAX, MIN
+    aggregation_function = Column(String, nullable=True) # SUM, AVG, COUNT, MAX, MIN, COUNT_DISTINCT
     target_column = Column(String, nullable=False)
     dimension_column = Column(String, nullable=True)
     time_column = Column(String, nullable=True)
-    default_chart_type = Column(String, default="Line") # Line, Bar, Donut, Scatter
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    default_chart_type = Column(String, default="Line") # Line, Bar, Donut, Scatter, Funnel, etc.
+    priority = Column(Integer, default=1)
+    reasoning = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
 
 class DashboardLayout(Base):
     __tablename__ = "dashboard_layouts"
 
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    connection_id = Column(Integer, ForeignKey("database_connections.id"), nullable=True)
     layout_name = Column(String, default="Default Layout")
+    business_domain = Column(String, nullable=True)
+    domain_mapping = Column(JSON, nullable=True) # Confirmed variable-to-column mappings
     widget_positions = Column(JSON, nullable=True)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    charts_config = Column(JSON, nullable=True)
+    filters_config = Column(JSON, nullable=True)
+    validation_warnings = Column(JSON, nullable=True)
+    used_fallback = Column(Boolean, default=False)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
 class AiInsight(Base):
     __tablename__ = "ai_insights"
@@ -190,7 +218,7 @@ class AiInsight(Base):
     confidence_score = Column(Integer, default=90)
     trend = Column(String, default="up") # up, down, neutral
     sparkline_values = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
 class ExecutedQuery(Base):
     __tablename__ = "executed_queries"
@@ -205,5 +233,53 @@ class ExecutedQuery(Base):
     rows_returned = Column(Integer, default=0)
     status = Column(String, default="success") # success, failed, blocked
     error_message = Column(Text, nullable=True)
-    executed_at = Column(DateTime, default=datetime.datetime.utcnow)
+    executed_at = Column(DateTime, default=utc_now)
 
+class QueryLog(Base):
+    __tablename__ = "query_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    database_id = Column(Integer, ForeignKey("database_connections.id"), nullable=True)
+    natural_query = Column(Text, nullable=True)
+    generated_sql = Column(Text, nullable=True)
+    status = Column(String(50), default="success")
+    execution_time_ms = Column(Float, default=0.0)
+    rows_returned = Column(Integer, default=0)
+    tokens_used = Column(Integer, default=0)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+
+    tenant = relationship("Tenant")
+    user = relationship("User")
+    database = relationship("DatabaseConnection")
+
+class Conversation(Base):
+    __tablename__ = "conversations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    title = Column(String, default="New Conversation")
+    platform = Column(String, default="web")
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    tenant = relationship("Tenant")
+    user = relationship("User")
+    messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=False)
+    sender_role = Column(String(20), nullable=False)
+    content = Column(Text, nullable=False)
+    sanitized_content = Column(Text, nullable=True)
+    query_type = Column(String(20), default="rag")
+    metadata_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+
+    conversation = relationship("Conversation", back_populates="messages")

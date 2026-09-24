@@ -39,6 +39,30 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+
+  /* ── Analytics Section Palette ─────────────────────────────── */
+  --analytics-blue: hsl(217, 91%, 60%);
+  --analytics-violet: hsl(263, 70%, 65%);
+  --analytics-emerald: hsl(152, 57%, 45%);
+  --analytics-amber: hsl(38, 92%, 50%);
+  --analytics-rose: hsl(346, 77%, 60%);
+  --analytics-cyan: hsl(188, 85%, 45%);
+
+  /* Glass surfaces (dark panels inside the light dashboard) */
+  --glass-bg: hsl(222, 47%, 8%);
+  --glass-bg-mid: hsl(220, 35%, 12%);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-border-hover: rgba(255, 255, 255, 0.14);
+
+  /* Analytics chart color array */
+  --ac-1: #6366f1;
+  --ac-2: #8b5cf6;
+  --ac-3: #06b6d4;
+  --ac-4: #10b981;
+  --ac-5: #f59e0b;
+  --ac-6: #ec4899;
+  --ac-7: #3b82f6;
+  --ac-8: #f97316;
 }
 
 .dark {

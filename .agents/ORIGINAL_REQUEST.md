@@ -1,42 +1,17 @@
 # Original User Request
 
-## 2026-08-05T06:59:37Z
+## Initial Request — 2026-08-05T21:47:50+05:00
 
-Reorganize the DataSpeakAI project directory into a disciplined, clean structure and establish an AI Agent Context System (AGENTS.md, structured docs/, CHANGELOG.md, and task templates) to support multi-developer collaboration using AI coding tools.
+You are the Project Orchestrator for DataSpeakAI.
+Your working directory is d:\dataspeak\.agents\orchestrator.
+Original user request is recorded at d:\dataspeak\.agents\ORIGINAL_REQUEST.md.
 
-Working directory: d:\dataspeak
-Integrity mode: development
+Please orchestrate the implementation of the core missing modules of DataSpeakAI:
+1. Security Hardening & Bug Fixes (Fernet encryption for stored DB passwords, parameterize raw SQL execution and sanitize dynamic identifiers, remove hardcoded secrets, authorize /admin route, fix SQLite inspection bug, align env vars VITE_API_BASE_URL).
+2. Conversational NL-to-SQL Query Engine (backend service backend/services/sql_engine.py, router /api/query with Gemini 2.5 Flash, read-only SELECT guardrails, interactive frontend query chat UI).
+3. RAG Knowledge Base Answer Synthesis (upgrade /api/documents/search with LLM answer synthesis).
+4. Dashboard Live Data Binding & Analytics (replace static mock data on DashboardOverview, AnalyticsPage, LogsPage, UsagePage, AdminPanel with live backend endpoints).
+5. Interactive ERD Visualizer & Widget Bundle (/api/databases/{db_id}/erd dynamic relationship endpoint, compile standalone embeddable JS chatbot widget bundle).
 
-## Requirements
-
-### R1. Directory Restructuring & Documentation Consolidation
-Move root-level documentation files, diagrams, SQL scripts, and module reports into organized subdirectories under docs/:
-- docs/architecture/ (workflow, activity diagrams, system design)
-- docs/database/ (ERDs, EERDs, SQL schemas)
-- docs/setup/ (setup guides, environment guides)
-- docs/reports/ (implementation reports, mock analyses, technical reports)
-
-Ensure root directory retains only essential runtime files (package.json, vite.config.ts, index.html, .gitignore, README.md, AGENTS.md, CHANGELOG.md).
-
-### R2. AI Agent Context Standard (AGENTS.md)
-Create a comprehensive AGENTS.md file at the root of the project to serve as the single source of truth for any AI agent (Antigravity, Cursor, Copilot, Claude Code) working on the codebase. It must include:
-- Executive Summary & Project Purpose.
-- Tech Stack Breakdown (Frontend, Backend, AI/RAG engine, Database).
-- Architecture & Key File Map (where components, routers, services, and schemas live).
-- Code Conventions & Engineering Rules (naming, error handling, SQL safety, environment variables).
-- Instructions for AI agents on how to read context before starting work.
-
-### R3. Multi-Developer Context Tracking (CHANGELOG.md & Session Logs)
-Create a CHANGELOG.md and a dedicated docs/sessions/ directory template system so team members and AI agents can:
-- Record work sessions, completed tasks, and architectural changes.
-- Provide prompt/task templates for team members delegating work to AI agents.
-- Maintain seamless context transfer between different developers and AI agents.
-
-## Acceptance Criteria
-
-### Project Organization & AI Context Readiness
-- [ ] Root directory cleaned: markdown/diagram/sql files relocated logically into docs/.
-- [ ] Operational check: npm run dev or build configurations are unaffected by doc relocation.
-- [ ] AGENTS.md created with full project context, architecture map, and coding guidelines for AI agents.
-- [ ] CHANGELOG.md initialized with project baseline history and session logging standard.
-- [ ] docs/templates/AI_TASK_TEMPLATE.md created for team members to write clear instructions for AI agents.
+Execute, review, challenge, and audit each milestone systematically. Ensure npm run build passes with 0 errors and python -c "import backend.main" succeeds.
+Report back to Sentinel when all milestones are finished and verified.

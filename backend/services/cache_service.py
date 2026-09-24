@@ -14,7 +14,7 @@ class InMemoryCacheService:
     def _key(self, tenant_id, cache_key):
         return f"{tenant_id}:{cache_key}"
 
-    def get_or_compute(self, tenant_id: int, cache_key: str, compute_fn: Callable[[], Any], ttl: int = None):
+    def get_or_compute(self, tenant_id: int, cache_key: str, compute_fn: Callable[[], Any], ttl: int | None = None):
         full_key = self._key(tenant_id, cache_key)
         ttl = ttl or self.default_ttl
         with self._lock:
@@ -30,5 +30,9 @@ class InMemoryCacheService:
         full_key = self._key(tenant_id, cache_key)
         with self._lock:
             self._store.pop(full_key, None)
+
+    def clear(self):
+        with self._lock:
+            self._store.clear()
 
 cache_service = InMemoryCacheService()

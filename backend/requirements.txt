@@ -20,3 +20,14 @@ requests
 python-dotenv
 pdfplumber
 pymupdf
+cryptography
+python-docx
+openpyxl
+python-pptx
+beautifulsoup4
+pandas
+aiohttp
+rank-bm25
+celery
+redis
+flower

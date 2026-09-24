@@ -67,8 +67,20 @@ export function AIInsightsPage() {
     if (!selectedDb) return;
     setGenerating(true);
     try {
-      await fetchInsightsForDb(selectedDb);
-      toast.success("Synthesized fresh AI business insights with Gemini 2.5 Flash!");
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${API_BASE_URL}/api/analytics/connections/${selectedDb}/ai-insights/generate`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setInsightsData(data);
+        toast.success("Synthesized fresh AI business insights with Gemini 2.5 Flash!");
+      } else {
+        toast.error("Failed to generate AI insights for connection");
+      }
+    } catch (err) {
+      toast.error("Error generating AI insights");
     } finally {
       setGenerating(false);
     }
@@ -83,6 +95,8 @@ export function AIInsightsPage() {
       fetchInsightsForDb(selectedDb);
     }
   }, [selectedDb]);
+
+  const hasInsights = insightsData && insightsData.status !== "not_generated" && insightsData.business_type;
 
   return (
     <div className="space-y-6">
@@ -122,8 +136,25 @@ export function AIInsightsPage() {
         </div>
       </div>
 
+      {/* Empty State when insights not yet generated */}
+      {!loading && insightsData && (!hasInsights) && (
+        <Card className="border-dashed border-2 bg-slate-50/50 p-8 text-center">
+          <div className="mx-auto w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center mb-3">
+            <Lightbulb className="w-6 h-6 text-blue-600" />
+          </div>
+          <h3 className="text-lg font-semibold text-slate-800">No AI Insights Generated Yet</h3>
+          <p className="text-sm text-slate-500 max-w-md mx-auto mt-1 mb-4">
+            Deterministic metrics are ready. Click "Re-Synthesize Insights" above to synthesize an executive narrative and actionable recommendations using Gemini 2.5 Flash.
+          </p>
+          <Button onClick={handleGenerateNew} disabled={generating} className="gap-2">
+            <Sparkles className="w-4 h-4" />
+            Synthesize Insights Now
+          </Button>
+        </Card>
+      )}
+
       {/* Business Domain Summary Banner */}
-      {insightsData && (
+      {hasInsights && (
         <Card className="bg-gradient-to-r from-blue-900 to-indigo-900 text-white border-none shadow-lg">
           <CardContent className="p-6 flex items-center justify-between gap-4">
             <div className="space-y-2">
@@ -141,7 +172,7 @@ export function AIInsightsPage() {
       )}
 
       {/* Key Metrics Cards */}
-      {insightsData && insightsData.key_metrics && (
+      {hasInsights && insightsData.key_metrics && (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
           {insightsData.key_metrics.map((km: any, idx: number) => (
             <Card key={idx} className="border shadow-sm">
@@ -168,7 +199,7 @@ export function AIInsightsPage() {
         <div className="flex justify-center p-12">
           <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
         </div>
-      ) : insightsData ? (
+      ) : hasInsights ? (
         <div className="grid md:grid-cols-2 gap-6">
           {/* Observations */}
           <Card className="border shadow-sm">
