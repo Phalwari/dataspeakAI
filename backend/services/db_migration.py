@@ -22,6 +22,9 @@ MIGRATION_COLUMNS = [
     ("schema_registry", "is_foreign_key", "BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE"),
     ("schema_registry", "foreign_key_target", "VARCHAR", "VARCHAR(255)"),
     ("dashboard_layouts", "domain_mapping", "JSON", "JSONB"),
+    ("dashboard_layouts", "document_id", "INTEGER", "INTEGER"),
+    ("dashboard_layouts", "source_type", "VARCHAR DEFAULT 'database'", "VARCHAR(50) DEFAULT 'database'"),
+    ("dashboard_layouts", "source_archetype", "VARCHAR DEFAULT 'relational_sql'", "VARCHAR(100) DEFAULT 'relational_sql'"),
     # Document processing & progress columns
     ("documents", "progress", "FLOAT DEFAULT 0.0", "FLOAT DEFAULT 0.0"),
     ("documents", "error_message", "TEXT", "TEXT"),

@@ -11,8 +11,9 @@ import { API_BASE_URL } from "../../config/api";
 import { toast } from "sonner";
 
 // Analytics child components
-import { AnalyticsHeader } from "../../components/analytics/AnalyticsHeader";
+import { AnalyticsHeader, type AnalyticsSourceItem } from "../../components/analytics/AnalyticsHeader";
 import { ProfilingProgressBar } from "../../components/analytics/ProfilingProgressBar";
+import { SourceArchetypeBanner } from "../../components/analytics/SourceArchetypeBanner";
 import { DomainSetupBanner } from "../../components/analytics/DomainSetupBanner";
 import { KpiSummaryStrip } from "../../components/analytics/KpiSummaryStrip";
 import { LiveExplorerCanvas } from "../../components/analytics/LiveExplorerCanvas";
@@ -39,6 +40,14 @@ const isIdCol = (name: string) => {
   );
 };
 
+const parseSource = (s: string) => {
+  if (!s || s === "all") return null;
+  if (s.startsWith("doc_")) return { type: "document" as const, id: parseInt(s.slice(4), 10) };
+  if (s.startsWith("db_")) return { type: "database" as const, id: parseInt(s.slice(3), 10) };
+  const num = parseInt(s, 10);
+  return isNaN(num) ? null : { type: "database" as const, id: num };
+};
+
 // ─────────────────────────────────────────────
 // Component
 // ─────────────────────────────────────────────
@@ -46,6 +55,7 @@ export function AnalyticsPage() {
   // ── Core state ─────────────────────────────────────────────
   const [dateRange, setDateRange] = useState("30days");
   const [databasesList, setDatabasesList] = useState<any[]>([]);
+  const [sourcesList, setSourcesList] = useState<AnalyticsSourceItem[]>([]);
   const [selectedDb, setSelectedDb] = useState<string>("all");
   const [dashboardData, setDashboardData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -81,7 +91,7 @@ export function AnalyticsPage() {
         const data = await res.json();
         setDatabasesList(data);
         if (data.length > 0 && selectedDb === "all") {
-          setSelectedDb(data[0].id.toString());
+          setSelectedDb(`db_${data[0].id}`);
         }
       }
     } catch {
@@ -89,8 +99,36 @@ export function AnalyticsPage() {
     }
   };
 
-  const fetchDashboardData = async (dbId: string, range: string) => {
-    if (!dbId || dbId === "all") return;
+  const fetchSources = async () => {
+    try {
+      const token = localStorage.getItem("token") || localStorage.getItem("access_token");
+      const res = await fetch(`${API_BASE_URL}/api/analytics/sources`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data: AnalyticsSourceItem[] = await res.json();
+        setSourcesList(data);
+
+        const dbs = data
+          .filter((s) => s.source_type === "database")
+          .map((s) => ({ id: s.raw_id || parseInt(s.id.replace("db_", ""), 10), name: s.name, db_type: s.db_type }));
+        setDatabasesList(dbs);
+
+        if (data.length > 0 && selectedDb === "all") {
+          setSelectedDb(data[0].id);
+        }
+      } else {
+        fetchDatabases();
+      }
+    } catch {
+      fetchDatabases();
+    }
+  };
+
+  const fetchDashboardData = async (sourceKey: string, range: string) => {
+    if (!sourceKey || sourceKey === "all") return;
+    const parsed = parseSource(sourceKey);
+    if (!parsed) return;
 
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -101,14 +139,23 @@ export function AnalyticsPage() {
     setLoading(true);
     try {
       const token = localStorage.getItem("token") || localStorage.getItem("access_token");
-      const res = await fetch(`${API_BASE_URL}/api/analytics/dashboard/${dbId}?date_range=${range}`, {
+      const endpoint = `${API_BASE_URL}/api/analytics/sources/${parsed.type}/${parsed.id}/dashboard?date_range=${range}`;
+      const res = await fetch(endpoint, {
         headers: { Authorization: `Bearer ${token}` },
         signal: controller.signal
       });
       if (res.ok) {
         const data = await res.json();
-        if (dbId !== selectedDbRef.current) return;
+        if (sourceKey !== selectedDbRef.current) return;
         setDashboardData(data);
+
+        // Auto-select top recommended chart if available
+        if (data.recommendations && data.recommendations.length > 0) {
+          const topRec = data.recommendations[0];
+          if (["Bar", "Line", "Area", "Donut", "Scatter"].includes(topRec.chart_type)) {
+            setChartType(topRec.chart_type);
+          }
+        }
 
         if (data.schema_summary && data.schema_summary.length > 0) {
           const tables = Array.from(new Set(data.schema_summary.map((s: any) => s.table_name))) as string[];
@@ -131,7 +178,7 @@ export function AnalyticsPage() {
           const qAgg = tMeasures.length > 0 ? "SUM" : "COUNT";
           setSelectedAgg(qAgg);
 
-          runInteractiveQuery(dbId, initTable, qMeas, initDim, qAgg);
+          runInteractiveQuery(sourceKey, initTable, qMeas, initDim, qAgg);
         }
       }
     } catch (err: any) {
@@ -139,18 +186,21 @@ export function AnalyticsPage() {
         toast.error("Failed to load live dashboard analytics");
       }
     } finally {
-      if (dbId === selectedDbRef.current) {
+      if (sourceKey === selectedDbRef.current) {
         setLoading(false);
       }
     }
   };
 
-  const runInteractiveQuery = async (dbId: string, tbl: string, meas: string, dim: string, agg: string) => {
-    if (!dbId || dbId === "all" || !tbl) return;
+  const runInteractiveQuery = async (sourceKey: string, tbl: string, meas: string, dim: string, agg: string) => {
+    if (!sourceKey || sourceKey === "all" || !tbl) return;
+    const parsed = parseSource(sourceKey);
+    if (!parsed) return;
+
     setQueryLoading(true);
     try {
       const token = localStorage.getItem("token") || localStorage.getItem("access_token");
-      const res = await fetch(`${API_BASE_URL}/api/analytics/dashboard/${dbId}/query`, {
+      const res = await fetch(`${API_BASE_URL}/api/analytics/sources/${parsed.type}/${parsed.id}/query`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -176,10 +226,27 @@ export function AnalyticsPage() {
 
   const handleTriggerProfile = async () => {
     if (!selectedDb || selectedDb === "all") return;
+    const parsed = parseSource(selectedDb);
+    if (!parsed) return;
+
     setIsProfiling(true);
     try {
       const token = localStorage.getItem("token") || localStorage.getItem("access_token");
-      const res = await fetch(`${API_BASE_URL}/api/analytics/connections/${selectedDb}/profile`, {
+      if (parsed.type === "document") {
+        const res = await fetch(`${API_BASE_URL}/api/analytics/sources/document/${parsed.id}/discover`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setIsProfiling(false);
+        if (res.ok) {
+          toast.success("Document Source Profile Refreshed!");
+          fetchDashboardData(selectedDb, dateRange);
+        } else {
+          toast.error("Failed to discover document source");
+        }
+        return;
+      }
+
+      const res = await fetch(`${API_BASE_URL}/api/analytics/connections/${parsed.id}/profile`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -189,7 +256,7 @@ export function AnalyticsPage() {
         const pollInterval = setInterval(async () => {
           attempts++;
           try {
-            const sRes = await fetch(`${API_BASE_URL}/api/analytics/connections/${selectedDb}/profile-status`, {
+            const sRes = await fetch(`${API_BASE_URL}/api/analytics/connections/${parsed.id}/profile-status`, {
               headers: { Authorization: `Bearer ${token}` }
             });
             if (sRes.ok) {
@@ -215,12 +282,22 @@ export function AnalyticsPage() {
       }
     } catch {
       setIsProfiling(false);
-      toast.error("Failed to profile database schema");
+      toast.error("Failed to profile source schema");
     }
   };
 
+  const handleSelectReferral = (recChartType: string, recMetric?: string) => {
+    if (["Bar", "Line", "Area", "Donut", "Scatter"].includes(recChartType)) {
+      setChartType(recChartType);
+    }
+    if (recMetric && availableMeasures.includes(recMetric)) {
+      handleMeasureChange(recMetric);
+    }
+    toast.info(`Switched to recommended ${recChartType} visualization`);
+  };
+
   // ── Lifecycle ──────────────────────────────────────────────
-  useEffect(() => { fetchDatabases(); }, []);
+  useEffect(() => { fetchSources(); }, []);
 
   useEffect(() => {
     if (selectedDb && selectedDb !== "all") {
@@ -304,6 +381,7 @@ export function AnalyticsPage() {
         selectedDb={selectedDb}
         dateRange={dateRange}
         databasesList={databasesList}
+        sourcesList={sourcesList}
         isProfiling={isProfiling}
         dashboardData={dashboardData}
         onDbChange={setSelectedDb}
@@ -314,6 +392,15 @@ export function AnalyticsPage() {
 
       {/* ── 2. Profiling progress bar ─────────────────────────── */}
       <ProfilingProgressBar isProfiling={isProfiling} />
+
+      {/* ── 2.5 Discovered Source Archetype Banner ───────────── */}
+      {selectedDb && selectedDb !== "all" && dashboardData?.discovery && (
+        <SourceArchetypeBanner
+          discovery={dashboardData.discovery}
+          recommendations={dashboardData.recommendations}
+          onSelectReferral={handleSelectReferral}
+        />
+      )}
 
       {/* ── 3. Domain setup banner (when unmapped) ────────────── */}
       <AnimatePresence>
@@ -348,6 +435,7 @@ export function AnalyticsPage() {
             chartType={chartType}
             queryResult={queryResult}
             queryLoading={queryLoading}
+            recommendedChartTypes={dashboardData?.recommendations?.map((r: any) => r.chart_type) || []}
             onTableChange={handleTableChange}
             onMeasureChange={handleMeasureChange}
             onDimensionChange={handleDimensionChange}

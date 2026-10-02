@@ -17,7 +17,32 @@ To maintain seamless multi-developer and AI agent collaboration:
 
 ## [Unreleased]
 
-<<<<<<< HEAD
+- **Phase 1.6.1: Tabular Document Introspection & Multi-Chart Layout Hardening (`backend/services/source_profiler.py`, `backend/services/adaptive_chart_recommender.py`, `src/app/components/analytics/LiveExplorerCanvas.tsx`, `AISynthesizedGrid.tsx`, `tests/test_source_profiler.py`)**:
+  - **HTML Table Extraction Parser (`backend/services/source_profiler.py`):** Built `_parse_html_table` using BeautifulSoup to introspect HTML tables (`<table border='1' class='extracted-table'>`) generated during document ingestion (e.g. `client_data.csv`). Resolved an issue where tabular documents showed 0 Measures, 0 Dimensions, and 0 Time Axes. Accurately extracted 18 numeric measures, 4 categorical dimensions, and 4 date/time axes.
+  - **Live Explorer Layout Geometry Defense (`src/app/components/analytics/LiveExplorerCanvas.tsx`):** Replaced `if (availableTables.length === 0) return null` with a styled glass empty-state component featuring `Table2` icon and informative guidance. Ensures the 3-column studio grid geometry never collapses or leaves blank column voids on non-tabular sources.
+  - **Auto View Mode for AI Grid (`src/app/components/analytics/AISynthesizedGrid.tsx`):** Added `"Auto"` as the default view mode in `GLOBAL_CHART_TYPES`. Each card in the AI Synthesized Dashboard now renders in its distinctive recommended format (Bar for comparative breakdown, Donut for category share, Line for chronological trajectories) while still allowing users to force a specific chart type across all cards via the View tabs.
+  - **Live Spreadsheet Metric Aggregations (`backend/services/adaptive_chart_recommender.py`):** Computed real-time top-5 category sums for Bar recommendations, category frequency counts for Donut recommendations, and chronological progressions for Line recommendations directly from parsed spreadsheet rows.
+  - **Automated Verification:** Added `test_parse_html_table` to `tests/test_source_profiler.py`. Full test suite passed (320 passed, 0 failures). Frontend production build passed cleanly (`npm run build` → ✓ 2763 modules transformed, 0 errors).
+
+- **Phase 1.6: Source-Aware Discovery & Adaptive Analytics Visualizations (`backend/services/source_profiler.py`, `backend/services/adaptive_chart_recommender.py`, `backend/routers/analytics.py`, `src/app/components/analytics/SourceArchetypeBanner.tsx`, `AnalyticsHeader.tsx`, `LiveExplorerCanvas.tsx`, `AnalyticsPage.tsx`)**:
+  - **Automated Source Archetype Discovery (`backend/services/source_profiler.py`):** Built source classifier introspecting connected SQL databases (PostgreSQL, MySQL, SQLite) and uploaded document sources (CSVs, Excel sheets, and document knowledge bases). Classifies sources into `relational_timeseries`, `relational_categorical`, `tabular_spreadsheet`, and `document_knowledge` by analyzing temporal axes, measure/dimension ratios, cardinalities, and extracted table chunks. Includes markdown table chunk parser (`_parse_markdown_table`).
+  - **Adaptive Chart Recommendation Engine (`backend/services/adaptive_chart_recommender.py`):** Developed rule-based and semantic recommendation engine generating visualization recommendations tailored to data shapes and modalities:
+    - *Relational Time-Series:* Recommends velocity trend Line charts, cumulative volume Area charts, categorical breakdown Bar charts, and headline KPI cards.
+    - *Relational Categorical:* Recommends proportional share Donut charts, ranked Bar charts, bivariate correlation Scatter plots (when 2+ continuous numeric measures exist), and average KPI cards.
+    - *Tabular Spreadsheets:* Recommends direct column Bar charts, row composition Donut charts, horizontal ranking Bar charts, and total KPI cards.
+    - *Document Knowledge Base:* Recommends modality breakdown Donut charts (text vs table vs image), page content density Area curves, extraction yield Bar charts, and indexed chunk KPI cards.
+  - **Unified Backend Analytics API (`backend/routers/analytics.py`):**
+    - Added `GET /api/analytics/sources`: Unified source catalog returning all database connections and documents with detected archetypes.
+    - Added `GET /api/analytics/sources/{type}/{id}/discover`: On-demand source archetype discovery and adaptive visualization recommendations.
+    - Added `GET /api/analytics/sources/{type}/{id}/dashboard`: Unified dashboard endpoint serving both SQL database metrics and document knowledge/tabular metrics.
+    - Added `POST /api/analytics/sources/{type}/{id}/query`: Unified query runner supporting SQL queries and structured document table aggregations (SUM, AVG, MAX, MIN, COUNT).
+    - Preserved 100% backward compatibility for existing `/dashboard/{connection_id}` and `/connections/{connection_id}/profile` endpoints.
+  - **Database Models & Auto-Migration (`backend/models.py`, `backend/services/db_migration.py`):** Added `source_type`, `source_archetype`, and `document_id` columns to `DashboardLayout` with idempotent auto-migration across SQLite and PostgreSQL.
+  - **Discovered Source Archetype Banner (`src/app/components/analytics/SourceArchetypeBanner.tsx`):** Created glassmorphic banner rendering discovered archetype identity, archetype descriptions, structural badges (tables, measures, dimensions, time axis), and interactive recommendation referral pills.
+  - **Grouped Source Selector (`src/app/components/analytics/AnalyticsHeader.tsx`):** Enhanced header dropdown to categorize sources into "Relational Databases" and "Document Data Sources" with distinct modality icons, plus a pulsing Discovered Archetype badge in the header bar.
+  - **Interactive Referral Wiring (`src/app/components/analytics/LiveExplorerCanvas.tsx`, `AnalyticsPage.tsx`):** Wired chart buttons in the Live Explorer to highlight recommended chart types with glowing star indicators (`⭐ Recommended`). Clicking recommendation referral pills in the archetype banner instantly switches and visualizes the recommended chart in the explorer.
+  - **Automated Verification:** Added 10 unit tests in `tests/test_source_profiler.py` and `tests/test_adaptive_chart_recommender.py`. Full regression suite reached 319 passing tests with 0 failures. Frontend production build compiled cleanly (`npm run build` → ✓ 2763 modules transformed, 0 errors).
+
 - **Analytics Page Full Frontend Overhaul — Task 1.2 (`src/app/pages/dashboard/AnalyticsPage.tsx`, `src/app/components/analytics/`)**:
   - **Monolith Decomposition:** Rewrote 863-line `AnalyticsPage.tsx` into a ~250-line orchestrator composing 9 focused child components. All original data-fetch logic (`fetchDatabases`, `fetchDashboardData`, `runInteractiveQuery`, `handleTriggerProfile`) preserved 100% unchanged.
   - **Mock Data Removal (Task 1.2):** Eliminated all static mock arrays (`queryTrendsData`, `topTablesData`, `databaseDistribution`, `dataGrowthData`). Page now derives all display data from live backend API responses.
@@ -131,8 +156,6 @@ To maintain seamless multi-developer and AI agent collaboration:
   - **Semantic Frontend Stat Labels:** Dynamically updated summary cards in `AnalyticsPage.tsx` to render mathematically accurate labels (`Total Records` for `*`, `Distinct Count` for `COUNT_DISTINCT`, `Non-null Count` for `COUNT(col)`, `Sample Count` for numeric measures).
   - **Schema Parity Migration:** Synchronized 11 missing columns for `documents` and `document_chunks` in `db_migration.py` and executed non-destructive schema migrations across both SQLite databases.
 
-=======
->>>>>>> origin/main
 - **Master Engineering Roadmap & Task Tracker ([`todo.md`](file:///d:/dataspeak/todo.md))**:
   - Established canonical project-wide backlog organized into sequential prioritized phases (P0 to P3): Phase 1 (Frontend Analytics Wiring), Phase 2 (Embeddable Widget), Phase 3 (AI Insights Engine), Phase 4 (Enterprise Database Schemas), Phase 5 (Interactive ERD Generator), and Phase 6 (Production & Billing Hardening).
   - Defined mandatory 4-step task lifecycle protocol for AI agents and human developers.
@@ -140,7 +163,6 @@ To maintain seamless multi-developer and AI agent collaboration:
 - **AI Agent Protocol & Instruction Standardization ([`AGENTS.md`](file:///d:/dataspeak/AGENTS.md), [`Guidelines.md`](file:///d:/dataspeak/docs/setup/Guidelines.md), [`AI_TASK_TEMPLATE.md`](file:///d:/dataspeak/docs/templates/AI_TASK_TEMPLATE.md))**:
   - Codified Section 5.5 in `AGENTS.md`: Mandatory rules requiring agents to mark tasks as `[x]`, append completion metadata, move completed items to the Archived section in `todo.md`, and log updates under `## [Unreleased]` in `CHANGELOG.md`.
   - Updated `Guidelines.md` and `AI_TASK_TEMPLATE.md` to enforce `todo.md` and `CHANGELOG.md` synchronization across all delegated agent tasks.
-<<<<<<< HEAD
 
 - **Pyright / Pylance Static Typing Hardening & Test Isolation (`backend/routers/analytics.py`, `backend/services/document_db_profiler.py`, `backend/services/metric_adapter.py`, `backend/services/cache_service.py`, `tests/`, `scratch/`)**:
   - **Analytics Router Typing:** Explicitly cast `current_user.tenant_id` (`Column[int]`) to integer `t_id` across `trigger_schema_profile`, `get_profile_status`, `get_dashboard_data`, `execute_dashboard_query`, `invalidate_dashboard_cache`, `get_connection_ai_insights`, `get_suggested_mappings`, and `apply_user_confirmed_mapping`, eliminating all Pyright type mismatch errors on `get_owned_connection` and `MetricRequest`.
@@ -164,8 +186,6 @@ To maintain seamless multi-developer and AI agent collaboration:
   - **Guided Reliability API Endpoints (`backend/routers/analytics.py`):** Added `GET /api/analytics/domains`, `POST /api/analytics/connections/{id}/suggest-mapping`, and `POST /api/analytics/connections/{id}/apply-mapping`. Validates columns against SchemaRegistry and produces deterministic `KpiDefinition` and `DashboardLayout` records with zero fabricated data.
   - **Comprehensive Verification Suite (`scratch/test_guided_mapping_engine.py`):** Validated semantic types, domain suggestions, unit price guards, FK detection, unknown custom dataset generic fallback, column rejection, and deterministic KPI generation.
 
-=======
->>>>>>> origin/main
 - **Default Superadmin Seed & Auto-Initialization (`backend/scripts/seed_admin.py`, `backend/main.py`, `LoginPage.tsx`)**:
 
   - Implemented automatic database seeding on startup ensuring a default verified Superadmin user (`admin@dataspeak.ai` / `AdminPassword123!`) and default tenant exist out-of-the-box.

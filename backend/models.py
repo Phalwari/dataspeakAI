@@ -196,6 +196,9 @@ class DashboardLayout(Base):
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
     connection_id = Column(Integer, ForeignKey("database_connections.id"), nullable=True)
+    document_id = Column(Integer, ForeignKey("documents.id"), nullable=True)
+    source_type = Column(String, default="database") # database, document
+    source_archetype = Column(String, default="relational_sql") # relational_timeseries, relational_categorical, tabular_spreadsheet, document_knowledge
     layout_name = Column(String, default="Default Layout")
     business_domain = Column(String, nullable=True)
     domain_mapping = Column(JSON, nullable=True) # Confirmed variable-to-column mappings

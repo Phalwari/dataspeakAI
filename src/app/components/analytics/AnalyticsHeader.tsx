@@ -12,6 +12,9 @@ import {
   CheckCircle2,
   Loader2,
   AlertTriangle,
+  Database,
+  FileSpreadsheet,
+  BookOpen,
 } from "lucide-react";
 import { Button } from "../ui/button";
 import {
@@ -22,10 +25,21 @@ import {
   SelectValue,
 } from "../ui/select";
 
+export interface AnalyticsSourceItem {
+  id: string;
+  raw_id?: number;
+  source_type?: "database" | "document";
+  name: string;
+  db_type: string;
+  archetype?: string;
+  archetype_display_name?: string;
+}
+
 interface AnalyticsHeaderProps {
   selectedDb: string;
   dateRange: string;
-  databasesList: Array<{ id: number; name: string; db_type: string }>;
+  databasesList?: Array<{ id: number; name: string; db_type: string }>;
+  sourcesList?: AnalyticsSourceItem[];
   isProfiling: boolean;
   dashboardData: any;
   onDbChange: (id: string) => void;
@@ -37,7 +51,8 @@ interface AnalyticsHeaderProps {
 export function AnalyticsHeader({
   selectedDb,
   dateRange,
-  databasesList,
+  databasesList = [],
+  sourcesList,
   isProfiling,
   dashboardData,
   onDbChange,
@@ -48,6 +63,20 @@ export function AnalyticsHeader({
   const kpiCount = dashboardData?.kpis?.length ?? 0;
   const businessDomain = dashboardData?.business_domain;
   const usedFallback = dashboardData?.used_fallback;
+  const archetypeDisplayName = dashboardData?.discovery?.archetype_display_name;
+
+  const dbSources = sourcesList
+    ? sourcesList.filter((s) => s.source_type === "database")
+    : (databasesList || []).map((db) => ({
+        id: db.id.toString(),
+        name: db.name,
+        db_type: db.db_type,
+        source_type: "database" as const,
+      }));
+
+  const docSources = sourcesList
+    ? sourcesList.filter((s) => s.source_type === "document")
+    : [];
 
   return (
     <motion.div
@@ -68,9 +97,17 @@ export function AnalyticsHeader({
               Analytics &amp; Visualization
             </h1>
             <p className="text-[11px] text-slate-400 mt-1">
-              Live database intelligence &amp; synthesized metrics
+              Live multi-modal data intelligence &amp; adaptive visualizations
             </p>
           </div>
+
+          {/* Archetype badge */}
+          {archetypeDisplayName && (
+            <span className="hidden xl:inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900 border border-slate-700/80 text-xs font-semibold text-slate-200">
+              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+              {archetypeDisplayName}
+            </span>
+          )}
 
           {/* Domain badge */}
           {businessDomain && (
@@ -108,16 +145,49 @@ export function AnalyticsHeader({
             </motion.div>
           )}
 
-          {/* DB Selector */}
+          {/* Unified Source Selector */}
           <Select value={selectedDb} onValueChange={onDbChange}>
-            <SelectTrigger className="w-48 bg-slate-900/90 border-slate-700/80 text-white text-xs h-9 hover:border-slate-600 transition-colors">
-              <SelectValue placeholder="Select Database" />
+            <SelectTrigger className="w-56 bg-slate-900/90 border-slate-700/80 text-white text-xs h-9 hover:border-slate-600 transition-colors">
+              <SelectValue placeholder="Select Data Source" />
             </SelectTrigger>
-            <SelectContent className="bg-slate-900 border-slate-700 text-white">
-              <SelectItem value="all">All Connections</SelectItem>
-              {databasesList.map((db) => (
-                <SelectItem key={db.id} value={db.id.toString()}>
-                  {db.name} ({db.db_type})
+            <SelectContent className="bg-slate-900 border-slate-700 text-white max-h-80">
+              <SelectItem value="all">
+                <span className="font-semibold">All Connections</span>
+              </SelectItem>
+
+              {dbSources.length > 0 && (
+                <div className="px-2 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5 mt-1">
+                  <Database className="w-3 h-3 text-cyan-400" />
+                  <span>Relational Databases</span>
+                </div>
+              )}
+              {dbSources.map((db) => (
+                <SelectItem key={db.id} value={db.id}>
+                  <div className="flex items-center gap-2">
+                    <Database className="w-3.5 h-3.5 text-cyan-400/80" />
+                    <span>{db.name}</span>
+                    <span className="text-[10px] text-slate-500 font-mono">({db.db_type})</span>
+                  </div>
+                </SelectItem>
+              ))}
+
+              {docSources.length > 0 && (
+                <div className="px-2 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5 mt-2 border-t border-slate-800">
+                  <FileSpreadsheet className="w-3 h-3 text-emerald-400" />
+                  <span>Document Data Sources</span>
+                </div>
+              )}
+              {docSources.map((doc) => (
+                <SelectItem key={doc.id} value={doc.id}>
+                  <div className="flex items-center gap-2">
+                    {doc.archetype === "tabular_spreadsheet" ? (
+                      <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+                    ) : (
+                      <BookOpen className="w-3.5 h-3.5 text-amber-400" />
+                    )}
+                    <span>{doc.name}</span>
+                    <span className="text-[10px] text-slate-500 font-mono">({doc.db_type})</span>
+                  </div>
                 </SelectItem>
               ))}
             </SelectContent>

@@ -8,7 +8,7 @@ import { motion } from "motion/react";
 import { Sparkles, AlertTriangle, Info, Loader2, BarChart2 } from "lucide-react";
 import { ChartRenderer, CHART_COLORS } from "./ChartRenderer";
 
-const GLOBAL_CHART_TYPES = ["Bar", "Line", "Area", "Donut", "Scatter"];
+const GLOBAL_CHART_TYPES = ["Auto", "Bar", "Line", "Area", "Donut", "Scatter"];
 
 interface AISynthesizedGridProps {
   dashboardData: any;
@@ -17,7 +17,7 @@ interface AISynthesizedGridProps {
 }
 
 export function AISynthesizedGrid({ dashboardData, loading, onOpenWizard }: AISynthesizedGridProps) {
-  const [globalChartType, setGlobalChartType] = useState<string>("Bar");
+  const [globalChartType, setGlobalChartType] = useState<string>("Auto");
   const [chartTypeOverrides, setChartTypeOverrides] = useState<Record<string | number, string>>({});
 
   if (loading) {
@@ -141,7 +141,9 @@ export function AISynthesizedGrid({ dashboardData, loading, onOpenWizard }: AISy
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 flex-1">
         {charts.slice(0, 4).map((chart: any, idx: number) => {
           const cardKey = chart.id ?? chart.title ?? idx;
-          const activeType = chartTypeOverrides[cardKey] ?? globalChartType ?? chart.chart_type ?? "Bar";
+          const activeType =
+            chartTypeOverrides[cardKey] ??
+            (globalChartType === "Auto" ? (chart.chart_type || "Bar") : globalChartType);
           const isError = chart.status === "error";
           const chartData = chart.data || [];
           const isScalarKpi = (chartData.length === 1 && !chart.dimension_column) || chart.chart_type === "KPI";

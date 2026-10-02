@@ -5,7 +5,7 @@
  * Pure frontend — no backend files touched.
  */
 import { motion, AnimatePresence } from "motion/react";
-import { Activity, Loader2, Copy, Check } from "lucide-react";
+import { Activity, Loader2, Copy, Check, Table2 } from "lucide-react";
 import { useState } from "react";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -33,6 +33,7 @@ interface LiveExplorerCanvasProps {
   chartType: string;
   queryResult: any;
   queryLoading: boolean;
+  recommendedChartTypes?: string[];
   onTableChange: (t: string) => void;
   onMeasureChange: (m: string) => void;
   onDimensionChange: (d: string) => void;
@@ -51,6 +52,7 @@ export function LiveExplorerCanvas({
   chartType,
   queryResult,
   queryLoading,
+  recommendedChartTypes = [],
   onTableChange,
   onMeasureChange,
   onDimensionChange,
@@ -59,7 +61,37 @@ export function LiveExplorerCanvas({
 }: LiveExplorerCanvasProps) {
   const [copied, setCopied] = useState(false);
 
-  if (availableTables.length === 0) return null;
+  if (availableTables.length === 0) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.45, ease: "easeOut", delay: 0.1 }}
+        className="rounded-2xl border border-slate-800/80 overflow-hidden shadow-2xl flex-1 flex flex-col min-h-[380px]"
+        style={{ background: "#0e1526" }}
+      >
+        <div className="px-5 py-3 border-b border-white/[0.06] flex items-center justify-between bg-white/[0.02]">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-slate-500" />
+            <h2 className="text-xs font-bold tracking-widest text-slate-300 uppercase">
+              Live Explorer Canvas
+            </h2>
+          </div>
+        </div>
+        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+          <div className="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center mb-3">
+            <Table2 className="w-6 h-6 text-indigo-400" />
+          </div>
+          <h3 className="text-sm font-semibold text-slate-200 mb-1">
+            No Tabular Entities Available
+          </h3>
+          <p className="text-xs text-slate-400 max-w-xs leading-relaxed">
+            This source does not contain tabular records or schema measures. Select a tabular document or connected database to query interactively.
+          </p>
+        </div>
+      </motion.div>
+    );
+  }
 
   const sqlPreview = selectedDimension
     ? `SELECT "${selectedDimension}", ${selectedAgg}("${selectedMeasure}") FROM "${selectedTable}"`
@@ -95,19 +127,28 @@ export function LiveExplorerCanvas({
           </h2>
         </div>
         <div className="flex items-center gap-1 p-1 rounded-lg bg-black/30 border border-white/[0.08]">
-          {CHART_TYPES.map((ct) => (
-            <button
-              key={ct.id}
-              onClick={() => onChartTypeChange(ct.id)}
-              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all duration-150 ${
-                chartType === ct.id
-                  ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/40"
-                  : "text-slate-400 hover:text-white hover:bg-white/[0.06]"
-              }`}
-            >
-              {ct.label}
-            </button>
-          ))}
+          {CHART_TYPES.map((ct) => {
+            const isRec = recommendedChartTypes?.includes(ct.id);
+            return (
+              <button
+                key={ct.id}
+                onClick={() => onChartTypeChange(ct.id)}
+                className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all duration-150 flex items-center gap-1.5 ${
+                  chartType === ct.id
+                    ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/40"
+                    : isRec
+                    ? "text-amber-300 hover:text-white hover:bg-white/[0.08] bg-amber-500/10 border border-amber-500/30"
+                    : "text-slate-400 hover:text-white hover:bg-white/[0.06]"
+                }`}
+                title={isRec ? "⭐ Recommended by Source Archetype" : undefined}
+              >
+                {isRec && chartType !== ct.id && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                )}
+                {ct.label}
+              </button>
+            );
+          })}
         </div>
       </div>
 

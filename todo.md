@@ -46,14 +46,6 @@ Every AI agent working on this repository **MUST** adhere to this 4-step workflo
   - **Details:** Replace static mock constants (`stats`, `queryData`, `databaseActivity`, `recentQueries`) with live data fetched from `GET /api/analytics/overview`. Add loading skeletons and error states with Sonner toast feedback.
   - **Acceptance Criteria:** Real-time KPI counts (queries, databases, documents, API calls), 7-day query timeline chart, and recent query table render live tenant data.
 
-<<<<<<< HEAD
-
-=======
-- [ ] **Task 1.2 — Wire Analytics & Visualization Page to Live Trends API**
-  - **Target Files:** [`src/app/pages/dashboard/AnalyticsPage.tsx`](file:///d:/dataspeak/src/app/pages/dashboard/AnalyticsPage.tsx), [`backend/routers/analytics.py`](file:///d:/dataspeak/backend/routers/analytics.py)
-  - **Details:** Replace static arrays (`queryTrendsData`, `topTablesData`, `databaseDistribution`, `dataGrowthData`) with `GET /api/analytics/trends`. Connect database filter dropdown and date range selector to backend query params.
-  - **Acceptance Criteria:** Recharts graphs display live query trends, top queried tables, database type distribution, latency, and success rates.
->>>>>>> origin/main
 
 - [ ] **Task 1.3 — Wire Query Logs Page with Pagination, Search & Filtering**
   - **Target Files:** [`src/app/pages/dashboard/LogsPage.tsx`](file:///d:/dataspeak/src/app/pages/dashboard/LogsPage.tsx), [`backend/routers/analytics.py`](file:///d:/dataspeak/backend/routers/analytics.py)
@@ -187,7 +179,10 @@ Every AI agent working on this repository **MUST** adhere to this 4-step workflo
 
 ## 📦 Archived / Completed Tasks
 
-<<<<<<< HEAD
+- [x] **Phase 1.6 & 1.6.1: Source-Aware Discovery, Adaptive Visualizations Studio & Tabular Introspection Hardening**
+  - *Completed:* 2026-10-02 | Antigravity AI Orchestrator & Visualization Specialist
+  - *Summary:* Discovered database and document source archetypes (relational time-series, categorical SQL, tabular spreadsheets, document knowledge bases); built automated source profiler in `source_profiler.py` and adaptive recommendation engine in `adaptive_chart_recommender.py` (Line/Area for time-series, Donut/Bar for categorical data, Scatter for multi-metric correlations, density/modality charts for documents); added unified endpoints `GET /api/analytics/sources`, `GET /sources/{type}/{id}/discover`, `GET /sources/{type}/{id}/dashboard`, `POST /sources/{type}/{id}/query` in `analytics.py`; upgraded `AnalyticsHeader.tsx` with grouped sources; created `SourceArchetypeBanner.tsx` with referral pills; wired `LiveExplorerCanvas.tsx` with recommendation star indicators. Resolved HTML table chunk parsing in `source_profiler.py` via BeautifulSoup, accurately detecting 18 measures, 4 dimensions, and 4 time axes on `client_data.csv`. Hardened `LiveExplorerCanvas.tsx` to render an elegant glass empty state instead of collapsing to `null`. Added "Auto" mode to `AISynthesizedGrid.tsx` preserving diverse chart types (Bar, Donut, Line). Added unit tests in `test_source_profiler.py` and `test_adaptive_chart_recommender.py`; full regression reached 320 passing tests with 0 failures and frontend build passed with 0 errors across 2,763 modules.
+
 - [x] **Task 1.2 — Analytics & Visualization Page: Full Frontend Overhaul & Domain Mapping Wizard**
   - *Completed:* 2026-09-24 | Antigravity AI Engineer
   - *Summary:* Removed all static mock arrays (`queryTrendsData`, `topTablesData`, `databaseDistribution`, `dataGrowthData`). Decomposed 863-line AnalyticsPage.tsx monolith into 9 focused components: `ChartRenderer`, `AnalyticsHeader`, `KpiSummaryStrip`, `LiveExplorerCanvas`, `AISynthesizedGrid`, `DomainSetupBanner`, `SchemaHealthPanel`, `AIInsightsSummaryCard`, `DomainMappingWizard`. Added 3-step guided Domain Mapping Wizard surfacing `/domains`, `/suggest-mapping`, `/apply-mapping` endpoints. Added inline AI Insights card and Schema Health panel. Build: ✓ 2762 modules, 0 errors.
@@ -231,9 +226,7 @@ Every AI agent working on this repository **MUST** adhere to this 4-step workflo
 - [x] **Phase 1.5D.2: Atomic Regeneration Safety & Dimension Enforcement**
   - *Completed:* 2026-09-23 | Antigravity AI Engineer
   - *Summary:* Fixed zero-valid regeneration dashboard wipeout risk by validating in-memory before deletion; unified KPI + layout replacement in a single atomic transaction with rollback; rejected cross-table dimensions pending relationship engine; enforced tenant connection ownership defense; verified 105/105 tests passing.
-=======
-*(When completing a task from the roadmap above, mark with `[x]`, append completion metadata, and move here.)*
->>>>>>> origin/main
+
 
 - [x] **Conversational AI Assistant Workspace & Unified Chat Engine**
   - *Completed:* 2026-08-08 | Antigravity AI Orchestrator

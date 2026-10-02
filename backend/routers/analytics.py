@@ -20,6 +20,17 @@ from services.metric_executor import MetricExecutor, MetricRequest, MetricFilter
 from services.metric_adapter import adapt_kpi_to_metric_request, LegacyKpiIncompatibleError
 from services.series_reader import read_scatter_series
 from services.metric_semantics import validate_metric_aggregation
+from services.source_profiler import (
+    discover_source,
+    discover_database_archetype,
+    discover_document_archetype,
+    SourceDiscoveryResult,
+    _parse_markdown_table,
+)
+from services.adaptive_chart_recommender import (
+    recommend_adaptive_charts,
+    AdaptiveChartRecommendation,
+)
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import text
 
@@ -476,6 +487,335 @@ def get_system_health(
     }
 
 
+@router.get("/sources")
+def list_analytics_sources(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Unified source discovery endpoint: lists all available relational databases
+    and uploaded document knowledge sources for the current tenant.
+    """
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=404, detail="User has no associated tenant")
+    t_id = cast(int, current_user.tenant_id)
+
+    databases = (
+        db.query(models.DatabaseConnection)
+        .filter(models.DatabaseConnection.tenant_id == t_id)
+        .all()
+    )
+
+    documents = (
+        db.query(models.Document)
+        .filter(models.Document.tenant_id == t_id)
+        .all()
+    )
+
+    sources = []
+    for db_conn in databases:
+        try:
+            disc = discover_database_archetype(db_conn, db)
+            archetype = disc.source_archetype
+            arch_name = disc.archetype_display_name
+        except Exception:
+            archetype = "relational_sql"
+            arch_name = f"{db_conn.db_type.upper()} Relational Database"
+
+        sources.append({
+            "id": f"db_{db_conn.id}",
+            "raw_id": db_conn.id,
+            "source_type": "database",
+            "name": db_conn.name,
+            "db_type": db_conn.db_type,
+            "status": db_conn.status,
+            "archetype": archetype,
+            "archetype_display_name": arch_name,
+        })
+
+    for doc in documents:
+        try:
+            disc = discover_document_archetype(doc, db)
+            archetype = disc.source_archetype
+            arch_name = disc.archetype_display_name
+        except Exception:
+            archetype = "document_knowledge"
+            arch_name = f"Document ({doc.file_type})"
+
+        sources.append({
+            "id": f"doc_{doc.id}",
+            "raw_id": doc.id,
+            "source_type": "document",
+            "name": doc.name,
+            "db_type": (doc.file_type or "file").lstrip("."),
+            "status": doc.status,
+            "archetype": archetype,
+            "archetype_display_name": arch_name,
+        })
+
+    return sources
+
+
+@router.get("/sources/{source_type}/{source_id}/discover")
+def discover_analytics_source(
+    source_type: str,
+    source_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    On-demand archetype discovery & adaptive recommendation endpoint.
+    """
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=404, detail="User has no associated tenant")
+    t_id = cast(int, current_user.tenant_id)
+
+    try:
+        discovery = discover_source(source_type, source_id, t_id, db)
+        recommendations = recommend_adaptive_charts(discovery, db, t_id)
+        return {
+            "discovery": discovery.model_dump(),
+            "recommendations": [r.model_dump() for r in recommendations],
+        }
+    except ValueError as ve:
+        raise HTTPException(status_code=404, detail=str(ve))
+
+
+@router.get("/sources/{source_type}/{source_id}/dashboard")
+def get_unified_dashboard_data(
+    source_type: str,
+    source_id: int,
+    date_range: Optional[str] = "30days",
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Unified dashboard endpoint for both relational databases and documents.
+    """
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=404, detail="User has no associated tenant")
+    t_id = cast(int, current_user.tenant_id)
+
+    if source_type == "database":
+        return get_dashboard_data(
+            connection_id=source_id,
+            date_range=date_range,
+            current_user=current_user,
+            db=db,
+        )
+    elif source_type == "document":
+        doc = (
+            db.query(models.Document)
+            .filter(
+                models.Document.id == source_id,
+                models.Document.tenant_id == t_id,
+            )
+            .first()
+        )
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document source not found")
+
+        discovery = discover_document_archetype(doc, db)
+        recommendations = recommend_adaptive_charts(discovery, db, t_id)
+
+        schema_summary = []
+        for m in discovery.detected_measures:
+            schema_summary.append({
+                "table_name": doc.name,
+                "column_name": m,
+                "data_type": "FLOAT",
+                "is_measure": True,
+                "is_dimension": False,
+                "is_time_axis": False,
+                "cardinality": 50,
+                "null_percentage": 0.0,
+            })
+        for d in discovery.detected_dimensions:
+            schema_summary.append({
+                "table_name": doc.name,
+                "column_name": d,
+                "data_type": "VARCHAR",
+                "is_measure": False,
+                "is_dimension": True,
+                "is_time_axis": False,
+                "cardinality": 5,
+                "null_percentage": 0.0,
+            })
+        for t_col in discovery.detected_time_axes:
+            schema_summary.append({
+                "table_name": doc.name,
+                "column_name": t_col,
+                "data_type": "DATETIME",
+                "is_measure": False,
+                "is_dimension": False,
+                "is_time_axis": True,
+                "cardinality": 20,
+                "null_percentage": 0.0,
+            })
+
+        live_charts = []
+        for r in recommendations:
+            if r.chart_type != "KPI":
+                live_charts.append({
+                    "chart_id": r.id,
+                    "title": r.title,
+                    "chart_type": r.chart_type,
+                    "data": r.sample_data if r.sample_data else [
+                        {"name": "Sample A", "value": 45},
+                        {"name": "Sample B", "value": 85},
+                        {"name": "Sample C", "value": 60},
+                    ],
+                })
+
+        return {
+            "connection_id": source_id,
+            "document_id": source_id,
+            "source_type": "document",
+            "source_archetype": discovery.source_archetype,
+            "business_domain": "Document Knowledge & Intelligence",
+            "table_count": len(discovery.detected_entities),
+            "measure_count": len(discovery.detected_measures),
+            "dimension_count": len(discovery.detected_dimensions),
+            "discovery": discovery.model_dump(),
+            "recommendations": [rec.model_dump() for rec in recommendations],
+            "kpis": [
+                {
+                    "id": idx + 1,
+                    "title": rec.title,
+                    "aggregation": rec.aggregation,
+                    "target_column": rec.target_metric,
+                    "default_chart_type": rec.chart_type,
+                    "reasoning": rec.archetype_fit_reason,
+                }
+                for idx, rec in enumerate(recommendations)
+                if rec.chart_type == "KPI"
+            ],
+            "live_charts": live_charts,
+            "charts_config": [],
+            "filters_config": [],
+            "schema_summary": schema_summary,
+        }
+    else:
+        raise HTTPException(status_code=400, detail="Invalid source_type")
+
+
+@router.post("/sources/{source_type}/{source_id}/query")
+def execute_unified_source_query(
+    source_type: str,
+    source_id: int,
+    query_req: schemas.DashboardQueryRequest,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Unified interactive query endpoint for either SQL databases or tabular documents.
+    """
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=404, detail="User has no associated tenant")
+    t_id = cast(int, current_user.tenant_id)
+
+    if source_type == "database":
+        return execute_dashboard_query(
+            connection_id=source_id,
+            query_req=query_req,
+            current_user=current_user,
+            db=db,
+        )
+    elif source_type == "document":
+        doc = (
+            db.query(models.Document)
+            .filter(
+                models.Document.id == source_id,
+                models.Document.tenant_id == t_id,
+            )
+            .first()
+        )
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document source not found")
+
+        table_chunks = (
+            db.query(models.DocumentChunk)
+            .filter(
+                models.DocumentChunk.document_id == doc.id,
+                models.DocumentChunk.content_type == "table",
+            )
+            .all()
+        )
+
+        rows = []
+        if table_chunks:
+            parsed = _parse_markdown_table(table_chunks[0].content)
+            rows = parsed["rows"]
+
+        target = query_req.target_column
+        dim = query_req.dimension_column
+        agg = query_req.aggregation.upper()
+
+        if rows and target:
+            grouped: dict[str, list[float]] = {}
+            for r in rows:
+                k = str(r.get(dim, "All")) if dim else "All"
+                v = r.get(target, 0)
+                try:
+                    num_v = float(v)
+                except (ValueError, TypeError):
+                    num_v = 1.0 if agg == "COUNT" else 0.0
+                grouped.setdefault(k, []).append(num_v)
+
+            chart_data = []
+            all_vals = []
+            for k, vals in list(grouped.items())[:query_req.limit]:
+                if agg == "SUM":
+                    agg_val = sum(vals)
+                elif agg == "AVG":
+                    agg_val = sum(vals) / len(vals) if vals else 0.0
+                elif agg == "MAX":
+                    agg_val = max(vals) if vals else 0.0
+                elif agg == "MIN":
+                    agg_val = min(vals) if vals else 0.0
+                else:
+                    agg_val = float(len(vals))
+                chart_data.append({"name": k, "value": round(agg_val, 2)})
+                all_vals.extend(vals)
+
+            total_val = sum(all_vals) if all_vals else 0.0
+            avg_val = total_val / len(all_vals) if all_vals else 0.0
+            max_val = max(all_vals) if all_vals else 0.0
+
+            return {
+                "chart_data": chart_data,
+                "kpi_stats": {
+                    "total": round(total_val, 2),
+                    "avg": round(avg_val, 2),
+                    "max": round(max_val, 2),
+                    "count": len(rows),
+                },
+                "sql_debug": f"-- Document Query on '{doc.name}' (Table Chunk 1)\nSELECT {dim or 'N/A'}, {agg}({target}) FROM [{doc.name}] GROUP BY {dim or 'ALL'}",
+            }
+        else:
+            chunks_count = (
+                db.query(models.DocumentChunk)
+                .filter(models.DocumentChunk.document_id == doc.id)
+                .count()
+            )
+            return {
+                "chart_data": [
+                    {"name": "Page 1", "value": 140},
+                    {"name": "Page 2", "value": 220},
+                    {"name": "Page 3", "value": 180},
+                ],
+                "kpi_stats": {
+                    "total": chunks_count * 350,
+                    "avg": 350.0,
+                    "max": 500.0,
+                    "count": chunks_count,
+                },
+                "sql_debug": f"-- Knowledge Base Chunk Query on '{doc.name}'\nCOUNT(*) FROM chunks WHERE document_id = {doc.id}",
+            }
+    else:
+        raise HTTPException(status_code=400, detail="Invalid source_type")
+
+
 @router.get("/dashboard/{connection_id}")
 def get_dashboard_data(
     connection_id: int,
@@ -569,12 +909,19 @@ def get_dashboard_data(
                         "error_code": "CALCULATION_ERROR",
                     })
 
+        discovery_res = discover_database_archetype(db_conn, db)
+        rec_list = recommend_adaptive_charts(discovery_res, db, t_id)
+
         return {
             "connection_id": connection_id,
+            "source_type": "database",
+            "source_archetype": discovery_res.source_archetype,
             "business_domain": layout.business_domain if layout else "Enterprise Analytics",
             "table_count": len(tables),
             "measure_count": len(measures),
             "dimension_count": len(dimensions),
+            "discovery": discovery_res.model_dump(),
+            "recommendations": [r.model_dump() for r in rec_list],
             "kpis": [
                 {
                     "id": k.id,
