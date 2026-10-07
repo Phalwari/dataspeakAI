@@ -10,7 +10,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import models
 from database import engine
-from routers import users, tenants, databases, api_keys, chatbot_config, documents, query, analytics, chat
+from routers import (
+    users, tenants, databases, api_keys, chatbot_config, documents,
+    query, chat, connections, insights, files, file_insights
+)
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -55,8 +58,11 @@ app.include_router(api_keys.router)
 app.include_router(chatbot_config.router)
 app.include_router(documents.router)
 app.include_router(query.router)
-app.include_router(analytics.router)
 app.include_router(chat.router)
+app.include_router(connections.router)
+app.include_router(insights.router)
+app.include_router(files.router)
+app.include_router(file_insights.router)
 
 
 @app.get("/")

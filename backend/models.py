@@ -62,10 +62,15 @@ class DatabaseConnection(Base):
     tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
     name = Column(String, nullable=False)
     db_type = Column(String, nullable=False)
-    host = Column(String, nullable=False)
-    username = Column(String, nullable=False)
-    password = Column(String, nullable=False) # Encrypted at rest using Fernet
-    database = Column(String, nullable=False)
+    host = Column(String, nullable=True)
+    username = Column(String, nullable=True)
+    password = Column(String, nullable=True) # Encrypted at rest using Fernet
+    database = Column(String, nullable=True)
+    port = Column(Integer, nullable=True)
+    connection_string = Column(String, nullable=True)
+    tables_metadata = Column(JSON, nullable=True)
+    insights_cache = Column(JSON, nullable=True)
+    insights_cached_at = Column(DateTime, nullable=True)
     status = Column(String, default="connected")
     created_at = Column(DateTime, default=utc_now)
     
@@ -286,3 +291,24 @@ class Message(Base):
     created_at = Column(DateTime, default=utc_now)
 
     conversation = relationship("Conversation", back_populates="messages")
+
+class Dataset(Base):
+    __tablename__ = "datasets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    name = Column(String, nullable=False)
+    file_type = Column(String, nullable=False)  # csv, xlsx, etc.
+    file_path = Column(String, nullable=False)
+    file_size = Column(String, nullable=False)
+    columns = Column(JSON, nullable=False)
+    row_count = Column(Integer, nullable=False)
+    analysis_results = Column(JSON, nullable=True)
+    indexing_status = Column(String, default="ready")
+    ml_insights_cache = Column(JSON, nullable=True)
+    ml_insights_cached_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+
+    tenant = relationship("Tenant")
+    owner = relationship("User")

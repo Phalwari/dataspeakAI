@@ -21,9 +21,9 @@ AGENT_TIMEOUT_SECONDS = 20
 
 
 async def run_chart_layout_agent(
-    semantic: SemanticAnalysis, kpi_output: KpiAgentOutput, llm_model: str = "gemini-3.6-flash"
+    semantic: SemanticAnalysis, kpi_output: KpiAgentOutput, llm_model: str = "gemini-2.5-flash"
 ) -> ChartLayoutOutput:
-    api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     kwargs = {"google_api_key": api_key} if api_key else {}
 
     llm = ChatGoogleGenerativeAI(model=llm_model, temperature=0.2, timeout=AGENT_TIMEOUT_SECONDS, **kwargs)

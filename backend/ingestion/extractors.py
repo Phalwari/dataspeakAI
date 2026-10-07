@@ -64,7 +64,7 @@ def extract_pdf_split_router(file_path: str, gemini_api_key: Optional[str] = Non
             plumber_page = pdf.pages[page_idx]
             
             # Pre-flight check: extract text length
-            raw_text = fitz_page.get_text() or ""
+            raw_text: str = str(fitz_page.get_text() or "")
             clean_text_len = len(raw_text.strip())
             
             # Fast-path if text length > 100
@@ -112,7 +112,7 @@ def extract_pdf_split_router(file_path: str, gemini_api_key: Optional[str] = Non
             else:
                 # Visual Escalation Path (Scanned or visually dense page)
                 content.stats.visual_pages += 1
-                page_text = raw_text
+                page_text: str = raw_text
                 
                 # If Gemini API Key is available, perform full page OCR & visual layout analysis
                 if gemini_api_key:
@@ -261,8 +261,10 @@ def extract_pptx(file_path: str) -> ExtractedContent:
         slide_num = idx + 1
         slide_text = []
         for shape in slide.shapes:
-            if shape.has_text_frame:
-                slide_text.append(shape.text_frame.text)
+            if getattr(shape, "has_text_frame", False):
+                tf = getattr(shape, "text_frame", None)
+                if tf is not None and hasattr(tf, "text"):
+                    slide_text.append(str(tf.text))
                 
         text_str = f"--- Slide {slide_num} ---\n" + "\n".join(slide_text)
         content.narrative_chunks.append(NarrativeBlock(

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, model_validator, Field
 from typing import Optional, List, Any, Dict
 from datetime import datetime
 
@@ -61,21 +61,81 @@ class Token(BaseModel):
     user: UserResponse
 
 class DatabaseConnectionBase(BaseModel):
-    name: str
+    name: Optional[str] = None
+    db_name: Optional[str] = None
     db_type: str
-    host: str
-    username: str
-    database: str
+    host: Optional[str] = None
+    port: Optional[int] = None
+    username: Optional[str] = None
+    database: Optional[str] = None
+    connection_string: Optional[str] = None
+    description: Optional[str] = None
 
 class DatabaseConnectionCreate(DatabaseConnectionBase):
-    password: str
+    password: Optional[str] = None
+
+class DatabaseConnectionTest(BaseModel):
+    db_type: str
+    host: Optional[str] = None
+    port: Optional[int] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+    connection_string: Optional[str] = None
+    database: Optional[str] = None
+
+class DatabaseConnectionTestResponse(BaseModel):
+    success: bool
+    message: str
+    db_schema: Optional[Dict[str, Any]] = Field(default=None, alias="schema")
+
+    class Config:
+        populate_by_name = True
+
+class AIConnectRequest(BaseModel):
+    input_text: str
+    db_name: Optional[str] = "Auto-Connected DB"
 
 class DatabaseConnectionResponse(DatabaseConnectionBase):
     id: int
     status: str
+    tables_metadata: Optional[Any] = None
+    created_at: Optional[datetime] = None
     
     class Config:
         from_attributes = True
+
+class ConnectionUpdate(BaseModel):
+    name: Optional[str] = None
+    db_name: Optional[str] = None
+    host: Optional[str] = None
+    port: Optional[int] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+    connection_string: Optional[str] = None
+    database: Optional[str] = None
+    description: Optional[str] = None
+
+class TablePreviewRequest(BaseModel):
+    table_name: Optional[str] = None
+    table: Optional[str] = None
+    limit: Optional[int] = 50
+    filter: Optional[Dict[str, Any]] = None
+
+class DBQueryRequest(BaseModel):
+    query: str
+
+class AIQueryRequest(BaseModel):
+    question: str
+    table_name: str
+
+class TemplateAnalysisRequest(BaseModel):
+    dataset_id: Any
+    template_type: str
+
+class TemplateAnalysisResponse(BaseModel):
+    mapping: Dict[str, Any]
+    column_info: List[Dict[str, Any]]
+    processing_summary: Dict[str, Any]
 
 class UserDatabaseAccessResponse(BaseModel):
     id: int
@@ -381,7 +441,15 @@ class SuggestMappingResponse(BaseModel):
 
 class ApplyMappingRequest(BaseModel):
     domain: str
-    mappings: Dict[str, Optional[str]]  # e.g. {"revenue": "orders.total_amount", "order_date": "orders.created_at"}
+    mappings: Dict[str, Optional[str]] = {}  # e.g. {"revenue": "orders.total_amount", "order_date": "orders.created_at"}
     chart_preferences: Optional[List[str]] = None
     confirmed_by_user: Optional[bool] = False  # Explicit user confirmation flag
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_mappings_field(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "mappings" not in data and "mapping" in data:
+                data["mappings"] = data["mapping"]
+        return data
 

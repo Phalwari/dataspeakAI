@@ -125,6 +125,7 @@ def test_valid_atomic_sum_recipe(registry):
         registry,
     )
 
+    assert isinstance(validated, AtomicMetricRecipe)
     assert validated.metric_id == "total_revenue"
     assert validated.operand.aggregation == "SUM"
 
@@ -251,18 +252,18 @@ def test_valid_aov_ratio(registry):
 
 def test_ratio_zero_division_policy_required():
     with pytest.raises(ValidationError):
-        RatioMetricRecipe(
-            metric_id="average_order_value",
-            title="Average Order Value",
-            numerator=AtomicMetricOperand(
+        RatioMetricRecipe.model_validate({
+            "metric_id": "average_order_value",
+            "title": "Average Order Value",
+            "numerator": AtomicMetricOperand(
                 target_ref="orders.total_amount",
                 aggregation="SUM",
             ),
-            denominator=AtomicMetricOperand(
+            "denominator": AtomicMetricOperand(
                 target_ref="orders.order_id",
                 aggregation="COUNT_DISTINCT",
             ),
-        )
+        })
 
 
 # ============================================================

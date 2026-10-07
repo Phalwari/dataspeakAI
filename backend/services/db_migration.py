@@ -38,6 +38,13 @@ MIGRATION_COLUMNS = [
     ("document_chunks", "content_type", "VARCHAR DEFAULT 'text'", "VARCHAR(50) DEFAULT 'text'"),
     ("document_chunks", "page_number", "INTEGER", "INTEGER"),
     ("document_chunks", "reference_id", "VARCHAR", "VARCHAR(255)"),
+    # Database connections columns
+    ("database_connections", "port", "INTEGER", "INTEGER"),
+    ("database_connections", "connection_string", "VARCHAR", "VARCHAR(1000)"),
+    ("database_connections", "tables_metadata", "JSON", "JSONB"),
+    ("database_connections", "insights_cache", "JSON", "JSONB"),
+    ("database_connections", "insights_cached_at", "DATETIME", "TIMESTAMP"),
+    ("database_connections", "description", "VARCHAR", "VARCHAR(500)"),
 ]
 
 

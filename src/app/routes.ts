@@ -9,7 +9,6 @@ import { DashboardOverview } from "./pages/dashboard/DashboardOverview";
 import { DatabasesPage } from "./pages/dashboard/DatabasesPage";
 import { KnowledgeBasePage } from "./pages/dashboard/KnowledgeBasePage";
 import { UploadDocumentsPage } from "./pages/dashboard/UploadDocumentsPage";
-import { AnalyticsPage } from "./pages/dashboard/AnalyticsPage";
 import { AIInsightsPage } from "./pages/dashboard/AIInsightsPage";
 import { ApiKeysPage } from "./pages/dashboard/ApiKeysPage";
 import { ChatbotWidgetPage } from "./pages/dashboard/ChatbotWidgetPage";
@@ -17,6 +16,9 @@ import { ChatPage } from "./pages/dashboard/ChatPage";
 import { UsagePage } from "./pages/dashboard/UsagePage";
 import { LogsPage } from "./pages/dashboard/LogsPage";
 import { SettingsPage } from "./pages/dashboard/SettingsPage";
+import { AnalyticsPage } from "./pages/dashboard/AnalyticsPage";
+import { BusinessInsightsPage } from "./pages/dashboard/BusinessInsightsPage";
+import { CsvAnalyticsPage } from "./pages/dashboard/CsvAnalyticsPage";
 import { AdminPanel } from "./pages/admin/AdminPanel";
 
 export const router = createBrowserRouter([
@@ -67,6 +69,14 @@ export const router = createBrowserRouter([
       {
         path: "analytics",
         Component: AnalyticsPage,
+      },
+      {
+        path: "insights",
+        Component: BusinessInsightsPage,
+      },
+      {
+        path: "csv-analytics",
+        Component: CsvAnalyticsPage,
       },
       {
         path: "ai-insights",

@@ -1,41 +1,51 @@
-# Handoff Report: Pyright / Pylance Static Typing Hardening & Test Isolation
+# Handoff Report: Multi-Domain Enterprise Accuracy Hardening & IDE Type Health
 
 ## 1. Observation
-The IDE diagnostic language server reported 22 errors across 7 files:
-1. `backend/routers/analytics.py`: 10 errors where SQLAlchemy `Column[int]` from `current_user.tenant_id` was passed to functions requiring primitive `int` (`get_owned_connection` and `MetricRequest`).
-2. `backend/services/document_db_profiler.py`: 7 errors/warnings regarding `Column[int]` passed to `profile_sampled_documents`, `Column[str]` used in `MongoClient` and `firestore.Client`, and a redundant `str()` call on a dictionary key.
-3. `backend/services/metric_adapter.py`: 2 errors where `kpi.connection_id` and `kpi.tenant_id` (`Column[int]`) were passed to `MetricRequest`.
-4. `scratch/diagnose_all_databases_blank.py`, `scratch/test_phase1_hardening.py`, `scratch/test_real_dashboard_flow.py`: Multiple `int(Column[int])` type mismatch errors where `int.__new__` expected `Buffer | SupportsInt`.
-5. `tests/test_phase1_5a_security_and_integrity.py`: 2 errors passing `Column[int]` to `_profiling_job_runner(int, int)`.
-6. `tests/test_phase1_5c_dashboard_executor_integration.py`: Type narrowing error on `res.data` before calling `len()` and iterating over dictionary items.
+1. **IDE / Pyright Static Typing Errors (`@[current_problems]`)**:
+   - `backend/ingestion/extractors.py`: `fitz_page.get_text()` returned ambiguous type `dict | list | str`, causing errors on `.strip()` and `+=` string concatenation. `BaseShape` in PPTX had uninspected `text_frame` attribute access.
+   - `backend/services/metric_recipes.py`: Discriminated union base class `BaseMetricRecipe` declared `metric_type: MetricType`, conflicting with subclass literal overrides (`Literal["atomic"]`, etc.).
+   - `tests/test_phase2a_metric_recipe_contract.py`: Missing type narrowing before accessing `.operand` on `MetricRecipe`, and missing required `zero_division` argument in static analysis.
+   - `tests/test_phase2c_derived_metric_executor.py`: Literal `"non_numeric_string"` passed into `MetricResult` value without typing cast.
+   - Missing module `routers.analytics` in test and scratch files due to working tree deletion.
+2. **Dashboard Accuracy Bugs**:
+   - **KPI 1 (Unit Price Bug)**: `monetary_cols` selected `unit_price` before checking `net_revenue`/`gross_revenue`, returning $6.5M instead of the true $12.8M.
+   - **KPI 2 (Misleading Label)**: `COUNT(*)` without status filter was labeled "completed transactions" even though 25% of orders were cancelled or returned.
+   - **KPI 3 (Fabricated Trends)**: Hardcoded constants (`5.8`, `3.4`, `11.2`, `4.8`, `6.5`, `5.0`, `6.8`, `3.2`) were emitted across KPIs.
+   - **KPI 4 (Fake Fallback)**: Catalog size fell back to Chinook `"3,503"`.
+   - **KPI 5 (YoY Distortion)**: Comparing 2.3 months of 2026 to full 12 months of 2025 yielded -80.5% distortion instead of real Same-Period-Last-Year (-0.63%).
+   - **Charts 3–6**: Hardcoded joins on Chinook tables (`TrackId`, `Genre`, `Album`, `MediaType`) crashed on any non-music database.
 
 ## 2. Logic Chain
-- **Analytics Router (`backend/routers/analytics.py`)**:
-  - In all endpoints where tenant existence is asserted via `if not current_user.tenant_id: raise HTTPException(...)`, introduced `t_id = cast(int, current_user.tenant_id)`.
-  - Passed `t_id` directly into `get_owned_connection(db, connection_id, t_id)` and `MetricRequest(tenant_id=t_id, ...)`.
-- **Document DB Profiler (`backend/services/document_db_profiler.py`)**:
-  - Cast `db_conn.id` to `conn_id = cast(int, db_conn.id)` and used across all collection sampling routines.
-  - Sanitized and stringified `db_conn.host` and `db_conn.database` for `MongoClient` and `firestore.Client` initialization, annotating clients as `Any` to prevent Pyright generic indexing errors.
-  - Removed unnecessary `str(key)` in `flatten_document`.
-- **Metric Adapter (`backend/services/metric_adapter.py`)**:
-  - Wrapped `kpi.connection_id` with `cast(int, ...)` and `kpi.tenant_id` with `cast(Optional[int], ...)`.
-- **Test Suites (`tests/`)**:
-  - In `test_phase1_5a_security_and_integrity.py`, cast `tenant_a.id` and connection IDs to `int`.
-  - In `test_phase1_5c_dashboard_executor_integration.py`, added `assert res.data is not None` to narrow `res.data` type safely.
-  - Added `clear()` method to `InMemoryCacheService` and invoked `cache_service.clear()` before and after integration test runs to prevent test state cross-contamination.
-- **Scratch Scripts (`scratch/`)**:
-  - Replaced `int(col)` with `cast(int, col)` across `diagnose_all_databases_blank.py`, `test_phase1_hardening.py`, and `test_real_dashboard_flow.py`.
+- **Type Health & Module Restoration**:
+  - Restored `backend/routers/analytics.py` from git commit.
+  - In `backend/ingestion/extractors.py`: Cast `raw_text = str(fitz_page.get_text() or "")` and safely inspected `getattr(shape, "text_frame", None)`.
+  - In `backend/services/metric_recipes.py`: Removed redundant `metric_type` declaration on `BaseMetricRecipe`.
+  - In `tests/`: Added `isinstance(validated, AtomicMetricRecipe)` narrowing, `model_validate` for testing missing kwargs, and `cast(Any, "non_numeric_string")`.
+- **Database Pipeline Refactor (`backend/services/db_pipeline_service.py`)**:
+  - Wired `sort_monetary_columns_by_priority(monetary_cols)` across all table profiles.
+  - Implemented unit rate guard: if only unit rate exists, formulates `SUM(unit_price * quantity)`.
+  - Added schema-driven lifecycle introspection: detects delivered, cancelled, and returned records, outputting honest labels without misleading "completed transactions".
+  - Implemented true SPLY (Same-Period-Last-Year) time series windowing; sets `trend_pct: None` if historical intervals are insufficient.
+  - Removed all fabricated trend constants (`5.8`, `3.4`, etc.) and the Chinook `"3,503"` fallback.
+  - Replaced Chinook-specific queries with schema-introspected categorical, status, and buyer spend queries, successfully generating all 6 charts dynamically.
+  - Updated frontend `ECommerceTemplate.tsx` to cleanly hide badges when `trendText` or `trend_pct` is absent.
 
 ## 3. Caveats
-- `backend/models.py` uses legacy SQLAlchemy 1.x `Column(...)` attribute definitions without `Mapped[...]` type annotations; runtime values on populated instances are Python primitives (`int`, `str`, etc.), but static type checkers infer class-level `Column[...]`. Using `typing.cast` preserves runtime semantics while satisfying strict static analysis.
+- Databases with completely unparseable date formats will have `trend_pct: None` and display no badge, ensuring no false percentages deceive business stakeholders.
 
 ## 4. Conclusion
-All 22 diagnostic errors and warnings reported by the IDE have been completely eliminated. Full test suites pass with 0 errors.
+All 8 IDE type errors and all 5 dashboard accuracy bugs are completely resolved. The engine is fully multi-domain and operates without hardcoded schemas or fabricated constants.
 
 ## 5. Verification Method
-- **Backend Test Suite**: Ran `backend\venv\Scripts\python -m pytest tests/`. Result: **55 passed, 0 failures in 6.95s**.
-- **Scratch Verification Scripts**:
-  - `scratch/test_phase1_hardening.py`: Result: **Exit code 0, 100% success**.
-  - `scratch/test_real_dashboard_flow.py`: Result: **Exit code 0, complete agent pipeline and dashboard payload executed successfully**.
-  - `scratch/diagnose_all_databases_blank.py`: Result: **Exit code 0**.
-- **Frontend Build Check**: Ran `npm run build`. Result: **Exit code 0 (2354 modules transformed cleanly in 25.33s)**.
+- **Golden Test Suite (`scratch/test_golden_ecommerce.py`)**:
+  - KPI 1: `[PASS]` Revenue is genuine ($12,836,135.55, not $6.5M unit_price).
+  - KPI 2: `[PASS]` Orders count 50,000 with honest label.
+  - KPI 3: `[PASS]` Zero hardcoded trends.
+  - KPI 4: `[PASS]` Zero fake catalog fallbacks (135 catalog size).
+  - KPI 5: `[PASS]` YoY comparison is true SPLY (-0.6%, not -80.5%).
+  - Generated all 6 charts dynamically.
+- **Backend Pytest**:
+  - `tests/test_phase2a_metric_recipe_contract.py` + `tests/test_phase2c_derived_metric_executor.py`: **50 passed in 2.94s**.
+  - `tests/test_phase1_5d1_silent_fallback_removal.py` + `tests/test_phase1_5d2_atomic_regeneration.py`: **31 passed in 10.85s**.
+- **Frontend Production Build**:
+  - `npm run build`: **✓ 2755 modules transformed, 0 errors in 48.23s**.

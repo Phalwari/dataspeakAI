@@ -43,11 +43,11 @@ def _schema_to_llm_input(table_profile) -> dict:
     }
 
 
-async def run_semantic_agent(table_profiles: list, llm_model: str = "gemini-3.6-flash") -> SemanticAnalysis:
+async def run_semantic_agent(table_profiles: list, llm_model: str = "gemini-2.5-flash") -> SemanticAnalysis:
     schema_payload = [_schema_to_llm_input(tp) for tp in table_profiles]
     schema_json = json.dumps(schema_payload, indent=2, default=str)
 
-    api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     kwargs = {"google_api_key": api_key} if api_key else {}
 
     llm = ChatGoogleGenerativeAI(model=llm_model, temperature=0.1, timeout=AGENT_TIMEOUT_SECONDS, **kwargs)

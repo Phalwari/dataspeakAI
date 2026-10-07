@@ -32,3 +32,5 @@ rank-bm25
 celery
 redis
 flower
+groq
+langchain-groq

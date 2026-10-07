@@ -1,6 +1,7 @@
 import ast
 import os
 import sys
+from typing import cast, Any
 from unittest.mock import patch
 import pytest
 from sqlalchemy import create_engine, text
@@ -900,7 +901,7 @@ def test_non_numeric_ratio_operand_rejected(execution_fixture):
     # Case B: string returned
     with patch.object(MetricExecutor, "execute") as mock_exec:
         mock_exec.side_effect = [
-            MetricResult(target="orders.total_amount", aggregation="SUM", is_scalar=True, value="non_numeric_string"),
+            MetricResult(target="orders.total_amount", aggregation="SUM", is_scalar=True, value=cast(Any, "non_numeric_string")),
             MetricResult(target="orders.order_id", aggregation="COUNT_DISTINCT", is_scalar=True, value=4),
         ]
         with pytest.raises(DerivedMetricExecutionError, match="did not return a numeric value"):

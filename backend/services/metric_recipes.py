@@ -133,7 +133,6 @@ class AtomicMetricOperand(StrictRecipeModel):
 
 class BaseMetricRecipe(StrictRecipeModel):
     recipe_version: Literal["1.0"] = "1.0"
-    metric_type: MetricType
     metric_id: str = Field(
         min_length=1,
         pattern=r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$",

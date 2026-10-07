@@ -99,6 +99,7 @@ Start both the backend and frontend development servers.
 ```bash
 cd backend
 # Ensure virtual environment is active
+.\venv\Scripts\Activate.ps1
 python -m uvicorn main:app --reload --port 8000
 ```
 The FastAPI backend will start at `http://localhost:8000`. Interactive OpenAPI documentation is available at `http://localhost:8000/docs`.
