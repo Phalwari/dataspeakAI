@@ -176,8 +176,8 @@ def is_dimension_column(col_name: str, col_type: str = "") -> bool:
 
 
 def _clean_sql_identifier(name: str, db_type: str) -> str:
-    """Quotes an identifier safely based on database type."""
-    cleaned = re.sub(r'[^a-zA-Z0-9_]', '', name)
+    """Quotes an identifier safely based on database type, allowing spaces for valid quoted identifiers."""
+    cleaned = re.sub(r'[^a-zA-Z0-9_\s\-]', '', name).strip()
     if db_type.lower() in ["postgresql", "sqlite"]:
         return f'"{cleaned}"'
     return f"`{cleaned}`"
@@ -254,6 +254,8 @@ class DatabasePipelineService:
         decrypted_password = encryption_service.decrypt(raw_pw) if raw_pw else None
         conn_str = getattr(db_conn, "connection_string", None)
         decrypted_conn_str = encryption_service.decrypt(conn_str) if conn_str else None
+        if not decrypted_conn_str and getattr(db_conn, "host", None) and ("mongodb://" in str(db_conn.host) or "mongodb+srv://" in str(db_conn.host)):
+            decrypted_conn_str = db_conn.host
 
         is_sql = str(db_conn.db_type).lower() in ["postgresql", "mysql", "sqlite"]
 
@@ -299,7 +301,8 @@ class DatabasePipelineService:
         print("[DB-Pipeline] Layer 1: Schema Discovery & Multi-Table Statistical Profiling...")
         
         schema = getattr(db_conn, "tables_metadata", None) or {}
-        if not schema or force_refresh:
+        if not schema or "error" in schema or force_refresh:
+            schema = {}
             # 1. Try SQLAlchemy native inspector
             try:
                 from services.db_utils import get_connection_url
@@ -346,57 +349,49 @@ class DatabasePipelineService:
                     print(f"[DB-Pipeline] Schema discovery warning: {e}")
                     schema = schema or {}
 
-        available_tables = [t for t in list(schema.keys()) if not t.startswith("sqlite_")]
+        available_tables = [
+            t for t in list(schema.keys())
+            if not t.startswith("sqlite_") and not t.startswith("system.") and t.lower() != "error"
+        ]
+        if db_conn.db_type.lower() == "mongodb" and available_tables:
+            available_tables.sort(key=lambda t: schema.get(t, {}).get("row_count", 0), reverse=True)
+
         if not available_tables:
             return {
                 "success": False,
                 "message": "No accessible tables found in this database connection."
             }
 
-        table_lower_map = {t.lower(): t for t in available_tables}
+        def normalize_name(s: str) -> str:
+            return re.sub(r'[\s_\-]+', '', s.lower())
+
+        table_norm_map = {normalize_name(t): t for t in available_tables}
+
+        def match_table(candidates: List[str]) -> Optional[str]:
+            for c in candidates:
+                n = normalize_name(c)
+                if n in table_norm_map:
+                    return table_norm_map[n]
+            return None
 
         # -- DOMAIN & RELATIONAL TOPOLOGY DISCOVERY --
-        # Detect primary Fact table (invoices, orders, sales, transactions)
-        fact_table = None
-        for candidate in ["invoice", "invoices", "orders", "order", "sales", "sale", "transactions", "transaction", "payments"]:
-            if candidate in table_lower_map:
-                fact_table = table_lower_map[candidate]
-                break
+        # Detect primary Fact table (invoices, orders, sales, transactions, payments, rentals)
+        fact_table = match_table(["invoice", "invoices", "orders", "order", "sales", "sale", "transactions", "transaction", "payment", "payments", "rental", "rentals"])
 
         # Detect line items table
-        line_item_table = None
-        for candidate in ["invoiceline", "orderdetails", "order_details", "order_items", "line_items", "orderitems"]:
-            if candidate in table_lower_map:
-                line_item_table = table_lower_map[candidate]
-                break
+        line_item_table = match_table(["invoiceline", "invoicelines", "invoice_lines", "invoice_line", "orderdetails", "order_details", "order_items", "line_items", "orderitems", "order_detail", "rental", "rentals"])
 
         # Detect customer table
-        customer_table = None
-        for candidate in ["customer", "customers", "client", "clients", "users", "user"]:
-            if candidate in table_lower_map:
-                customer_table = table_lower_map[candidate]
-                break
+        customer_table = match_table(["customer", "customers", "client", "clients", "users", "user", "member", "members"])
 
         # Detect catalog/product table
-        catalog_table = None
-        for candidate in ["track", "tracks", "product", "products", "item", "items", "books", "course"]:
-            if candidate in table_lower_map:
-                catalog_table = table_lower_map[candidate]
-                break
+        catalog_table = match_table(["track", "tracks", "product", "products", "item", "items", "books", "course", "courses", "film", "films", "movie", "movies"])
 
         # Detect category/genre table
-        category_table = None
-        for candidate in ["genre", "genres", "category", "categories"]:
-            if candidate in table_lower_map:
-                category_table = table_lower_map[candidate]
-                break
+        category_table = match_table(["genre", "genres", "category", "categories"])
 
         # Detect artist/brand/vendor table
-        artist_table = None
-        for candidate in ["artist", "artists", "supplier", "suppliers", "vendor", "vendors", "brand", "brands"]:
-            if candidate in table_lower_map:
-                artist_table = table_lower_map[candidate]
-                break
+        artist_table = match_table(["actor", "actors", "artist", "artists", "supplier", "suppliers", "vendor", "vendors", "brand", "brands"])
 
         # Profile each table's columns safely
         table_profiles: Dict[str, Any] = {}
@@ -460,33 +455,82 @@ class DatabasePipelineService:
             fact_prof = table_profiles.get(fact_table, {})
             
             # 1. Total Genuine Gross/Net Revenue (Prioritized over unit rates)
+            # Check line items table for transactional sales details (e.g. Order Details, InvoiceLine)
+            line_money_expr = None
+            line_has_revenue = False
+            join_col = None
+            if line_item_table:
+                q_line = _clean_sql_identifier(line_item_table, db_conn.db_type)
+                line_prof = table_profiles.get(line_item_table, {})
+                line_cols = line_prof.get("columns", {})
+                
+                # Check for unit price, quantity, and discount in line items
+                l_price_col = next((c for c in line_cols.keys() if any(k in c.lower() for k in ["unitprice", "unit_price", "price", "rate", "cost", "amount"])), None)
+                l_qty_col = next((c for c in line_cols.keys() if any(k in c.lower() for k in ["quantity", "qty", "units"])), None)
+                l_disc_col = next((c for c in line_cols.keys() if any(k in c.lower() for k in ["discount", "disc"])), None)
+                
+                # Detect join column between fact and line item
+                fact_col_names = list(fact_prof.get("columns", {}).keys())
+                for fc in fact_col_names:
+                    for lc in line_cols.keys():
+                        if fc.lower() == lc.lower() and is_id_column(fc):
+                            join_col = (fc, lc)
+                            break
+                    if join_col:
+                        break
+
+                if l_price_col and l_qty_col:
+                    q_lp = _clean_sql_identifier(l_price_col, db_conn.db_type)
+                    q_lq = _clean_sql_identifier(l_qty_col, db_conn.db_type)
+                    if l_disc_col:
+                        q_ld = _clean_sql_identifier(l_disc_col, db_conn.db_type)
+                        line_money_expr = f"({q_lp} * {q_lq} * (1.0 - COALESCE({q_ld}, 0.0)))"
+                    else:
+                        line_money_expr = f"({q_lp} * {q_lq})"
+                    line_has_revenue = True
+
             money_cols = sort_monetary_columns_by_priority(fact_prof.get("monetary_cols", []))
-            money_col = money_cols[0] if money_cols else "Total"
-            q_money = _clean_sql_identifier(money_col, db_conn.db_type)
-            
-            # Guard against unit rates: if the selected money col is a unit price, check for quantity
-            fact_measures = fact_prof.get("measure_cols", [])
-            qty_col = next((c for c in fact_measures if any(k in c.lower() for k in ["qty", "quantity", "units", "count"])), None)
-            if is_unit_price_column(money_col) and qty_col:
-                q_qty = _clean_sql_identifier(qty_col, db_conn.db_type)
-                money_expr = f"({q_money} * {q_qty})"
-                avg_expr = f"ROUND(AVG({q_money} * {q_qty}), 2)"
+            has_genuine_fact_revenue = bool(money_cols and not all("freight" in c.lower() or "shipping" in c.lower() for c in money_cols))
+            qty_col: Optional[str] = None
+            q_line: str = _clean_sql_identifier(line_item_table, db_conn.db_type) if line_item_table else ""
+
+            if has_genuine_fact_revenue:
+                money_col = money_cols[0]
+                q_money = _clean_sql_identifier(money_col, db_conn.db_type)
+                fact_measures = fact_prof.get("measure_cols", [])
+                qty_col = next((c for c in fact_measures if any(k in c.lower() for k in ["qty", "quantity", "units", "count"])), None)
+                if is_unit_price_column(money_col) and qty_col:
+                    q_qty = _clean_sql_identifier(qty_col, db_conn.db_type)
+                    money_expr = f"({q_money} * {q_qty})"
+                    avg_expr = f"ROUND(AVG({q_money} * {q_qty}), 2)"
+                else:
+                    money_expr = q_money
+                    avg_expr = f"ROUND(AVG({q_money}), 2)"
+
+                fact_summary = execute_sql(f"""
+                    SELECT 
+                        ROUND(SUM({money_expr}), 2) as total_rev,
+                        COUNT(*) as total_orders,
+                        {avg_expr} as avg_order_val
+                    FROM {q_fact}
+                """)
+                rev_val = float(fact_summary[0].get("total_rev") or 0) if fact_summary else 0.0
+                ord_val = int(fact_summary[0].get("total_orders") or 0) if fact_summary else 0
+                aov_val = float(fact_summary[0].get("avg_order_val") or 0) if fact_summary else 0.0
             else:
-                money_expr = q_money
-                avg_expr = f"ROUND(AVG({q_money}), 2)"
-            
-            # Primary queries on Fact table
-            fact_summary = execute_sql(f"""
-                SELECT 
-                    ROUND(SUM({money_expr}), 2) as total_rev,
-                    COUNT(*) as total_orders,
-                    {avg_expr} as avg_order_val
-                FROM {q_fact}
-            """)
-            
-            rev_val = float(fact_summary[0].get("total_rev") or 0) if fact_summary else 0.0
-            ord_val = int(fact_summary[0].get("total_orders") or 0) if fact_summary else 0
-            aov_val = float(fact_summary[0].get("avg_order_val") or 0) if fact_summary else 0.0
+                fact_cnt_res = execute_sql(f"SELECT COUNT(*) as total_orders FROM {q_fact}")
+                ord_val = int(fact_cnt_res[0].get("total_orders") or 0) if fact_cnt_res else 0
+                rev_val = 0.0
+                aov_val = 0.0
+                money_expr = None
+
+                if line_has_revenue and line_money_expr and line_item_table:
+                    q_line = _clean_sql_identifier(line_item_table, db_conn.db_type)
+                    line_rev_res = execute_sql(f"SELECT ROUND(SUM({line_money_expr}), 2) as total_rev FROM {q_line}")
+                    if line_rev_res and line_rev_res[0].get("total_rev"):
+                        rev_val = float(line_rev_res[0].get("total_rev") or 0.0)
+                        aov_val = round(rev_val / ord_val, 2) if ord_val > 0 else 0.0
+                        money_expr = line_money_expr
 
             # Status & Lifecycle introspection (Truthful accounting)
             status_col = next((c for c in fact_prof.get("dim_cols", []) + list(fact_prof.get("columns", {}).keys()) 
@@ -497,7 +541,7 @@ class DatabasePipelineService:
             cancelled_count = 0
             returned_count = 0
             status_distribution: List[Dict[str, Any]] = []
-            if status_col:
+            if status_col and money_expr:
                 q_status = _clean_sql_identifier(status_col, db_conn.db_type)
                 status_res = execute_sql(f"""
                     SELECT {q_status} as st, COUNT(*) as cnt, ROUND(SUM({money_expr}), 2) as rev
@@ -545,13 +589,17 @@ class DatabasePipelineService:
 
             # Units Sold
             units_sold = 0
-            if line_item_table:
+            if line_item_table and line_item_table != fact_table:
                 q_line = _clean_sql_identifier(line_item_table, db_conn.db_type)
                 line_prof = table_profiles.get(line_item_table, {})
-                line_qty_col = next((c for c in line_prof.get("measure_cols", []) if any(k in c.lower() for k in ["qty", "quant", "units"])), None)
+                line_cols = line_prof.get("columns", {})
+                line_qty_col = next((c for c in line_cols.keys() if any(k in c.lower() for k in ["quantity", "qty", "units"])), None)
                 if line_qty_col:
                     q_lqty = _clean_sql_identifier(line_qty_col, db_conn.db_type)
                     qty_res = execute_sql(f"SELECT SUM({q_lqty}) as cnt FROM {q_line}")
+                    units_sold = int(qty_res[0].get("cnt") or 0) if qty_res else 0
+                else:
+                    qty_res = execute_sql(f"SELECT COUNT(*) as cnt FROM {q_line}")
                     units_sold = int(qty_res[0].get("cnt") or 0) if qty_res else 0
             elif qty_col:
                 q_qty = _clean_sql_identifier(qty_col, db_conn.db_type)
@@ -579,20 +627,90 @@ class DatabasePipelineService:
             top_market_name = "Global"
             top_market_val = 0.0
             country_data: List[Dict[str, Any]] = []
+            geo_dim_label = "Market"
+
             if country_col:
+                geo_dim_label = country_col.replace('_', ' ').title()
                 q_country = _clean_sql_identifier(country_col, db_conn.db_type)
-                country_res = execute_sql(f"""
-                    SELECT {q_country} as name, ROUND(SUM({money_expr}), 2) as val 
-                    FROM {q_fact} 
-                    WHERE {q_country} IS NOT NULL 
-                    GROUP BY {q_country} 
-                    ORDER BY val DESC 
-                    LIMIT 10
-                """)
+                if join_col and line_money_expr and not has_genuine_fact_revenue and q_line:
+                    q_jf = _clean_sql_identifier(join_col[0], db_conn.db_type)
+                    q_jl = _clean_sql_identifier(join_col[1], db_conn.db_type)
+                    country_query = f"""
+                        SELECT {q_fact}.{q_country} as name, ROUND(SUM({line_money_expr}), 2) as val 
+                        FROM {q_fact} 
+                        JOIN {q_line} ON {q_fact}.{q_jf} = {q_line}.{q_jl}
+                        WHERE {q_fact}.{q_country} IS NOT NULL 
+                        GROUP BY name 
+                        ORDER BY val DESC 
+                        LIMIT 10
+                    """
+                elif money_expr:
+                    country_query = f"""
+                        SELECT {q_country} as name, ROUND(SUM({money_expr}), 2) as val 
+                        FROM {q_fact} 
+                        WHERE {q_country} IS NOT NULL 
+                        GROUP BY {q_country} 
+                        ORDER BY val DESC 
+                        LIMIT 10
+                    """
+                else:
+                    country_query = f"""
+                        SELECT {q_country} as name, COUNT(*) as val 
+                        FROM {q_fact} 
+                        WHERE {q_country} IS NOT NULL 
+                        GROUP BY {q_country} 
+                        ORDER BY val DESC 
+                        LIMIT 10
+                    """
+                country_res = execute_sql(country_query)
                 if country_res:
                     top_market_name = country_res[0].get("name") or "Global"
                     top_market_val = float(country_res[0].get("val") or 0)
                     country_data = country_res
+            else:
+                # Relational geographic discovery (e.g., customer -> address -> city -> country)
+                rel_geo_query = None
+                has_geo_chain = "country" in table_norm_map and "city" in table_norm_map and "address" in table_norm_map and customer_table
+                if has_geo_chain and money_expr:
+                    q_co = _clean_sql_identifier(table_norm_map["country"], db_conn.db_type)
+                    q_ci = _clean_sql_identifier(table_norm_map["city"], db_conn.db_type)
+                    q_ad = _clean_sql_identifier(table_norm_map["address"], db_conn.db_type)
+                    q_cu = _clean_sql_identifier(customer_table, db_conn.db_type)
+                    rel_geo_query = f"""
+                        SELECT {q_co}.country as name, ROUND(SUM({q_fact}.{money_expr}), 2) as val
+                        FROM {q_fact}
+                        JOIN {q_cu} ON {q_fact}.customer_id = {q_cu}.customer_id
+                        JOIN {q_ad} ON {q_cu}.address_id = {q_ad}.address_id
+                        JOIN {q_ci} ON {q_ad}.city_id = {q_ci}.city_id
+                        JOIN {q_co} ON {q_ci}.country_id = {q_co}.country_id
+                        GROUP BY name
+                        ORDER BY val DESC
+                        LIMIT 10
+                    """
+                    geo_dim_label = "Country"
+                elif customer_table and money_expr:
+                    cust_prof = table_profiles.get(customer_table, {})
+                    c_geo_col = next((c for c in cust_prof.get("dim_cols", []) if any(k in c.lower() for k in ["country", "state", "city", "region"])), None)
+                    if c_geo_col:
+                        q_cu = _clean_sql_identifier(customer_table, db_conn.db_type)
+                        q_cg = _clean_sql_identifier(c_geo_col, db_conn.db_type)
+                        rel_geo_query = f"""
+                            SELECT {q_cu}.{q_cg} as name, ROUND(SUM({q_fact}.{money_expr}), 2) as val
+                            FROM {q_fact}
+                            JOIN {q_cu} ON {q_fact}.customer_id = {q_cu}.customer_id
+                            WHERE {q_cu}.{q_cg} IS NOT NULL
+                            GROUP BY name
+                            ORDER BY val DESC
+                            LIMIT 10
+                        """
+                        geo_dim_label = c_geo_col.replace('_', ' ').title()
+
+                if rel_geo_query:
+                    country_res = execute_sql(rel_geo_query)
+                    if country_res:
+                        top_market_name = country_res[0].get("name") or "Global"
+                        top_market_val = float(country_res[0].get("val") or 0)
+                        country_data = country_res
 
             # Calculate authentic period trend (SPLY: Same-Period-Last-Year, avoiding partial vs full distortion)
             trend_pct = None
@@ -744,17 +862,38 @@ class DatabasePipelineService:
                 }
             ]
 
-            # -- HIGH-VALUE FEDERATED CHARTS (PHASE 2D, FULLY MULTI-DOMAIN) --
             # Chart 1: Time Series Revenue Velocity
             if date_col:
-                month_expr = date_trunc_fmt.format(col=q_date)
-                monthly_query = f"""
-                    SELECT {month_expr} as period, ROUND(SUM({money_expr}), 2) as value 
-                    FROM {q_fact} 
-                    WHERE {q_date} IS NOT NULL 
-                    GROUP BY period 
-                    ORDER BY period ASC
-                """
+                if join_col and line_money_expr and not has_genuine_fact_revenue:
+                    q_jf = _clean_sql_identifier(join_col[0], db_conn.db_type)
+                    q_jl = _clean_sql_identifier(join_col[1], db_conn.db_type)
+                    month_expr = date_trunc_fmt.format(col=f"{q_fact}.{q_date}")
+                    monthly_query = f"""
+                        SELECT {month_expr} as period, ROUND(SUM({line_money_expr}), 2) as value 
+                        FROM {q_fact} 
+                        JOIN {q_line} ON {q_fact}.{q_jf} = {q_line}.{q_jl}
+                        WHERE {q_fact}.{q_date} IS NOT NULL 
+                        GROUP BY period 
+                        ORDER BY period ASC
+                    """
+                elif money_expr:
+                    month_expr = date_trunc_fmt.format(col=q_date)
+                    monthly_query = f"""
+                        SELECT {month_expr} as period, ROUND(SUM({money_expr}), 2) as value 
+                        FROM {q_fact} 
+                        WHERE {q_date} IS NOT NULL 
+                        GROUP BY period 
+                        ORDER BY period ASC
+                    """
+                else:
+                    month_expr = date_trunc_fmt.format(col=q_date)
+                    monthly_query = f"""
+                        SELECT {month_expr} as period, COUNT(*) as value 
+                        FROM {q_fact} 
+                        WHERE {q_date} IS NOT NULL 
+                        GROUP BY period 
+                        ORDER BY period ASC
+                    """
                 monthly_data = execute_sql(monthly_query)
                 if monthly_data:
                     computed_charts.append({
@@ -775,11 +914,11 @@ class DatabasePipelineService:
             if country_data:
                 computed_charts.append({
                     "id": "revenue_by_market",
-                    "title": f"Revenue by {country_col.replace('_', ' ').title() if country_col else 'Market'}",
+                    "title": f"Revenue by {geo_dim_label}",
                     "subtitle": "Top revenue-generating segments across buyer base",
                     "type": "bar",
                     "table": fact_table,
-                    "x_column": country_col.replace('_', ' ').title() if country_col else "Market",
+                    "x_column": geo_dim_label,
                     "y_column": "Total Revenue ($)",
                     "xKey": "name",
                     "yKey": "val",
@@ -818,6 +957,43 @@ class DatabasePipelineService:
                         "data": seg_res,
                         "color": "#8b5cf6"
                     })
+            elif fact_table == "payment":
+                t_rent = match_table(["rental", "rentals"])
+                t_inv = match_table(["inventory"])
+                t_fc = match_table(["film_category", "filmcategory"])
+                t_cat = match_table(["category", "categories"])
+                if t_rent and t_inv and t_fc and t_cat:
+                    # Relational category revenue breakdown for media rentals
+                    q_rent = _clean_sql_identifier(t_rent, db_conn.db_type)
+                    q_inv = _clean_sql_identifier(t_inv, db_conn.db_type)
+                    q_fc = _clean_sql_identifier(t_fc, db_conn.db_type)
+                    q_cat = _clean_sql_identifier(t_cat, db_conn.db_type)
+                    cat_rev_query = f"""
+                        SELECT {q_cat}.name as name, ROUND(SUM({q_fact}.{money_expr}), 2) as value
+                        FROM {q_fact}
+                        JOIN {q_rent} ON {q_fact}.rental_id = {q_rent}.rental_id
+                        JOIN {q_inv} ON {q_rent}.inventory_id = {q_inv}.inventory_id
+                        JOIN {q_fc} ON {q_inv}.film_id = {q_fc}.film_id
+                        JOIN {q_cat} ON {q_fc}.category_id = {q_cat}.category_id
+                        GROUP BY {q_cat}.name
+                        ORDER BY value DESC
+                        LIMIT 6
+                    """
+                    cat_rev_res = execute_sql(cat_rev_query)
+                    if cat_rev_res:
+                        computed_charts.append({
+                            "id": "revenue_by_segment",
+                            "title": "Revenue Share by Film Category",
+                            "subtitle": "Distribution of rental sales across genres",
+                            "type": "donut",
+                            "table": t_cat,
+                            "x_column": "Category",
+                            "y_column": "Sales ($)",
+                            "xKey": "name",
+                            "yKey": "value",
+                            "data": cat_rev_res,
+                            "color": "#8b5cf6"
+                        })
 
             # Chart 4: Order Lifecycle & Status Distribution
             if status_distribution:
@@ -839,14 +1015,63 @@ class DatabasePipelineService:
             cust_id_col = next((c for c in fact_prof.get("columns", {}).keys() if any(k in c.lower() for k in ["customer", "client", "user_id", "buyer"])), None)
             if cust_id_col:
                 q_cid = _clean_sql_identifier(cust_id_col, db_conn.db_type)
-                cust_spend_query = f"""
-                    SELECT CAST({q_cid} AS TEXT) as name, ROUND(SUM({money_expr}), 2) as value
-                    FROM {q_fact}
-                    WHERE {q_cid} IS NOT NULL
-                    GROUP BY {q_cid}
-                    ORDER BY value DESC
-                    LIMIT 8
-                """
+                cust_spend_query = None
+                
+                # Check if customer name can be joined from customer_table
+                if customer_table:
+                    q_cu = _clean_sql_identifier(customer_table, db_conn.db_type)
+                    cu_cols = table_profiles.get(customer_table, {}).get("columns", {})
+                    name_expr = None
+                    if "first_name" in cu_cols and "last_name" in cu_cols:
+                        name_expr = f"TRIM({q_cu}.first_name || ' ' || {q_cu}.last_name)"
+                    elif "name" in cu_cols:
+                        name_expr = f"{q_cu}.name"
+                    elif any("contactname" in c.lower() for c in cu_cols):
+                        c_col = next(c for c in cu_cols if "contactname" in c.lower())
+                        name_expr = f"{q_cu}.{_clean_sql_identifier(c_col, db_conn.db_type)}"
+
+                    if name_expr and money_expr:
+                        cust_spend_query = f"""
+                            SELECT COALESCE(NULLIF({name_expr}, ''), CAST({q_fact}.{q_cid} AS TEXT)) as name, ROUND(SUM({q_fact}.{money_expr}), 2) as value
+                            FROM {q_fact}
+                            JOIN {q_cu} ON {q_fact}.{q_cid} = {q_cu}.{q_cid}
+                            WHERE {q_fact}.{q_cid} IS NOT NULL
+                            GROUP BY {q_fact}.{q_cid}
+                            ORDER BY value DESC
+                            LIMIT 8
+                        """
+
+                if not cust_spend_query:
+                    if join_col and line_money_expr and not has_genuine_fact_revenue:
+                        q_jf = _clean_sql_identifier(join_col[0], db_conn.db_type)
+                        q_jl = _clean_sql_identifier(join_col[1], db_conn.db_type)
+                        cust_spend_query = f"""
+                            SELECT CAST({q_fact}.{q_cid} AS TEXT) as name, ROUND(SUM({line_money_expr}), 2) as value
+                            FROM {q_fact}
+                            JOIN {q_line} ON {q_fact}.{q_jf} = {q_line}.{q_jl}
+                            WHERE {q_fact}.{q_cid} IS NOT NULL
+                            GROUP BY {q_fact}.{q_cid}
+                            ORDER BY value DESC
+                            LIMIT 8
+                        """
+                    elif money_expr:
+                        cust_spend_query = f"""
+                            SELECT CAST({q_cid} AS TEXT) as name, ROUND(SUM({money_expr}), 2) as value
+                            FROM {q_fact}
+                            WHERE {q_cid} IS NOT NULL
+                            GROUP BY {q_cid}
+                            ORDER BY value DESC
+                            LIMIT 8
+                        """
+                    else:
+                        cust_spend_query = f"""
+                            SELECT CAST({q_cid} AS TEXT) as name, COUNT(*) as value
+                            FROM {q_fact}
+                            WHERE {q_cid} IS NOT NULL
+                            GROUP BY {q_cid}
+                            ORDER BY value DESC
+                            LIMIT 8
+                        """
                 cust_spend_data = execute_sql(cust_spend_query)
                 if cust_spend_data:
                     computed_charts.append({
@@ -864,7 +1089,66 @@ class DatabasePipelineService:
                     })
 
             # Chart 6: Product / Line Item or Secondary Dimension Breakdown
-            if catalog_table and "category" in table_profiles.get(catalog_table, {}).get("columns", {}):
+            if catalog_table and category_table:
+                cat_cols = table_profiles.get(category_table, {}).get("columns", {})
+                prod_cols = table_profiles.get(catalog_table, {}).get("columns", {})
+                cat_name_col = next((c for c in cat_cols.keys() if not is_id_column(c) and any(k in c.lower() for k in ["name", "category", "genre", "title", "label"])), None)
+                cat_id_col = next((c for c in cat_cols.keys() if is_id_column(c)), None)
+                prod_cat_fk = next((c for c in prod_cols.keys() if any(k in c.lower() for k in ["category", "genre"]) and is_id_column(c)), None)
+                
+                bridge_table = match_table([
+                    f"{catalog_table}_{category_table}",
+                    f"{category_table}_{catalog_table}",
+                    f"{catalog_table}{category_table}",
+                    f"{category_table}{catalog_table}"
+                ])
+
+                prod_cat_res = None
+                if bridge_table:
+                    q_br = _clean_sql_identifier(bridge_table, db_conn.db_type)
+                    q_ctbl = _clean_sql_identifier(category_table, db_conn.db_type)
+                    q_ptbl = _clean_sql_identifier(catalog_table, db_conn.db_type)
+                    q_cname = _clean_sql_identifier(cat_name_col or "name", db_conn.db_type)
+                    prod_cat_res = execute_sql(f"""
+                        SELECT {q_ctbl}.{q_cname} as name, COUNT(*) as value
+                        FROM {q_ptbl}
+                        JOIN {q_br} ON {q_ptbl}.{catalog_table}_id = {q_br}.{catalog_table}_id
+                        JOIN {q_ctbl} ON {q_br}.{category_table}_id = {q_ctbl}.{category_table}_id
+                        GROUP BY name
+                        ORDER BY value DESC
+                        LIMIT 8
+                    """)
+                elif cat_name_col and cat_id_col and prod_cat_fk:
+                    q_ctbl = _clean_sql_identifier(category_table, db_conn.db_type)
+                    q_ptbl = _clean_sql_identifier(catalog_table, db_conn.db_type)
+                    q_cname = _clean_sql_identifier(cat_name_col, db_conn.db_type)
+                    q_cid = _clean_sql_identifier(cat_id_col, db_conn.db_type)
+                    q_pfk = _clean_sql_identifier(prod_cat_fk, db_conn.db_type)
+                    
+                    prod_cat_res = execute_sql(f"""
+                        SELECT {q_ctbl}.{q_cname} as name, COUNT(*) as value
+                        FROM {q_ptbl}
+                        JOIN {q_ctbl} ON {q_ptbl}.{q_pfk} = {q_ctbl}.{q_cid}
+                        GROUP BY name
+                        ORDER BY value DESC
+                        LIMIT 8
+                    """)
+
+                if prod_cat_res:
+                    computed_charts.append({
+                        "id": "catalog_category_distribution",
+                        "title": f"Catalog Distribution by {category_table.replace('_', ' ').title()}",
+                        "subtitle": "Product diversity across inventory taxonomy",
+                        "type": "bar",
+                        "table": catalog_table,
+                        "x_column": "Category",
+                        "y_column": "Products",
+                        "xKey": "name",
+                        "yKey": "value",
+                        "data": prod_cat_res,
+                        "color": "#ec4899"
+                    })
+            elif catalog_table and "category" in table_profiles.get(catalog_table, {}).get("columns", {}):
                 cat_tbl_prof = table_profiles.get(catalog_table, {})
                 q_ctbl = _clean_sql_identifier(catalog_table, db_conn.db_type)
                 prod_cat_res = execute_sql(f"""
@@ -906,6 +1190,263 @@ class DatabasePipelineService:
                     "filter_type": "date_range",
                     "options": []
                 })
+
+        elif db_conn.db_type.lower() == "mongodb":
+            # -------------------------------------------------------------
+            # MONGODB NATIVE AGGREGATION & ANALYTICS PIPELINE
+            # -------------------------------------------------------------
+            tbl = selected_table if (selected_table and selected_table in schema) else available_tables[0]
+            prof = table_profiles.get(tbl, {})
+
+            import pymongo
+            try:
+                mongo_client = pymongo.MongoClient(decrypted_conn_str, serverSelectionTimeoutMS=5000)
+                try:
+                    mongo_db = mongo_client.get_default_database()
+                except Exception:
+                    mongo_db = mongo_client[getattr(db_conn, "database", None) or "test"]
+                coll = mongo_db[tbl]
+
+                # 1. Total document count
+                try:
+                    total_records = coll.estimated_document_count()
+                except Exception:
+                    total_records = coll.count_documents({})
+
+                computed_kpis.append({
+                    "id": f"{tbl}_total_rows",
+                    "label": f"Total {tbl.replace('_', ' ').title()} Documents",
+                    "value": f"{total_records:,}",
+                    "raw_value": total_records,
+                    "table": tbl,
+                    "format": "integer",
+                    "format_type": "integer",
+                    "recipe_type": "atomic",
+                    "trend_direction": "neutral",
+                    "trend_pct": None,
+                    "trend_text": f"{total_records:,} verified documents"
+                })
+
+                # 2. Measures (sum and avg)
+                for m_col in prof.get("measure_cols", [])[:3]:
+                    col_name_title = m_col.replace("_", " ").title()
+                    fmt = "currency" if is_monetary_column(m_col) else "number"
+                    try:
+                        m_pipe = [
+                            {"$match": {m_col: {"$ne": None}}},
+                            {"$group": {
+                                "_id": None,
+                                "s_val": {"$sum": f"${m_col}"},
+                                "a_val": {"$avg": f"${m_col}"}
+                            }}
+                        ]
+                        agg_res = list(coll.aggregate(m_pipe))
+                        if agg_res:
+                            s_v = float(agg_res[0].get("s_val") or 0)
+                            a_v = float(agg_res[0].get("a_val") or 0)
+
+                            computed_kpis.append({
+                                "id": f"{tbl}_{m_col}_sum",
+                                "label": f"Total {col_name_title}",
+                                "value": f"${s_v:,.2f}" if fmt == "currency" else f"{s_v:,.1f}",
+                                "raw_value": s_v,
+                                "table": tbl,
+                                "format": fmt,
+                                "format_type": fmt,
+                                "recipe_type": "atomic",
+                                "trend_direction": "neutral",
+                                "trend_pct": None,
+                                "trend_text": "cumulative sum"
+                            })
+
+                            computed_kpis.append({
+                                "id": f"{tbl}_{m_col}_avg",
+                                "label": f"Average {col_name_title}",
+                                "value": f"${a_v:,.2f}" if fmt == "currency" else f"{a_v:,.1f}",
+                                "raw_value": a_v,
+                                "table": tbl,
+                                "format": fmt,
+                                "format_type": fmt,
+                                "recipe_type": "atomic",
+                                "trend_direction": "neutral",
+                                "trend_pct": None,
+                                "trend_text": "mean value"
+                            })
+                    except Exception as me:
+                        print(f"[DB-Pipeline Mongo measure error] {m_col}: {me}")
+
+                # 3. Categorical distinct count
+                for d_col in prof.get("dim_cols", [])[:2]:
+                    try:
+                        d_vals = coll.distinct(d_col)
+                        d_cnt = len(d_vals)
+                        computed_kpis.append({
+                            "id": f"{tbl}_{d_col}_distinct",
+                            "label": f"Distinct {d_col.replace('_', ' ').title()}",
+                            "value": f"{d_cnt:,}",
+                            "raw_value": d_cnt,
+                            "table": tbl,
+                            "format": "integer",
+                            "format_type": "integer",
+                            "recipe_type": "atomic",
+                            "trend_direction": "neutral",
+                            "trend_pct": None,
+                            "trend_text": "unique segments"
+                        })
+                    except Exception:
+                        pass
+
+                # 4. Charts: Comprehensive Multi-Perspective Visualizations (4-5 Charts)
+                tbl_title = tbl.replace('_', ' ').title()
+                use_sample = total_records > 50000
+                sample_stage = [{"$sample": {"size": 25000}}] if use_sample else []
+
+                # 4A. Time Series Trend Chart (Area)
+                if prof.get("date_cols"):
+                    t_col = prof["date_cols"][0]
+                    try:
+                        t_m_col = prof.get("measure_cols", [None])[0]
+                        t_expr = {"$sum": f"${t_m_col}"} if t_m_col else {"$sum": 1}
+                        t_pipe = sample_stage + [
+                            {"$match": {t_col: {"$ne": None}}},
+                            {"$group": {
+                                "_id": {"$dateToString": {"format": "%Y-%m", "date": f"${t_col}"}},
+                                "value": t_expr
+                            }},
+                            {"$sort": {"_id": 1}},
+                            {"$limit": 24}
+                        ]
+                        t_res = list(coll.aggregate(t_pipe))
+                        t_data = [{"period": str(r["_id"]), "value": round(float(r["value"]), 2)} for r in t_res if r.get("_id")]
+                        if t_data:
+                            computed_charts.append({
+                                "id": f"{tbl}_trend",
+                                "title": f"{tbl_title} Activity Trend Over Time",
+                                "subtitle": f"Time-series trajectory along {t_col.replace('_', ' ').title()}",
+                                "type": "area",
+                                "table": tbl,
+                                "x_column": "Period",
+                                "y_column": t_m_col.replace('_', ' ').title() if t_m_col else "Volume",
+                                "xKey": "period",
+                                "yKey": "value",
+                                "data": t_data,
+                                "color": "#6c47ff"
+                            })
+                    except Exception as te:
+                        print(f"[DB-Pipeline Mongo time series error]: {te}")
+
+                # 4B. Categorical Distribution Charts (Bar & Donut)
+                chart_colors = ["#00c2cb", "#8b5cf6", "#ec4899", "#f59e0b", "#10b981"]
+                for idx, d_col in enumerate(prof.get("dim_cols", [])[:3]):
+                    m_col = prof.get("measure_cols", [None])[0]
+                    try:
+                        if m_col:
+                            chart_pipe = sample_stage + [
+                                {"$match": {d_col: {"$ne": None}, m_col: {"$ne": None}}},
+                                {"$group": {"_id": f"${d_col}", "value": {"$sum": f"${m_col}"}}},
+                                {"$sort": {"value": -1}},
+                                {"$limit": 8}
+                            ]
+                        else:
+                            chart_pipe = sample_stage + [
+                                {"$match": {d_col: {"$ne": None}}},
+                                {"$group": {"_id": f"${d_col}", "value": {"$sum": 1}}},
+                                {"$sort": {"value": -1}},
+                                {"$limit": 8}
+                            ]
+                        chart_res = list(coll.aggregate(chart_pipe))
+                        c_data = [{"name": str(r["_id"]), "value": round(float(r["value"]), 2)} for r in chart_res if r.get("_id")]
+                        if c_data:
+                            c_type = "donut" if idx == 1 else "bar"
+                            computed_charts.append({
+                                "id": f"{tbl}_{d_col}_breakdown",
+                                "title": f"{tbl_title} Distribution by {d_col.replace('_', ' ').title()}",
+                                "subtitle": f"Segment breakdown by {d_col}",
+                                "type": c_type,
+                                "table": tbl,
+                                "x_column": d_col.replace("_", " ").title(),
+                                "y_column": m_col.replace("_", " ").title() if m_col else "Volume",
+                                "xKey": "name",
+                                "yKey": "value",
+                                "data": c_data,
+                                "color": chart_colors[idx % len(chart_colors)]
+                            })
+                    except Exception as ce:
+                        print(f"[DB-Pipeline Mongo chart error] {d_col}: {ce}")
+
+                # 4C. Secondary Measure Breakdown (Top Entities by Secondary Measure)
+                if len(prof.get("measure_cols", [])) > 1 and prof.get("dim_cols"):
+                    d_col = prof["dim_cols"][0]
+                    m_col2 = prof["measure_cols"][1]
+                    try:
+                        m2_pipe = sample_stage + [
+                            {"$match": {d_col: {"$ne": None}, m_col2: {"$ne": None}}},
+                            {"$group": {"_id": f"${d_col}", "value": {"$sum": f"${m_col2}"}}},
+                            {"$sort": {"value": -1}},
+                            {"$limit": 8}
+                        ]
+                        m2_res = list(coll.aggregate(m2_pipe))
+                        m2_data = [{"name": str(r["_id"]), "value": round(float(r["value"]), 2)} for r in m2_res if r.get("_id")]
+                        if m2_data:
+                            computed_charts.append({
+                                "id": f"{tbl}_{m_col2}_breakdown",
+                                "title": f"Top {d_col.replace('_', ' ').title()} by {m_col2.replace('_', ' ').title()}",
+                                "subtitle": f"Distribution of {m_col2.replace('_', ' ').title()} across key segments",
+                                "type": "bar",
+                                "table": tbl,
+                                "x_column": d_col.replace("_", " ").title(),
+                                "y_column": m_col2.replace("_", " ").title(),
+                                "xKey": "name",
+                                "yKey": "value",
+                                "data": m2_data,
+                                "color": "#f59e0b"
+                            })
+                    except Exception as me:
+                        print(f"[DB-Pipeline Mongo measure2 chart error]: {me}")
+
+                # 4D. Tertiary Measure Breakdown if available (e.g. 5th chart)
+                if len(prof.get("measure_cols", [])) > 2 and len(prof.get("dim_cols", [])) > 0:
+                    d_col = prof["dim_cols"][0]
+                    m_col3 = prof["measure_cols"][2]
+                    try:
+                        m3_pipe = sample_stage + [
+                            {"$match": {d_col: {"$ne": None}, m_col3: {"$ne": None}}},
+                            {"$group": {"_id": f"${d_col}", "value": {"$sum": f"${m_col3}"}}},
+                            {"$sort": {"value": -1}},
+                            {"$limit": 8}
+                        ]
+                        m3_res = list(coll.aggregate(m3_pipe))
+                        m3_data = [{"name": str(r["_id"]), "value": round(float(r["value"]), 2)} for r in m3_res if r.get("_id")]
+                        if m3_data:
+                            computed_charts.append({
+                                "id": f"{tbl}_{m_col3}_breakdown",
+                                "title": f"Top {d_col.replace('_', ' ').title()} by {m_col3.replace('_', ' ').title()}",
+                                "subtitle": f"Distribution of {m_col3.replace('_', ' ').title()} across key segments",
+                                "type": "donut",
+                                "table": tbl,
+                                "x_column": d_col.replace("_", " ").title(),
+                                "y_column": m_col3.replace("_", " ").title(),
+                                "xKey": "name",
+                                "yKey": "value",
+                                "data": m3_data,
+                                "color": "#10b981"
+                            })
+                    except Exception as me:
+                        print(f"[DB-Pipeline Mongo measure3 chart error]: {me}")
+
+                all_filters = [
+                    {
+                        "column": f"{tbl}.{d_col}",
+                        "label": d_col.replace("_", " ").title(),
+                        "filter_type": "multiselect",
+                        "options": []
+                    }
+                    for d_col in prof.get("dim_cols", [])[:3]
+                ]
+
+                mongo_client.close()
+            except Exception as mongo_err:
+                print(f"[DB-Pipeline Mongo error]: {mongo_err}")
 
         else:
             # -------------------------------------------------------------
@@ -1052,6 +1593,36 @@ class DatabasePipelineService:
                         "yKey": "value",
                         "data": c_data,
                         "color": "#00c2cb" if idx == 0 else "#8b5cf6"
+                    })
+
+            # Secondary Measure Breakdown for Single Table
+            if len(prof["measure_cols"]) > 1 and prof["dim_cols"]:
+                d_col = prof["dim_cols"][0]
+                q_d = _clean_sql_identifier(d_col, db_conn.db_type)
+                m_col2 = prof["measure_cols"][1]
+                q_m2 = _clean_sql_identifier(m_col2, db_conn.db_type)
+                m2_query = f"""
+                    SELECT {q_d} as name, ROUND(SUM({q_m2}), 2) as value 
+                    FROM {q_tbl} 
+                    WHERE {q_d} IS NOT NULL AND {q_m2} IS NOT NULL
+                    GROUP BY {q_d} 
+                    ORDER BY value DESC 
+                    LIMIT 8
+                """
+                m2_data = execute_sql(m2_query)
+                if m2_data:
+                    computed_charts.append({
+                        "id": f"{tbl}_{m_col2}_breakdown",
+                        "title": f"Top {d_col.replace('_', ' ').title()} by {m_col2.replace('_', ' ').title()}",
+                        "subtitle": f"Distribution of {m_col2.replace('_', ' ').title()} across key segments",
+                        "type": "bar",
+                        "table": tbl,
+                        "x_column": d_col.replace("_", " ").title(),
+                        "y_column": m_col2.replace("_", " ").title(),
+                        "xKey": "name",
+                        "yKey": "value",
+                        "data": m2_data,
+                        "color": "#f59e0b"
                     })
 
             all_filters = [

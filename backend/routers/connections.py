@@ -323,6 +323,9 @@ def preview_connection_table(
         raise HTTPException(status_code=400, detail="Table name is required")
 
     decrypted_password = decrypt_password(c.password) if c.password else ""
+    raw_conn = c.connection_string or (c.host if c.host and ("mongodb" in str(c.host) or "://" in str(c.host)) else None)
+    decrypted_conn = decrypt_password(raw_conn) if raw_conn else ""
+
     return db_connection_service.preview_table(
         db_type=c.db_type,
         host=c.host,
@@ -330,7 +333,7 @@ def preview_connection_table(
         username=c.username,
         password=decrypted_password,
         database=c.database,
-        connection_string=c.connection_string,
+        connection_string=decrypted_conn,
         table_name=target_table,
         limit=preview_req.limit or 50,
         filter_dict=preview_req.filter

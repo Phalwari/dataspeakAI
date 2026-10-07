@@ -59,16 +59,8 @@ def get_gemini_keys() -> List[str]:
 
 
 def get_deepseek_keys() -> List[str]:
-    """Harvest all configured DeepSeek keys from environment (DEEPSEEK_API_KEY_1..9, DEEPSEEK_API_KEY)."""
-    keys = []
-    for i in range(1, 10):
-        k = os.getenv(f"DEEPSEEK_API_KEY_{i}")
-        if k and k.strip() and k not in keys:
-            keys.append(k.strip())
-    k = os.getenv("DEEPSEEK_API_KEY")
-    if k and k.strip() and k not in keys:
-        keys.append(k.strip())
-    return keys
+    """DeepSeek disabled per configuration."""
+    return []
 
 
 def get_gemini_key() -> Optional[str]:
@@ -271,8 +263,9 @@ class LLMPoolManager:
         # 1. Google Gemini Candidates (Primary provider - fast, high quota)
         if ChatGoogleGenerativeAI is not None and gemini_keys:
             gemini_models = [
-                "gemini-2.5-flash",
-                "gemini-1.5-flash",
+                "gemini-flash-lite-latest",
+                "gemma-4-26b-a4b-it",
+                "gemini-3.8-flash",
             ]
             for key in gemini_keys:
                 for g_mod in gemini_models:
@@ -288,10 +281,7 @@ class LLMPoolManager:
 
         # 2. Groq Candidates (Instant failover provider on 429/503)
         if ChatGroq is not None and groq_keys:
-            if fast_model:
-                groq_models = ["llama-3.1-8b-instant", "qwen/qwen3.8-27b", "llama-3.3-70b-versatile"]
-            else:
-                groq_models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768", "qwen/qwen3.8-27b"]
+            groq_models = ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"]
 
             for key in groq_keys:
                 for gr_mod in groq_models:
@@ -306,22 +296,6 @@ class LLMPoolManager:
                         llms.append(ChatGroq(**kwargs))
                     except Exception as e:
                         logger.debug(f"[LLM Pool] Groq candidate init notice ({gr_mod}): {e}")
-
-        # 3. DeepSeek Candidates (Secondary failover)
-        if ChatOpenAI is not None and deepseek_keys:
-            for key in deepseek_keys:
-                try:
-                    kwargs: dict[str, Any] = {
-                        "model": "deepseek-chat",
-                        "temperature": temperature,
-                        "api_key": key,
-                        "base_url": "https://api.deepseek.com"
-                    }
-                    if json_mode:
-                        kwargs["model_kwargs"] = {"response_format": {"type": "json_object"}}
-                    llms.append(ChatOpenAI(**kwargs))
-                except Exception as e:
-                    logger.debug(f"[LLM Pool] DeepSeek candidate init notice: {e}")
 
         # 4. Fallback if no valid client instances could be initialized
         if not llms:

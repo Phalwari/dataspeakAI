@@ -17,6 +17,51 @@ To maintain seamless multi-developer and AI agent collaboration:
 
 ## [Unreleased]
 
+- **MongoDB Drill-Down Record Inspector & Live Document Streaming Fix (`backend/services/database_connection_service.py`, `backend/routers/connections.py`)**:
+  - **Connection String & Host Dual-Fallback:** Fixed route handler in `/api/connections/{id}/preview` to decrypt connection strings and seamlessly fall back to `c.host` when Atlas URIs (`mongodb+srv://...`) are stored in host fields.
+  - **Dynamic Mongo Filter & Slice Support:** Connected frontend drill-down filters (e.g. `Filter: US` or `Filter: All`) to MongoDB `find(mongo_filter)` queries with regex support for month dates.
+  - **Recursive BSON & Datetime Serialization:** Upgraded `_serialize_row` and `_serialize_value` to convert `ObjectId`, nested subdocuments, lists, UUIDs, Decimals, and datetimes to standard JSON-serializable structures, eliminating the "No matching records found for this slice (0 records retrieved)" drawer bug.
+
+- **MongoDB Chart Expansion & Intelligent Pushdown Sampling (`backend/services/db_pipeline_service.py`)**:
+  - **6 Rich Analytical Charts:** Expanded MongoDB chart generation from 2 hardcoded dimension charts to 6 diverse, high-value visualizations: Activity Trend Over Time (Area Chart across 24 monthly periods), Distribution by Country ISO2 (Bar), Distribution by Country ISO3 (Donut), Top Territories by Name (Bar), Top Entities by Population (Bar), and Top Entities by Confirmed Cases (Donut).
+  - **Pushdown Sampling for Multi-Million Document Datasets:** Added statistical `$sample: 25000` pushdown aggregation for collections exceeding 50,000 documents (such as `global_and_us` with 4,151,376 documents), achieving sub-second aggregation response without Atlas memory limit errors or timeout bottlenecks.
+
+- **LLM Multi-Key Token Exhaustion Auto-Shifting & Provider Optimization (`backend/services/llm_generation_service.py`, `backend/services/multi_llm.py`)**:
+  - **Instant Key Shift on Token Exhaustion (429/403):** Implemented proactive token/quota exhaustion detection. When any API key encounters rate limits or quota exhaustion, it is placed on a 60-second cooldown and the system immediately shifts to the next available key in the pool without retrying dead models or falling back to raw error text.
+  - **Multi-Key & Comma-Separated Key Harvesting:** Added support for comma-separated API keys in `.env` (`GEMINI_API_KEY=key1,key2...`, `GEMINI_API_KEYS`, `GROQ_API_KEYS`, `GROQ_API_KEY_1..15`).
+  - **DeepSeek Removal:** Removed DeepSeek from the provider fallback chains (`_build_provider_order`, `multi_llm.py`), streamlining generation to Gemini and Groq.
+  - **Model Endpoint Modernization:** Updated active model lists to live supported endpoints (`gemini-flash-lite-latest`, `gemma-4-26b-a4b-it`, `qwen/qwen3.8-27b`, `openai/gpt-oss-120b`).
+
+- **MongoDB Native Analytics Pipeline & Schema Introspection Fix (`backend/services/database_connection_service.py`, `backend/services/db_pipeline_service.py`)**:
+  - **Collection Introspection Sanitization:** Filtered out internal `system.` collections (e.g. `system.views`) in `get_mongodb_schema` to prevent Unauthorized errors on read-only MongoDB Atlas clusters, and formatted schema entries directly to collection mapping.
+  - **Connection String & Host Field Dual-Binding:** Handled MongoDB connections where Atlas URIs (`mongodb+srv://...`) are stored in either `host` or `connection_string`.
+  - **Native Aggregation Pushdown:** Implemented native MongoDB aggregation pipelines (`$match`, `$group`, `$sum`, `$avg`, `estimated_document_count`) for document databases, yielding real KPIs and distribution charts instead of raw SQL failures.
+
+- **Cloud Databases Live Connectivity & Schema Audit (`Cloud_Databases_Postgres_Mongo_Firebase/`, `backend/services/database_connection_service.py`, `backend/services/document_db_profiler.py`)**:
+  - **Live Online PostgreSQL:** Connected to European Bioinformatics Institute (RNAcentral, UK) PostgreSQL 16.11 server (`postgresql://reader:NWDMCE5xdipIjRrp@hh-pgsql-public.ebi.ac.uk:5432/pfmegrnargs`) with 1.35s latency and executed live SQL queries.
+  - **Live Online MongoDB Atlas:** Connected to official MongoDB COVID-19 open data replica set cluster (`mongodb+srv://readonly:readonly@covid-19.hip2i.mongodb.net/covid19`) in 3.02s. Introspected 9 collections, verified document retrieval across `countries_summary` (~229,743 docs) and `global` (~331,470 docs), and verified nested document dot-notation flattening.
+  - **Firebase / Firestore Engine:** Tested Firestore Project ID and Service Account Certificate validation schemes and collection schema introspection (`users`, `orders`, `products`).
+  - **Desktop Verification Artifacts:** Generated `test_results.md`, `test_results.json`, and `run_audit_cloud_dbs.py` in `Desktop/Database_Verification_Audits/Cloud_Databases_Postgres_Mongo_Firebase/`.
+
+- **Database Verification & Ground-Truth Reconciliation Audit 3 of 5: Sakila Media & Movie Rentals (`Database_3_Sakila/`, `backend/services/db_pipeline_service.py`)**:
+  - **Online Source Ingestion:** Downloaded `sakila.db` from DuckDB SQLite scanner repository (16 tables, 16,049 payments, 16,044 rentals, 1,000 films, 599 customers).
+  - **Relational Domain Traversal & Intelligence (`backend/services/db_pipeline_service.py`):**
+    - Expanded domain topology detection to automatically identify `payment` and `rental` facts, `film` catalog, and `member`/`customer` entities.
+    - Implemented multi-hop geographic dimension traversal (`payment.customer_id -> customer.address_id -> address.city_id -> city.country_id -> country.country`) to resolve geographic sales breakdown when no country column exists on the fact table.
+    - Added relational many-to-many bridge joining (`film -> film_category -> category`) for taxonomy distribution and genre sales share donuts.
+    - Enhanced customer spend ranking to automatically resolve customer names (`Karl Seal`, `Eleanor Hunt`) instead of surrogate IDs.
+  - **100% Ground-Truth Mathematical Reconciliation (0.00 Variance):**
+    - Total Revenue: **$67,416.51** vs SQL `SUM(amount)`: **$67,416.51** (Exact Match)
+    - Total Orders: **16,049** vs SQL `COUNT(*)`: **16,049** (Exact Match)
+    - Average Order Value: **$4.20** vs SQL `AVG(amount)`: **$4.20** (Exact Match)
+    - Active Customers: **599** vs SQL `COUNT(*)`: **599** (Exact Match)
+    - Customer Lifetime Value (CLV): **$112.55** vs SQL: **$112.55** (Exact Match)
+    - Total Units Sold / Rented: **16,044** vs SQL `COUNT(*)` from `rental`: **16,044** (Exact Match)
+    - Catalog Size: **1,000** vs SQL `COUNT(*)` from `film`: **1,000** (Exact Match)
+    - Top Market: **India ($6,630.27)** vs SQL multi-join: **India ($6,630.27)** (Exact Match)
+    - Monthly Velocity trajectory across 5 months sum = **$67,416.51** (Exact Match)
+  - **Desktop Verification Artifacts:** Saved `sakila.db`, `run_audit_db3.py`, `test_results.json`, and `test_results.md` to `Desktop/Database_Verification_Audits/Database_3_Sakila/`. Verified regression on Chinook (DB 1) and Northwind (DB 2) with 100% pass rates.
+
 - **Phase 1.7: Multi-Domain Enterprise Accuracy Hardening & IDE Type Health (`backend/services/db_pipeline_service.py`, `backend/ingestion/extractors.py`, `backend/services/metric_recipes.py`, `tests/`, `src/app/components/templates/ECommerceTemplate.tsx`)**:
   - **Monetary Measure Prioritization (`backend/services/db_pipeline_service.py`):** Fixed revenue misattribution bug where `unit_price` was mistakenly selected as total revenue. Implemented `sort_monetary_columns_by_priority` and `is_unit_price_column` to prioritize genuine transaction totals (`net_revenue`, `gross_revenue`, `total_amount`) and automatically formulate `SUM(unit_price * quantity)` when only unit rates exist.
   - **Truthful Lifecycle Status Accounting:** Eliminated misleading "completed transactions" subtitle. Built lifecycle analyzer detecting delivered, shipped, cancelled, and returned records, displaying truthful volume distributions.

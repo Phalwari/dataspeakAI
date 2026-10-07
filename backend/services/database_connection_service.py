@@ -3,26 +3,30 @@ Database Connection Service
 Handles testing connections and fetching schema information
 """
 
-try:
-    import psycopg2
-except ImportError:
-    psycopg2 = None
-
-try:
-    import pymongo
-except ImportError:
-    pymongo = None
-
-try:
-    import pymysql
-except ImportError:
-    pymysql = None
-
-import sqlite3
 from typing import Dict, List, Any, Tuple, Optional
+import sqlite3
 import json
 import threading
 import re
+from functools import lru_cache
+
+psycopg2: Any = None
+try:
+    import psycopg2
+except ImportError:
+    pass
+
+pymongo: Any = None
+try:
+    import pymongo
+except ImportError:
+    pass
+
+pymysql: Any = None
+try:
+    import pymysql
+except ImportError:
+    pass
 from functools import lru_cache
 
 import os
@@ -143,23 +147,29 @@ class DatabaseConnectionService:
         return table_name
     
     @staticmethod
-    def _serialize_row(row: dict) -> dict:
+    def _serialize_value(val: Any) -> Any:
         from decimal import Decimal
         import datetime as dt
         import uuid as uuid_mod
-        result = {}
-        for k, v in row.items():
-            if isinstance(v, Decimal):
-                result[k] = float(v)
-            elif isinstance(v, (dt.datetime, dt.date)):
-                result[k] = v.isoformat()
-            elif isinstance(v, uuid_mod.UUID):
-                result[k] = str(v)
-            elif isinstance(v, bytes):
-                result[k] = v.decode("utf-8", errors="replace")
-            else:
-                result[k] = v
-        return result
+        if val is None or isinstance(val, (int, float, bool, str)):
+            return val
+        if isinstance(val, Decimal):
+            return float(val)
+        if isinstance(val, (dt.datetime, dt.date)):
+            return val.isoformat()
+        if isinstance(val, uuid_mod.UUID):
+            return str(val)
+        if isinstance(val, bytes):
+            return val.decode("utf-8", errors="replace")
+        if isinstance(val, dict):
+            return {str(k): DatabaseConnectionService._serialize_value(v) for k, v in val.items()}
+        if isinstance(val, (list, tuple, set)):
+            return [DatabaseConnectionService._serialize_value(item) for item in val]
+        return str(val)
+
+    @staticmethod
+    def _serialize_row(row: dict) -> dict:
+        return {str(k): DatabaseConnectionService._serialize_value(v) for k, v in row.items()}
 
     @staticmethod
     def is_safe_sql(query: str) -> tuple[bool, str]:
@@ -201,8 +211,8 @@ class DatabaseConnectionService:
         Falls back to FIRESTORE_MOCK_SCHEMA if firebase_admin is unavailable.
         """
         try:
-            import firebase_admin
-            from firebase_admin import credentials, firestore as fs_client
+            import firebase_admin  # type: ignore[import-not-found,import-untyped]
+            from firebase_admin import credentials, firestore as fs_client  # type: ignore[import-not-found,import-untyped]
 
             conn_str = connection_string.strip() if connection_string else ""
             if not conn_str:
@@ -259,7 +269,7 @@ class DatabaseConnectionService:
             return FIRESTORE_MOCK_SCHEMA
 
     @staticmethod
-    def test_postgresql(host: str = None, port: int = 5432, username: str = None, password: str = None, database: str = "postgres", connection_string: str = None) -> Tuple[bool, str]:
+    def test_postgresql(host: Optional[str] = None, port: Optional[int] = 5432, username: Optional[str] = None, password: Optional[str] = None, database: Optional[str] = "postgres", connection_string: Optional[str] = None) -> Tuple[bool, str]:
         """Test PostgreSQL connection"""
         try:
             if connection_string:
@@ -306,7 +316,7 @@ class DatabaseConnectionService:
             return False, f"MongoDB connection failed: {str(e)}"
     
     @staticmethod
-    def test_mysql(host: str, port: int, username: str, password: str, database: str = None) -> Tuple[bool, str]:
+    def test_mysql(host: str, port: int, username: str, password: str, database: Optional[str] = None) -> Tuple[bool, str]:
         """Test MySQL/MariaDB connection"""
         try:
             conn = pymysql.connect(
@@ -326,7 +336,7 @@ class DatabaseConnectionService:
         """Test SQLite connection"""
         try:
             import os
-            db_path = str(database_path or "").strip().strip('"').strip("'")
+            db_path = (database_path or "").strip().strip('"\'')
             if not db_path:
                 return False, "SQLite file path is empty"
             if not os.path.exists(db_path):
@@ -411,32 +421,39 @@ class DatabaseConnectionService:
     
     @staticmethod
     def get_mongodb_schema(connection_string: Optional[str] = None) -> Dict[str, Any]:
-        """Fetch MongoDB schema — limited to the connection string's default database only."""
+        """Fetch MongoDB schema — collections mapped to their fields and row count."""
         try:
             client = pymongo.MongoClient(connection_string, serverSelectionTimeoutMS=5000)
             schema = {}
 
             try:
                 db = client.get_default_database()
-                target_dbs = [db]
             except Exception:
-                # If URI does not specify a default database, use non-admin databases
                 all_dbs = client.list_database_names()
-                target_dbs = [client[d] for d in all_dbs if d not in ['admin', 'config', 'local']]
+                usable_dbs = [d for d in all_dbs if d not in ['admin', 'config', 'local']]
+                db = client[usable_dbs[0]] if usable_dbs else client["test"]
 
-            for db in target_dbs:
-                db_name = db.name
-                collections = db.list_collection_names()
+            collections = [c for c in db.list_collection_names() if not c.startswith("system.")]
 
-                db_schema = {}
-                for collection_name in collections:
+            for collection_name in collections:
+                try:
                     collection = db[collection_name]
                     sample = collection.find_one()
-                    if sample:
-                        fields = {k: type(v).__name__ for k, v in sample.items()} if isinstance(sample, dict) else {}
-                        db_schema[collection_name] = fields
-
-                schema[db_name] = db_schema
+                    fields = {}
+                    if sample and isinstance(sample, dict):
+                        for k, v in sample.items():
+                            fields[k] = type(v).__name__
+                    count = 0
+                    try:
+                        count = collection.estimated_document_count()
+                    except Exception:
+                        pass
+                    schema[collection_name] = {
+                        "columns": fields,
+                        "row_count": count
+                    }
+                except Exception:
+                    continue
 
             client.close()
             return schema
@@ -502,7 +519,7 @@ class DatabaseConnectionService:
             return {"error": str(e)}
 
     @staticmethod
-    def get_tables(db_type: str, host: str, port: int, username: str, password: str, database: str = None, connection_string: str = None) -> List[Dict[str, Any]]:
+    def get_tables(db_type: str, host: Optional[str] = None, port: Optional[int] = None, username: Optional[str] = None, password: Optional[str] = None, database: Optional[str] = None, connection_string: Optional[str] = None) -> List[Dict[str, Any]]:
         """Fetch list of tables and their row counts"""
         tables_info = []
         try:
@@ -525,28 +542,36 @@ class DatabaseConnectionService:
                 tables = [row[0] for row in cursor.fetchall()]
                 for t in tables:
                     cursor.execute(f"SELECT count(*) FROM `{t}`")
-                    count = cursor.fetchone()[0]
+                    row = cursor.fetchone()
+                    count = row[0] if row else 0
                     tables_info.append({"name": t, "rows": count})
                 cursor.close()
                 conn.close()
             elif db_type.lower() == "mongodb":
-                client = pymongo.MongoClient(connection_string, serverSelectionTimeoutMS=5000)
-                # We need to find the specific database. For MongoDB the DB name is often part of the connection string or specified.
-                db = client.get_default_database() if client.get_default_database().name else client[database or "test"]
+                actual_conn = connection_string or (host if host and ("mongodb" in host or "://" in host) else None)
+                client = pymongo.MongoClient(actual_conn, serverSelectionTimeoutMS=8000)
+                try:
+                    db = client.get_default_database()
+                except Exception:
+                    db = client[database or "test"]
+                if db is None or not getattr(db, "name", None):
+                    db = client[database or "test"]
                 collections = db.list_collection_names()
                 for c in collections:
-                    count = db[c].estimated_document_count()
-                    tables_info.append({"name": c, "rows": count})
+                    if not c.startswith("system."):
+                        count = db[c].estimated_document_count()
+                        tables_info.append({"name": c, "rows": count})
                 client.close()
             elif db_type.lower() == "sqlite":
-                db_path = (database or host).strip('"').strip("'")
+                db_path = (database or host or "").strip('"\'')
                 conn = sqlite3.connect(db_path)
                 cursor = conn.cursor()
                 cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
                 tables = [row[0] for row in cursor.fetchall()]
                 for t in tables:
                     cursor.execute(f'SELECT count(*) FROM "{t}"')
-                    count = cursor.fetchone()[0]
+                    row = cursor.fetchone()
+                    count = row[0] if row else 0
                     tables_info.append({"name": t, "rows": count})
                 cursor.close()
                 conn.close()
@@ -561,10 +586,10 @@ class DatabaseConnectionService:
             return [{"error": str(e)}]
 
     @staticmethod
-    def preview_table(db_type: str, host: int, port: int, username: str, password: str, database: str = None, connection_string: str = None, table_name: str = None, limit: int = 50, filter_dict: Dict[str, Any] = None) -> Dict[str, Any]:
+    def preview_table(db_type: str, host: Optional[str] = None, port: Optional[int] = None, username: Optional[str] = None, password: Optional[str] = None, database: Optional[str] = None, connection_string: Optional[str] = None, table_name: Optional[str] = None, limit: int = 50, filter_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Fetch preview data for a specific table"""
         try:
-            safe_table_name = DatabaseConnectionService._validate_table_name(table_name)
+            safe_table_name = DatabaseConnectionService._validate_table_name(table_name or "")
             where_clause = ""
             params = []
             if filter_dict:
@@ -607,7 +632,7 @@ class DatabaseConnectionService:
                         cursor = conn.cursor()
                         query = f'SELECT * FROM "{safe_table_name}" {where_clause} LIMIT %s'
                         cursor.execute(query, tuple(params + [limit]))
-                        columns = [desc[0] for desc in cursor.description]
+                        columns = [desc[0] for desc in cursor.description] if cursor.description else []
                         rows = [DatabaseConnectionService._serialize_row(dict(zip(columns, row))) for row in cursor.fetchall()]
                         cursor.close()
                         return {"columns": columns, "rows": rows}
@@ -619,7 +644,7 @@ class DatabaseConnectionService:
                     cursor = conn.cursor()
                     query = f'SELECT * FROM "{safe_table_name}" {where_clause} LIMIT %s'
                     cursor.execute(query, tuple(params + [limit]))
-                    columns = [desc[0] for desc in cursor.description]
+                    columns = [desc[0] for desc in cursor.description] if cursor.description else []
                     rows = [DatabaseConnectionService._serialize_row(dict(zip(columns, row))) for row in cursor.fetchall()]
                     cursor.close()
                     conn.close()
@@ -629,37 +654,51 @@ class DatabaseConnectionService:
                 cursor = conn.cursor()
                 query = f"SELECT * FROM `{safe_table_name}` {where_clause} LIMIT %s"
                 cursor.execute(query, tuple(params + [limit]))
-                columns = [desc[0] for desc in cursor.description]
+                columns = [desc[0] for desc in cursor.description] if cursor.description else []
                 rows = [DatabaseConnectionService._serialize_row(dict(zip(columns, row))) for row in cursor.fetchall()]
                 cursor.close()
                 conn.close()
                 return {"columns": columns, "rows": rows}
             elif db_type.lower() == "mongodb":
-                client = pymongo.MongoClient(connection_string, serverSelectionTimeoutMS=5000)
-                db = client.get_default_database() if client.get_default_database().name else client[database or "test"]
-                cursor = db[table_name].find().limit(limit)
-                rows = list(cursor)
-                # Convert ObjectId to string for JSON serialization
-                for r in rows:
-                    if '_id' in r:
-                        r['_id'] = str(r['_id'])
+                actual_conn = connection_string or (host if host and ("mongodb" in host or "://" in host) else None)
+                client = pymongo.MongoClient(actual_conn, serverSelectionTimeoutMS=8000)
+                try:
+                    db = client.get_default_database()
+                except Exception:
+                    db = client[database or "test"]
+                if db is None or not getattr(db, "name", None):
+                    db = client[database or "test"]
+
+                mongo_filter = {}
+                if filter_dict and isinstance(filter_dict, dict):
+                    for col, val in filter_dict.items():
+                        if col and val not in (None, "", "All", "all"):
+                            if isinstance(val, str) and re.match(r'^\d{4}-\d{2}$', val):
+                                mongo_filter[col] = {"$regex": f"^{val}"}
+                            else:
+                                mongo_filter[col] = val
+
+                cursor = db[safe_table_name].find(mongo_filter).limit(limit)
+                raw_rows = list(cursor)
+                rows = [DatabaseConnectionService._serialize_row(r) for r in raw_rows]
                 
                 columns = []
                 if len(rows) > 0:
-                    # Get keys from all docs to ensure we capture all columns
-                    all_keys = set()
+                    all_keys = []
                     for r in rows:
-                        all_keys.update(r.keys())
-                    columns = list(all_keys)
+                        for k in r.keys():
+                            if k not in all_keys:
+                                all_keys.append(k)
+                    columns = all_keys
                 client.close()
                 return {"columns": columns, "rows": rows}
             elif db_type.lower() == "sqlite":
-                db_path = (database or host).strip('"').strip("'")
+                db_path = (database or host or "").strip('"\'')
                 conn = sqlite3.connect(db_path)
                 cursor = conn.cursor()
                 query = f'SELECT * FROM "{safe_table_name}" {where_clause} LIMIT ?'
                 cursor.execute(query, tuple(params + [limit]))
-                columns = [desc[0] for desc in cursor.description]
+                columns = [desc[0] for desc in cursor.description] if cursor.description else []
                 rows = [DatabaseConnectionService._serialize_row(dict(zip(columns, row))) for row in cursor.fetchall()]
                 cursor.close()
                 conn.close()
@@ -685,7 +724,7 @@ class DatabaseConnectionService:
                     ]
                 else:
                     rows = []
-                columns = list(FIRESTORE_MOCK_SCHEMA.get(table_name, {}).keys())
+                columns = list(FIRESTORE_MOCK_SCHEMA.get(table_name or "", {}).keys())
                 if not columns and rows:
                     columns = list(rows[0].keys())
                 return {"columns": columns, "rows": rows}
@@ -696,6 +735,8 @@ class DatabaseConnectionService:
     @staticmethod
     def execute_query(db_type: str, host: str = "localhost", port: Optional[int] = None, username: str = "", password: Optional[str] = None, database: Optional[str] = None, connection_string: Optional[str] = None, query: Optional[str] = None) -> List[Dict[str, Any]]:
         """Execute a raw SQL/Mongo query and return results (max 1000 rows)"""
+        if not query:
+            return [{"error": "Empty query provided"}]
         try:
             if db_type.lower() == "postgresql":
                 safe, error_msg = DatabaseConnectionService.is_safe_sql(query)
@@ -857,7 +898,7 @@ class DatabaseConnectionService:
             elif db_type.lower() in ["firestore", "firebase"]:
                 import json
                 try:
-                    q_dict = json.loads(query)
+                    q_dict = json.loads(query or "{}")
                     collection_name = q_dict.get("collection")
                     if not collection_name:
                         return [{"error": "Firestore query JSON must specify 'collection'."}]

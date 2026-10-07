@@ -34,3 +34,4 @@ redis
 flower
 groq
 langchain-groq
+pymongo
