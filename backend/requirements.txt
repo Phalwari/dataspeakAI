@@ -27,6 +27,8 @@ openpyxl
 python-pptx
 beautifulsoup4
 pandas
+scikit-learn
+xgboost
 aiohttp
 rank-bm25
 celery

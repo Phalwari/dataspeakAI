@@ -1,7 +1,7 @@
 """
 backend/services/metric_executor.py
 
-Canonical Metric Execution Engine for DataSpeakAI / NexaBI.
+Canonical Metric Execution Engine for DataSpeakAI.
 Single calculation authority for deterministic KPI cards and chart series.
 Validates semantic rules, enforces table boundaries, generates parameterized SQL,
 and executes queries against verified database connections.

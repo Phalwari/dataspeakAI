@@ -159,7 +159,8 @@ def generate_sql_from_nl(db_conn: models.DatabaseConnection, user_question: str,
 
     if api_key:
         try:
-            gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+            gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+            gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={api_key}"
             prompt = (
                 f"You are a Senior SQL & Database Engineer. Given the following database schema context and user question, "
                 f"generate a valid, read-only SQL query ({db_conn.db_type} dialect) and a short explanation.\n\n"

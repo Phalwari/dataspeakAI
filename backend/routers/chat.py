@@ -377,7 +377,8 @@ def chat_endpoint(
                                 f"Data Rows (JSON sample):\n{rows_preview}\n\n"
                                 "Provide a clear, natural language answer summarizing the key findings directly answering the user's question. Highlight key figures, averages, top entities, or trends concisely."
                             )
-                            gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_api_key}"
+                            gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+                            gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_api_key}"
                             payload = {"contents": [{"parts": [{"text": prompt}]}]}
                             headers = {"Content-Type": "application/json"}
                             res = requests.post(gemini_url, json=payload, headers=headers, timeout=25)
@@ -460,7 +461,8 @@ def chat_endpoint(
                         f"User Question: {user_query}\n\n"
                         f"Retrieved Document Context:\n{context_text}"
                     )
-                    gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_api_key}"
+                    gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+                    gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_api_key}"
                     payload = {"contents": [{"parts": [{"text": prompt}]}]}
                     headers = {"Content-Type": "application/json"}
                     res = requests.post(gemini_url, json=payload, headers=headers, timeout=30)
@@ -532,7 +534,8 @@ def chat_endpoint(
                     f"Database Table Results:\n{sql_rows_text}\n\n"
                     "Synthesize a unified, comprehensive answer combining both the numerical database findings and the qualitative document context. Cite document sources using [Source: filename]."
                 )
-                gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_api_key}"
+                gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+                gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_api_key}"
                 payload = {"contents": [{"parts": [{"text": prompt}]}]}
                 headers = {"Content-Type": "application/json"}
                 res = requests.post(gemini_url, json=payload, headers=headers, timeout=30)

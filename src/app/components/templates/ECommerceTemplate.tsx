@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 const useTheme = () => ({ darkMode: false, toggleTheme: () => {} });
 
-const NEXABI_THEME = {
+const DATASPEAK_THEME = {
   bg: '#f8fafc',
   glass: '#ffffff',
   glassBorder: '#e2e8f0',
@@ -46,7 +46,7 @@ const CHART_COLORS = ['#6c47ff','#00c2cb','#f59e0b','#e24b4a','#10b981','#9b7dff
 
 const KPI_GLOW_COLORS = ['#6c47ff', '#00c2cb', '#6c47ff', '#f59e0b', '#e24b4a'];
 
-export const NexaBIDashboard: React.FC<any> = ({ 
+export const DataSpeakDashboard: React.FC<any> = ({ 
   mlData, 
   usingSampleData,
   templateName = "Manufacturing QC Dashboard",
@@ -555,7 +555,7 @@ export const NexaBIDashboard: React.FC<any> = ({
             )}
             <div className="logo-badge"><BarChart2 size={20} color="#fff" /></div>
             <div>
-              <p className="h-title">NexaBI</p>
+              <p className="h-title">DataSpeakAI</p>
               <p className="h-sub">{templateName}</p>
             </div>
           </div>
@@ -1499,6 +1499,6 @@ const getSampleInsights = (type) => {
 };
 
 // Map components for unified rendering
-export const ECommerceTemplate = NexaBIDashboard;
-export const ManufacturingTemplate = NexaBIDashboard;
-export default NexaBIDashboard;
+export const ECommerceTemplate = DataSpeakDashboard;
+export const ManufacturingTemplate = DataSpeakDashboard;
+export default DataSpeakDashboard;

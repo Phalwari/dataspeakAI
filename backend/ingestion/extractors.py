@@ -124,7 +124,8 @@ def extract_pdf_split_router(file_path: str, gemini_api_key: Optional[str] = Non
                         img_bytes = pix.tobytes("png")
                         img_b64 = base64.b64encode(img_bytes).decode('utf-8')
                         
-                        gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_api_key}"
+                        gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+                        gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_api_key}"
                         payload = {
                             "contents": [{
                                 "parts": [

@@ -82,7 +82,8 @@ Return ONLY a valid JSON array of objects with the following keys:
 - "sparkline_values": (array of 6 integers e.g. [10, 20, 15, 30, 25, 40])
         """
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
+        gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_key}"
         payload = {
             "contents": [{"parts": [{"text": prompt}]}]
         }

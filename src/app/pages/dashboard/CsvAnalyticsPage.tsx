@@ -11,7 +11,7 @@ const API_URL = `${API_BASE_URL}/api`;
 import { toast } from 'sonner';
 // local auth via token
 import { useAnalytics } from '../../context/AnalyticsContext';
-import NexaBIDashboard from '../../components/templates/ECommerceTemplate';
+import DataSpeakDashboard from '../../components/templates/ECommerceTemplate';
 
 const pageVariants = {
   initial: { opacity: 0, y: 16 },
@@ -365,7 +365,7 @@ export function CsvAnalyticsPage() {
         >
           <h1 className="analytics-title">
             <BarChart2 size={26} color="var(--primary)" />
-            NexaBI Analytics Hub
+            DataSpeakAI Analytics Hub
           </h1>
           <p className="analytics-sub">
             Upload any CSV/Excel file or select an existing dataset to run dynamic ML models and interactive dashboards.
@@ -529,7 +529,7 @@ export function CsvAnalyticsPage() {
         </div>
       ) : (
         <div style={{ width: '100%', height: '100%' }}>
-          <NexaBIDashboard
+          <DataSpeakDashboard
             templateName={filename || "Analytics Dashboard"}
             usingSampleData={false}
             mlData={mlData}

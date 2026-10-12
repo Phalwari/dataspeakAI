@@ -51,6 +51,7 @@ def list_connections(
             "host": c.host,
             "database": c.database,
             "port": getattr(c, "port", None),
+            "description": getattr(c, "description", None),
             "status": c.status or "connected",
             "is_active": c.status or "active",
             "tables_metadata": getattr(c, "tables_metadata", None),
@@ -86,6 +87,7 @@ def get_connection(
         "host": c.host,
         "database": c.database,
         "port": getattr(c, "port", None),
+        "description": getattr(c, "description", None),
         "status": c.status,
         "tables_metadata": getattr(c, "tables_metadata", None),
         "created_at": c.created_at.isoformat() if c.created_at else None,
@@ -293,6 +295,7 @@ def update_connection(
         "username": c.username,
         "database": c.database,
         "connection_string": c.connection_string,
+        "description": getattr(c, "description", None),
         "status": c.status,
         "tables_metadata": c.tables_metadata,
         "created_at": c.created_at

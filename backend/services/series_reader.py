@@ -1,7 +1,7 @@
 """
 backend/services/series_reader.py
 
-Validated Series and Raw Sample Reader for DataSpeakAI / NexaBI.
+Validated Series and Raw Sample Reader for DataSpeakAI.
 Provides safe, centralized row sampling (such as scatter correlation pairs)
 without embedding arbitrary SQL in HTTP API routers or overloading MetricExecutor.
 Enforces SchemaRegistry validation, intra-table boundaries, dialect quoting,

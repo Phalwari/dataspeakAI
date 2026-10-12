@@ -144,7 +144,8 @@ def generate_ai_insights_from_stats(db_conn: Any, registries: List[Any], db: Any
         Return ONLY valid raw JSON without markdown formatting or code blocks.
         """
         
-        req_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+        gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+        req_url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={GEMINI_API_KEY}"
         payload = {
             "contents": [{"parts": [{"text": prompt}]}]
         }

@@ -154,7 +154,14 @@ def generate_with_gemini(
 
     # Order keys so fresh keys are tried first, then rotated
     ordered_keys = _get_active_ordered_keys(keys, "gemini")
-    models_to_try = [model] + GEMINI_MODELS if model else GEMINI_MODELS
+    env_model = os.getenv("GEMINI_MODEL")
+    base_models = list(GEMINI_MODELS)
+    if env_model:
+        base_models = [env_model] + [m for m in base_models if m != env_model]
+    if model:
+        models_to_try = [model] + [m for m in base_models if m != model]
+    else:
+        models_to_try = base_models
 
     last_err = None
     for key in ordered_keys:
@@ -327,12 +334,13 @@ def generate_with_ollama(
 def generate_multimodal_with_gemini(
     prompt: str,
     image_b64_list: Optional[List[str]] = None,
-    model: str = "gemini-flash-lite-latest",
+    model: Optional[str] = None,
     temperature: float = 0.2,
     api_key: Optional[str] = None,
     user: Optional[Any] = None,
 ) -> str:
     """Send text + Base64 PNG images to Gemini with multi-key failover."""
+    active_model = model or os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
     keys = []
     if api_key:
         keys.extend(_extract_keys(api_key))
@@ -364,7 +372,7 @@ def generate_multimodal_with_gemini(
     for key in ordered_keys:
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/"
-            f"{model}:generateContent?key={key}"
+            f"{active_model}:generateContent?key={key}"
         )
         try:
             resp = httpx.post(url, json=payload, timeout=120.0)
@@ -420,7 +428,7 @@ def generate(
             return generate_multimodal_with_gemini(
                 prompt,
                 image_b64_list=image_b64_list,
-                model=model or "gemini-flash-lite-latest",
+                model=model,
                 temperature=temperature,
                 api_key=api_key,
                 user=user,

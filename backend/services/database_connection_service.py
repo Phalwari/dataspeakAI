@@ -31,7 +31,7 @@ from functools import lru_cache
 
 import os
 import logging
-logger = logging.getLogger("nexabi.db")
+logger = logging.getLogger("dataspeak.db")
 
 # ── Connection pool storage ───────────────────────────────────────────────────
 _pg_pools: Dict = {}
@@ -219,7 +219,7 @@ class DatabaseConnectionService:
                 return FIRESTORE_MOCK_SCHEMA
 
             # Use a stable per-credential app name to avoid duplicate init
-            app_name = f"nexabi_{abs(hash(conn_str)) % 100000}"
+            app_name = f"dataspeak_{abs(hash(conn_str)) % 100000}"
 
             try:
                 # Reuse existing app if already initialised

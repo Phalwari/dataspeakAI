@@ -71,6 +71,7 @@ class DatabaseConnection(Base):
     tables_metadata = Column(JSON, nullable=True)
     insights_cache = Column(JSON, nullable=True)
     insights_cached_at = Column(DateTime, nullable=True)
+    description = Column(String, nullable=True)
     status = Column(String, default="connected")
     created_at = Column(DateTime, default=utc_now)
     

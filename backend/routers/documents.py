@@ -581,7 +581,8 @@ def search_documents(
                         f"Document Context:\n{context_text}"
                     )
 
-                    gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_api_key}"
+                    gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+                    gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_api_key}"
                     payload = {"contents": [{"parts": [{"text": prompt}]}]}
                     headers = {"Content-Type": "application/json"}
                     res = requests.post(gemini_url, json=payload, headers=headers, timeout=30)

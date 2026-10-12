@@ -50,9 +50,12 @@ def add_database(
         name=db_conn.name,
         db_type=db_conn.db_type,
         host=db_conn.host,
+        port=db_conn.port,
         username=db_conn.username,
         password=encrypt_password(db_conn.password),
         database=db_conn.database,
+        connection_string=db_conn.connection_string,
+        description=db_conn.description,
         status="connected"
     )
     db.add(new_db)

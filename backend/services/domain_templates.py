@@ -1,5 +1,5 @@
 """
-Extensible Domain Template Registry for DataSpeakAI / NexaBI.
+Extensible Domain Template Registry for DataSpeakAI.
 
 Defines canonical domain templates (optimization templates, NOT system limitations)
 for business domains (E-Commerce, SaaS, Healthcare, Logistics, Finance, etc.)

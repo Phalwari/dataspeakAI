@@ -1642,7 +1642,7 @@ class DatabasePipelineService:
 
         def run_ai_synthesis() -> Dict[str, Any]:
             prompt = f"""
-            You are NexaBI's Chief Business Intelligence Analyst.
+            You are DataSpeakAI's Chief Business Intelligence Analyst.
             Analyze this live enterprise database profile and key performance indicators:
             
             Database: {getattr(db_conn, "name", getattr(db_conn, "db_name", "Database"))} ({db_conn.db_type})

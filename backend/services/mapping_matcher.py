@@ -1,5 +1,5 @@
 """
-Deterministic & Heuristic Mapping Matcher for DataSpeakAI / NexaBI.
+Deterministic & Heuristic Mapping Matcher for DataSpeakAI.
 
 Pairs columns profiled in SchemaRegistry with the Essential Variables of a selected
 DomainTemplate (or Generic Fallback).

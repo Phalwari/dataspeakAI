@@ -3,7 +3,11 @@ import os
 import json
 import time
 import shutil
-import mongomock
+import argparse
+try:
+    import mongomock
+except ImportError:
+    mongomock = None
 
 if sys.stdout.encoding != 'utf-8':
     try:
@@ -12,8 +16,19 @@ if sys.stdout.encoding != 'utf-8':
         pass
 
 def run_mongo_audit():
-    desktop_audit_dir = r"C:\Users\waliu\OneDrive - Higher Education Commission\Desktop\Database_Verification_Audits\MongoDB_Business_Owners"
-    json_path = os.path.join(desktop_audit_dir, "companies.json")
+    parser = argparse.ArgumentParser(description="DataSpeakAI - Heavy MongoDB Business Owners Database Audit")
+    parser.add_argument(
+        "--data-path",
+        default=os.path.join(os.path.dirname(__file__), "..", "tests", "fixtures", "companies.json"),
+        help="Path to the companies.json dataset file"
+    )
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Directory to output audit results (defaults to data-path parent directory)"
+    )
+    args = parser.parse_args()
+    json_path = os.path.abspath(args.data_path)
 
     print(f"================================================================")
     print(f" DataSpeakAI - Heavy MongoDB Business Owners Database Audit")
@@ -22,7 +37,7 @@ def run_mongo_audit():
     
     if not os.path.exists(json_path):
         print(f"ERROR: Dataset file not found at {json_path}")
-        return
+        return False
 
     file_size_bytes = os.path.getsize(json_path)
     file_size_mb = file_size_bytes / (1024 * 1024)
@@ -45,6 +60,9 @@ def run_mongo_audit():
     print(f"  Parsed {len(docs):,} enterprise documents in {t_parse:.2f}s")
 
     print("\n[Step 2/4] Initializing Mock MongoDB Client and loading into collection...")
+    if mongomock is None:
+        print("  ERROR: 'mongomock' package is required to run this mock audit. Install it via 'pip install mongomock'.")
+        return False
     t0 = time.time()
     client = mongomock.MongoClient()
     db = client["dataspeak_business_db"]
@@ -257,11 +275,9 @@ def run_mongo_audit():
     }
 
     # Write to target folder(s)
-    target_dirs = [desktop_audit_dir]
-    local_desktop = r"C:\Users\waliu\Desktop\Database_Verification_Audits\MongoDB_Business_Owners"
-    if os.path.exists(r"C:\Users\waliu\Desktop") and local_desktop != desktop_audit_dir:
-        os.makedirs(local_desktop, exist_ok=True)
-        target_dirs.append(local_desktop)
+    output_dir = os.path.abspath(args.output_dir) if args.output_dir else os.path.dirname(json_path)
+    os.makedirs(output_dir, exist_ok=True)
+    target_dirs = [output_dir]
 
     # Markdown report
     md_content = f"""# DataSpeakAI — Heavy MongoDB Business Owners Database Audit Report
@@ -397,6 +413,9 @@ All metrics were computed via two completely independent calculation engines:
         print(f"Copied script to: {script_copy_path}")
 
     print("\nAudit completed successfully with 100% reconciliation match!")
+    return True
 
 if __name__ == "__main__":
-    run_mongo_audit()
+    success = run_mongo_audit()
+    if not success:
+        sys.exit(1)

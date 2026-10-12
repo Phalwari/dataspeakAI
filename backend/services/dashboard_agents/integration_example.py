@@ -13,7 +13,7 @@ import logging
 # from profiler import profile_sql_table, TableProfile
 # from dashboard_agents import generate_dashboard_via_agents
 
-logger = logging.getLogger("nexabi.integration")
+logger = logging.getLogger("dataspeak.integration")
 
 
 async def run_full_profiling_and_agent_pipeline(db_conn, table_names: list, engine):

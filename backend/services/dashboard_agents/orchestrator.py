@@ -27,7 +27,7 @@ from .chart_layout_agent import run_chart_layout_agent
 from .validator import validate_dashboard_config
 from .fallback_rule_engine import generate_fallback_config
 
-logger = logging.getLogger("nexabi.agents.orchestrator")
+logger = logging.getLogger("dataspeak.agents.orchestrator")
 
 PIPELINE_TOTAL_TIMEOUT_SECONDS = 120   # poori pipeline ke liye overall safety cap
 

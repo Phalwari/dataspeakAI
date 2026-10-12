@@ -15,7 +15,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from .schemas import SemanticAnalysis
 from .prompts import SEMANTIC_AGENT_PROMPT
 
-logger = logging.getLogger("nexabi.agents.semantic")
+logger = logging.getLogger("dataspeak.agents.semantic")
 
 AGENT_TIMEOUT_SECONDS = 20
 

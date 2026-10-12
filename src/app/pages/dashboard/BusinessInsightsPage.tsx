@@ -389,7 +389,7 @@ export function BusinessInsightsPage() {
 
       const cleanName = (activeConnName || 'Dashboard').replace(/[^a-zA-Z0-9]/g, '_');
       const link = document.createElement('a');
-      link.download = `NexaBI_${cleanName}_Analytics_Report.png`;
+      link.download = `DataSpeakAI_${cleanName}_Analytics_Report.png`;
       link.href = canvas.toDataURL('image/png');
       document.body.appendChild(link);
       link.click();

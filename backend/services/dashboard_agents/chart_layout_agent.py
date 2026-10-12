@@ -15,7 +15,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from .schemas import SemanticAnalysis, KpiAgentOutput, ChartLayoutOutput
 from .prompts import CHART_LAYOUT_AGENT_PROMPT
 
-logger = logging.getLogger("nexabi.agents.chart_layout")
+logger = logging.getLogger("dataspeak.agents.chart_layout")
 
 AGENT_TIMEOUT_SECONDS = 20
 

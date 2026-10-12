@@ -15,7 +15,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from .schemas import SemanticAnalysis, KpiAgentOutput
 from .prompts import KPI_AGENT_PROMPT
 
-logger = logging.getLogger("nexabi.agents.kpi")
+logger = logging.getLogger("dataspeak.agents.kpi")
 
 AGENT_TIMEOUT_SECONDS = 20
 

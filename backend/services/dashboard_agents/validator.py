@@ -17,7 +17,7 @@ from typing import Optional, Set, Dict
 
 from .schemas import KpiAgentOutput, ChartLayoutOutput, SemanticAnalysis, ValidatedDashboardConfig
 
-logger = logging.getLogger("nexabi.agents.validator")
+logger = logging.getLogger("dataspeak.agents.validator")
 
 FUZZY_MATCH_THRESHOLD = 0.8   # 0-1, kitna similar naam ho to auto-correct karo
 
