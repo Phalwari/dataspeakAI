@@ -453,3 +453,127 @@ class ApplyMappingRequest(BaseModel):
                 data["mappings"] = data["mapping"]
         return data
 
+
+# ---------------------------------------------------------------------------
+# Phase 1: Dashboard Overview, Query Logs, Usage & Admin Schemas
+# ---------------------------------------------------------------------------
+
+class OverviewQueryTimelinePoint(BaseModel):
+    name: str
+    date: str
+    queries: int
+
+
+class OverviewDatabaseActivity(BaseModel):
+    name: str
+    db_type: Optional[str] = None
+    queries: int
+
+
+class OverviewRecentQuery(BaseModel):
+    id: int
+    question: str
+    database: str
+    status: str
+    time: str
+    created_at: str
+
+
+class AnalyticsOverviewResponse(BaseModel):
+    total_queries: int
+    connected_databases: int
+    uploaded_documents: int
+    api_calls_today: int
+    subscription_plan: str
+    query_data: List[OverviewQueryTimelinePoint]
+    database_activity: List[OverviewDatabaseActivity]
+    recent_queries: List[OverviewRecentQuery]
+
+
+class QueryLogItem(BaseModel):
+    id: int
+    userQuestion: str
+    generatedQuery: str
+    database: str
+    status: str
+    executionTime: str
+    timestamp: str
+    rows: int
+    tokens: Optional[int] = 0
+    error: Optional[str] = None
+
+
+class QueryLogsResponse(BaseModel):
+    items: List[QueryLogItem]
+    total: int
+    page: int
+    limit: int
+    total_queries: int
+    successful: int
+    failed: int
+    success_rate: float
+    avg_response_time_ms: float
+
+
+class UsageTimelinePoint(BaseModel):
+    date: str
+    queries: int
+    tokens: int
+
+
+class UsageDatabaseTypeDistribution(BaseModel):
+    name: str
+    value: int
+    color: str
+
+
+class UsageHourlyPoint(BaseModel):
+    hour: str
+    queries: int
+
+
+class TenantUsageResponse(BaseModel):
+    total_queries: int
+    tokens_used: int
+    token_limit: int
+    available_tokens: int
+    avg_tokens_per_query: float
+    databases_count: int
+    current_cost: str
+    plan: Optional[str] = "Starter"
+    usage_data: List[UsageTimelinePoint]
+    database_type_data: List[UsageDatabaseTypeDistribution]
+    hourly_data: List[UsageHourlyPoint]
+
+
+class AdminPlatformStat(BaseModel):
+    title: str
+    value: str
+    change: str
+    trend: str
+    key: str
+
+
+class AdminStatsResponse(BaseModel):
+    total_tenants: int
+    total_users: int
+    total_queries: int
+    active_databases: int
+    document_count: int
+    platform_stats: List[AdminPlatformStat]
+    platform_activity: Optional[List[OverviewQueryTimelinePoint]] = None
+
+
+class AdminTenantItem(BaseModel):
+    id: int
+    company: str
+    email: str
+    plan: str
+    queries: int
+    databases: int
+    users_count: int
+    status: str
+    joined: str
+    usage: int
+
+

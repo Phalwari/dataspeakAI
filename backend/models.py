@@ -14,6 +14,7 @@ class Tenant(Base):
     website = Column(String, nullable=True)
     industry = Column(String, nullable=True)
     address = Column(String, nullable=True)
+    plan = Column(String(50), default="Starter")
     created_at = Column(DateTime, default=utc_now)
 
     users = relationship("User", back_populates="tenant")

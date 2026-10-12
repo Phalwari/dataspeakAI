@@ -1,5 +1,6 @@
 import { Link, useNavigate } from "react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
+import { toast } from "sonner";
 import { API_BASE_URL } from "../../config/api";
 import {
   Users,
@@ -12,6 +13,9 @@ import {
   ArrowLeft,
   Search,
   MoreVertical,
+  RefreshCw,
+  Cpu,
+  Layers,
 } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
@@ -43,157 +47,75 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
-const platformStats = [
-  {
-    title: "Total Tenants",
-    value: "1,247",
-    change: "+12.5%",
-    trend: "up",
-    icon: Users,
-  },
-  {
-    title: "Total Queries",
-    value: "2.4M",
-    change: "+18.2%",
-    trend: "up",
-    icon: Activity,
-  },
-  {
-    title: "Active Databases",
-    value: "3,891",
-    change: "+7.1%",
-    trend: "up",
-    icon: Database,
-  },
-  {
-    title: "System Health",
-    value: "99.8%",
-    change: "Healthy",
-    trend: "neutral",
-    icon: Server,
-  },
-];
+interface AdminStatCard {
+  title: string;
+  value: string;
+  change: string;
+  trend: string;
+  key: string;
+}
 
-const tenants = [
-  {
-    id: 1,
-    company: "Acme Corporation",
-    email: "admin@acme.com",
-    plan: "Pro",
-    queries: 45234,
-    databases: 8,
-    status: "active",
-    joined: "Jan 15, 2026",
-    usage: 85,
-  },
-  {
-    id: 2,
-    company: "TechStart Inc.",
-    email: "contact@techstart.io",
-    plan: "Starter",
-    queries: 12456,
-    databases: 3,
-    status: "active",
-    joined: "Jan 20, 2026",
-    usage: 62,
-  },
-  {
-    id: 3,
-    company: "DataFlow Systems",
-    email: "admin@dataflow.com",
-    plan: "Pro",
-    queries: 78921,
-    databases: 12,
-    status: "active",
-    joined: "Dec 12, 2025",
-    usage: 94,
-  },
-  {
-    id: 4,
-    company: "CloudBase",
-    email: "team@cloudbase.co",
-    plan: "Starter",
-    queries: 8234,
-    databases: 2,
-    status: "trial",
-    joined: "Feb 1, 2026",
-    usage: 41,
-  },
-  {
-    id: 5,
-    company: "SmartData",
-    email: "info@smartdata.ai",
-    plan: "Free",
-    queries: 987,
-    databases: 1,
-    status: "active",
-    joined: "Feb 3, 2026",
-    usage: 19,
-  },
-  {
-    id: 6,
-    company: "QueryLab",
-    email: "hello@querylab.io",
-    plan: "Pro",
-    queries: 156789,
-    databases: 15,
-    status: "suspended",
-    joined: "Nov 8, 2025",
-    usage: 0,
-  },
-];
+interface PlatformActivityPoint {
+  date: string;
+  queries: number;
+  name?: string;
+}
+
+interface AdminStatsResponse {
+  total_tenants: number;
+  total_users: number;
+  total_queries: number;
+  active_databases: number;
+  document_count: number;
+  platform_stats: AdminStatCard[];
+  platform_activity?: PlatformActivityPoint[];
+}
+
+interface TenantItem {
+  id: number;
+  company: string;
+  email: string;
+  plan: string;
+  queries: number;
+  databases: number;
+  users_count: number;
+  status: string;
+  joined: string;
+  usage: number;
+}
+
+interface SystemHealthResponse {
+  status: string;
+  active_db_pools: number;
+  cached_dashboards_count: number;
+}
 
 const systemMetrics = [
-  { time: "00:00", cpu: 45, memory: 62, requests: 1200 },
-  { time: "04:00", cpu: 38, memory: 58, requests: 800 },
-  { time: "08:00", cpu: 72, memory: 75, requests: 3200 },
-  { time: "12:00", cpu: 85, memory: 82, requests: 4500 },
-  { time: "16:00", cpu: 78, memory: 79, requests: 3800 },
-  { time: "20:00", cpu: 65, memory: 71, requests: 2400 },
-];
-
-const systemHealth = [
-  {
-    component: "API Gateway",
-    status: "healthy",
-    uptime: "99.99%",
-    responseTime: "45ms",
-  },
-  {
-    component: "Database Cluster",
-    status: "healthy",
-    uptime: "99.95%",
-    responseTime: "12ms",
-  },
-  {
-    component: "AI Model Service",
-    status: "healthy",
-    uptime: "99.87%",
-    responseTime: "234ms",
-  },
-  {
-    component: "Cache Layer",
-    status: "warning",
-    uptime: "98.42%",
-    responseTime: "8ms",
-  },
-  {
-    component: "Message Queue",
-    status: "healthy",
-    uptime: "100%",
-    responseTime: "3ms",
-  },
+  { time: "00:00", cpu: 32, memory: 54, requests: 420 },
+  { time: "04:00", cpu: 28, memory: 52, requests: 280 },
+  { time: "08:00", cpu: 48, memory: 65, requests: 1240 },
+  { time: "12:00", cpu: 62, memory: 72, requests: 2150 },
+  { time: "16:00", cpu: 55, memory: 68, requests: 1890 },
+  { time: "20:00", cpu: 42, memory: 58, requests: 940 },
 ];
 
 export function AdminPanel() {
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(true);
+  const [authChecking, setAuthChecking] = useState(true);
   const [authorized, setAuthorized] = useState(false);
 
+  const [stats, setStats] = useState<AdminStatsResponse | null>(null);
+  const [tenants, setTenants] = useState<TenantItem[]>([]);
+  const [health, setHealth] = useState<SystemHealthResponse | null>(null);
+  const [loadingData, setLoadingData] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // 1. Role verification check
   useEffect(() => {
     const checkAdminAccess = async () => {
       const token = localStorage.getItem("token");
       if (!token) {
+        toast.error("Please sign in as Admin to access this area");
         navigate("/dashboard");
         return;
       }
@@ -207,6 +129,7 @@ export function AdminPanel() {
         }
         const user = await res.json();
         if (user.role !== "Admin") {
+          toast.error("Admin privilege required for Platform Management");
           navigate("/dashboard");
           return;
         }
@@ -214,17 +137,68 @@ export function AdminPanel() {
       } catch (err) {
         navigate("/dashboard");
       } finally {
-        setLoading(false);
+        setAuthChecking(false);
       }
     };
 
     checkAdminAccess();
   }, [navigate]);
 
-  if (loading) {
+  // 2. Fetch live stats & tenant management data
+  const fetchAdminData = async () => {
+    if (!authorized) return;
+    setLoadingData(true);
+    try {
+      const token = localStorage.getItem("token");
+      const headers = { Authorization: `Bearer ${token}` };
+
+      const [statsRes, tenantsRes, healthRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/admin/stats`, { headers }),
+        fetch(`${API_BASE_URL}/api/admin/tenants`, { headers }),
+        fetch(`${API_BASE_URL}/api/analytics/admin/system-health`, { headers }),
+      ]);
+
+      if (statsRes.ok) {
+        const statsData = await statsRes.json();
+        setStats(statsData);
+      }
+      if (tenantsRes.ok) {
+        const tenantsData = await tenantsRes.json();
+        setTenants(tenantsData);
+      }
+      if (healthRes.ok) {
+        const healthData = await healthRes.json();
+        setHealth(healthData);
+      }
+    } catch (err) {
+      console.error("Error loading admin data:", err);
+      toast.error("Failed to load admin telemetry");
+    } finally {
+      setLoadingData(false);
+    }
+  };
+
+  useEffect(() => {
+    if (authorized) {
+      fetchAdminData();
+    }
+  }, [authorized]);
+
+  const filteredTenants = useMemo(() => {
+    if (!searchQuery.trim()) return tenants;
+    const q = searchQuery.toLowerCase();
+    return tenants.filter(
+      (t) =>
+        t.company.toLowerCase().includes(q) ||
+        t.email.toLowerCase().includes(q) ||
+        t.plan.toLowerCase().includes(q)
+    );
+  }, [tenants, searchQuery]);
+
+  if (authChecking) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 text-gray-600 font-medium">
-        Checking authorization...
+        Checking admin authorization...
       </div>
     );
   }
@@ -233,10 +207,24 @@ export function AdminPanel() {
     return null;
   }
 
+  const statIcons: Record<string, any> = {
+    tenants: Users,
+    queries: Activity,
+    databases: Database,
+    health: Server,
+  };
+
+  const statCards = stats?.platform_stats || [
+    { title: "Total Tenants", value: "0", change: "+0%", trend: "neutral", key: "tenants" },
+    { title: "Total Queries", value: "0", change: "+0%", trend: "neutral", key: "queries" },
+    { title: "Active Databases", value: "0", change: "+0%", trend: "neutral", key: "databases" },
+    { title: "System Health", value: "100%", change: "Healthy", trend: "neutral", key: "health" },
+  ];
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Top Bar */}
-      <header className="bg-white border-b border-gray-200 px-6 py-4">
+      <header className="bg-white border-b border-gray-200 px-6 py-4 sticky top-0 z-10">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Link to="/dashboard">
@@ -245,16 +233,26 @@ export function AdminPanel() {
               </Button>
             </Link>
             <div>
-              <h1 className="text-xl font-semibold">Admin Panel</h1>
-              <p className="text-sm text-gray-600">Platform Owner Dashboard</p>
+              <h1 className="text-xl font-semibold text-gray-900">Admin Control Center</h1>
+              <p className="text-xs text-gray-500">Platform-wide multi-tenant observability</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className="gap-2">
+          <div className="flex items-center gap-3">
+            <Badge variant="outline" className="gap-2 bg-green-50 text-green-700 border-green-200">
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-              All Systems Operational
+              {health?.status === "healthy" ? "All Systems Operational" : "System Active"}
             </Badge>
+            <Button
+              onClick={fetchAdminData}
+              variant="outline"
+              size="sm"
+              className="gap-2 text-xs"
+              disabled={loadingData}
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loadingData ? "animate-spin" : ""}`} />
+              Refresh
+            </Button>
           </div>
         </div>
       </header>
@@ -263,39 +261,33 @@ export function AdminPanel() {
       <main className="max-w-7xl mx-auto p-6 space-y-6">
         {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {platformStats.map((stat) => (
-            <Card key={stat.title}>
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-                    <stat.icon className="w-5 h-5 text-white" />
+          {statCards.map((stat) => {
+            const Icon = statIcons[stat.key] || Activity;
+            return (
+              <Card key={stat.title}>
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+                      <Icon className="w-5 h-5 text-white" />
+                    </div>
+                    <span className="text-xs text-green-600 font-medium">{stat.change}</span>
                   </div>
-                  {stat.trend === "up" && (
-                    <span className="text-xs text-green-600 font-medium">
-                      {stat.change}
-                    </span>
-                  )}
-                  {stat.trend === "neutral" && (
-                    <span className="text-xs text-gray-600 font-medium">
-                      {stat.change}
-                    </span>
-                  )}
-                </div>
-                <h3 className="text-2xl font-bold mb-1">{stat.value}</h3>
-                <p className="text-sm text-gray-600">{stat.title}</p>
-              </CardContent>
-            </Card>
-          ))}
+                  <h3 className="text-2xl font-bold mb-1 text-gray-900">{stat.value}</h3>
+                  <p className="text-sm text-gray-600">{stat.title}</p>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
 
         {/* System Metrics */}
         <div className="grid lg:grid-cols-2 gap-6">
           <Card>
             <CardHeader>
-              <CardTitle>System Resource Usage</CardTitle>
+              <CardTitle className="text-base font-semibold">Simulated Resource Telemetry</CardTitle>
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={300}>
+              <ResponsiveContainer width="100%" height={280}>
                 <LineChart data={systemMetrics}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                   <XAxis dataKey="time" stroke="#9ca3af" />
@@ -322,27 +314,40 @@ export function AdminPanel() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Request Volume</CardTitle>
+              <CardTitle className="text-base font-semibold">Global Platform Activity Curve</CardTitle>
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={300}>
-                <AreaChart data={systemMetrics}>
+              <ResponsiveContainer width="100%" height={280}>
+                <AreaChart data={stats?.platform_activity && stats.platform_activity.length > 0 ? stats.platform_activity : []}>
                   <defs>
-                    <linearGradient id="colorRequests" x1="0" y1="0" x2="0" y2="1">
+                    <linearGradient id="colorRequestsAdmin" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#ec4899" stopOpacity={0.3} />
                       <stop offset="95%" stopColor="#ec4899" stopOpacity={0} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                  <XAxis dataKey="time" stroke="#9ca3af" />
+                  <XAxis dataKey="name" stroke="#9ca3af" />
                   <YAxis stroke="#9ca3af" />
-                  <Tooltip />
+                  <Tooltip
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        const pt = payload[0].payload as PlatformActivityPoint;
+                        return (
+                          <div className="bg-white p-2 border border-gray-200 rounded shadow-sm text-xs">
+                            <p className="font-semibold text-gray-900">{pt.date} ({pt.name})</p>
+                            <p className="text-pink-600 font-medium">{pt.queries} Queries</p>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
                   <Area
                     type="monotone"
-                    dataKey="requests"
+                    dataKey="queries"
                     stroke="#ec4899"
                     fillOpacity={1}
-                    fill="url(#colorRequests)"
+                    fill="url(#colorRequestsAdmin)"
                   />
                 </AreaChart>
               </ResponsiveContainer>
@@ -350,48 +355,51 @@ export function AdminPanel() {
           </Card>
         </div>
 
-        {/* System Health */}
+        {/* System Health Indicators */}
         <Card>
           <CardHeader>
-            <CardTitle>System Health Indicators</CardTitle>
+            <CardTitle className="text-base font-semibold">Service Health & Pool Metrics</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3">
-              {systemHealth.map((component) => (
-                <div
-                  key={component.component}
-                  className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
-                >
-                  <div className="flex items-center gap-4">
-                    {component.status === "healthy" ? (
-                      <CheckCircle className="w-5 h-5 text-green-600" />
-                    ) : (
-                      <AlertCircle className="w-5 h-5 text-yellow-600" />
-                    )}
-                    <div>
-                      <p className="font-medium">{component.component}</p>
-                      <p className="text-sm text-gray-600">
-                        Uptime: {component.uptime}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-6">
-                    <div>
-                      <p className="text-sm text-gray-600">Response Time</p>
-                      <p className="font-medium">{component.responseTime}</p>
-                    </div>
-                    {component.status === "healthy" ? (
-                      <Badge className="bg-green-100 text-green-700 hover:bg-green-100">
-                        Healthy
-                      </Badge>
-                    ) : (
-                      <Badge className="bg-yellow-100 text-yellow-700 hover:bg-yellow-100">
-                        Warning
-                      </Badge>
-                    )}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="p-4 rounded-lg border border-gray-100 bg-gray-50/50 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Server className="w-5 h-5 text-blue-600" />
+                  <div>
+                    <p className="font-medium text-sm text-gray-900">Database Engine Pools</p>
+                    <p className="text-xs text-gray-500">Live active connection pool instances</p>
                   </div>
                 </div>
-              ))}
+                <Badge variant="outline" className="font-mono text-xs">
+                  {health?.active_db_pools ?? 0} active
+                </Badge>
+              </div>
+
+              <div className="p-4 rounded-lg border border-gray-100 bg-gray-50/50 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Layers className="w-5 h-5 text-purple-600" />
+                  <div>
+                    <p className="font-medium text-sm text-gray-900">Cached Dashboards</p>
+                    <p className="text-xs text-gray-500">In-memory Redis/TTL cache slots</p>
+                  </div>
+                </div>
+                <Badge variant="outline" className="font-mono text-xs">
+                  {health?.cached_dashboards_count ?? 0} cached
+                </Badge>
+              </div>
+
+              <div className="p-4 rounded-lg border border-gray-100 bg-gray-50/50 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <CheckCircle className="w-5 h-5 text-green-600" />
+                  <div>
+                    <p className="font-medium text-sm text-gray-900">API Gateway Status</p>
+                    <p className="text-xs text-gray-500">FastAPI ASGI Core Engine</p>
+                  </div>
+                </div>
+                <Badge className="bg-green-100 text-green-700 hover:bg-green-100">
+                  Healthy
+                </Badge>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -399,111 +407,102 @@ export function AdminPanel() {
         {/* Tenant List */}
         <Card>
           <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle>Tenant Management</CardTitle>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <CardTitle className="text-base font-semibold">
+                  Registered Tenants ({filteredTenants.length})
+                </CardTitle>
+                <p className="text-xs text-gray-500 mt-1">Live customer accounts registered in DataSpeakAI</p>
+              </div>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                 <Input
-                  placeholder="Search tenants..."
-                  className="pl-10 w-[300px]"
+                  placeholder="Search tenants or admin emails..."
+                  className="pl-10 w-full sm:w-[280px]"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
                 />
               </div>
             </div>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Company</TableHead>
-                  <TableHead>Plan</TableHead>
-                  <TableHead>Queries</TableHead>
-                  <TableHead>Databases</TableHead>
-                  <TableHead>Usage</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Joined</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {tenants.map((tenant) => (
-                  <TableRow key={tenant.id}>
-                    <TableCell>
-                      <div>
-                        <p className="font-medium">{tenant.company}</p>
-                        <p className="text-xs text-gray-600">{tenant.email}</p>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant={
-                          tenant.plan === "Pro"
-                            ? "default"
-                            : tenant.plan === "Starter"
-                            ? "secondary"
-                            : "outline"
-                        }
-                      >
-                        {tenant.plan}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="font-medium">
-                      {tenant.queries.toLocaleString()}
-                    </TableCell>
-                    <TableCell>{tenant.databases}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <div className="flex-1 bg-gray-200 rounded-full h-2 max-w-[80px]">
-                          <div
-                            className="bg-blue-500 h-2 rounded-full"
-                            style={{ width: `${tenant.usage}%` }}
-                          />
-                        </div>
-                        <span className="text-xs text-gray-600">
-                          {tenant.usage}%
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      {tenant.status === "active" && (
-                        <Badge className="bg-green-100 text-green-700 hover:bg-green-100">
-                          Active
-                        </Badge>
-                      )}
-                      {tenant.status === "trial" && (
-                        <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100">
-                          Trial
-                        </Badge>
-                      )}
-                      {tenant.status === "suspended" && (
-                        <Badge className="bg-red-100 text-red-700 hover:bg-red-100">
-                          Suspended
-                        </Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-sm text-gray-600">
-                      {tenant.joined}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon">
-                            <MoreVertical className="w-4 h-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem>View Details</DropdownMenuItem>
-                          <DropdownMenuItem>Edit Plan</DropdownMenuItem>
-                          <DropdownMenuItem>View Logs</DropdownMenuItem>
-                          <DropdownMenuItem className="text-red-600">
-                            Suspend Account
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
+            {loadingData ? (
+              <div className="py-12 text-center text-gray-500 space-y-2">
+                <RefreshCw className="w-6 h-6 animate-spin mx-auto text-blue-600" />
+                <p className="text-sm font-medium">Loading tenants...</p>
+              </div>
+            ) : filteredTenants.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Company</TableHead>
+                    <TableHead>Plan</TableHead>
+                    <TableHead>Users</TableHead>
+                    <TableHead>Queries</TableHead>
+                    <TableHead>Databases</TableHead>
+                    <TableHead>Usage Meter</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Joined</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {filteredTenants.map((tenant) => (
+                    <TableRow key={tenant.id} className="hover:bg-gray-50/80 transition-colors">
+                      <TableCell>
+                        <div>
+                          <p className="font-medium text-sm text-gray-900">{tenant.company}</p>
+                          <p className="text-xs text-gray-500">{tenant.email}</p>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={tenant.plan === "Pro" ? "default" : "secondary"}
+                          className="text-xs"
+                        >
+                          {tenant.plan}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-sm text-gray-700">
+                        {tenant.users_count}
+                      </TableCell>
+                      <TableCell className="font-medium text-sm text-gray-900">
+                        {tenant.queries.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-sm text-gray-700">
+                        {tenant.databases}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 bg-gray-200 rounded-full h-2 max-w-[80px]">
+                            <div
+                              className="bg-blue-600 h-2 rounded-full"
+                              style={{ width: `${Math.min(100, tenant.usage)}%` }}
+                            />
+                          </div>
+                          <span className="text-xs text-gray-600">{tenant.usage}%</span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge className="bg-green-100 text-green-700 hover:bg-green-100 text-xs">
+                          {tenant.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs text-gray-500 whitespace-nowrap">
+                        {tenant.joined}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <div className="py-12 text-center text-gray-500">
+                <Users className="w-10 h-10 text-gray-300 mx-auto mb-2" />
+                <p className="font-medium text-base text-gray-800">No Tenants Found</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  {searchQuery ? "No tenants matched your search criteria." : "No tenants registered yet."}
+                </p>
+              </div>
+            )}
           </CardContent>
         </Card>
       </main>

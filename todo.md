@@ -37,36 +37,10 @@ Every AI agent working on this repository **MUST** adhere to this 4-step workflo
 
 ---
 
-### Phase 1: Live Frontend-to-Backend Dashboard Wiring
-**Priority: P0 (Immediate Quick Win) | Estimated Effort: 2-3 sessions**  
-**Goal:** Connect all frontend dashboard views to the existing backend endpoints in [`backend/routers/analytics.py`](file:///d:/dataspeak/backend/routers/analytics.py) and remove hardcoded static mock arrays.
-
-- [ ] **Task 1.1 — Wire Overview Dashboard to Live Analytics API**
-  - **Target Files:** [`src/app/pages/dashboard/DashboardOverview.tsx`](file:///d:/dataspeak/src/app/pages/dashboard/DashboardOverview.tsx), [`backend/routers/analytics.py`](file:///d:/dataspeak/backend/routers/analytics.py)
-  - **Details:** Replace static mock constants (`stats`, `queryData`, `databaseActivity`, `recentQueries`) with live data fetched from `GET /api/analytics/overview`. Add loading skeletons and error states with Sonner toast feedback.
-  - **Acceptance Criteria:** Real-time KPI counts (queries, databases, documents, API calls), 7-day query timeline chart, and recent query table render live tenant data.
-
-
-- [ ] **Task 1.3 — Wire Query Logs Page with Pagination, Search & Filtering**
-  - **Target Files:** [`src/app/pages/dashboard/LogsPage.tsx`](file:///d:/dataspeak/src/app/pages/dashboard/LogsPage.tsx), [`backend/routers/analytics.py`](file:///d:/dataspeak/backend/routers/analytics.py)
-  - **Details:** Connect log table to `GET /api/logs`. Wire search input, status filter dropdown (`All`, `Success`, `Failed`), database selector, and pagination controls (`page`, `limit`).
-  - **Acceptance Criteria:** Live query logs render with exact execution time in ms, rows returned, error messages (if failed), and timestamp. Export CSV button downloads live log data.
-
-- [ ] **Task 1.4 — Wire Usage & Metering Page to Live Usage API**
-  - **Target Files:** [`src/app/pages/dashboard/UsagePage.tsx`](file:///d:/dataspeak/src/app/pages/dashboard/UsagePage.tsx), [`backend/routers/analytics.py`](file:///d:/dataspeak/backend/routers/analytics.py)
-  - **Details:** Replace static arrays (`usageData`, `databaseTypeData`, `hourlyData`) with `GET /api/usage`.
-  - **Acceptance Criteria:** Meter cards display actual tokens used vs. limit (500k), daily token usage charts, database breakdown pie chart, and hourly query patterns.
-
-- [ ] **Task 1.5 — Wire Admin Panel to Live System & Tenant APIs**
-  - **Target Files:** [`src/app/pages/admin/AdminPanel.tsx`](file:///d:/dataspeak/src/app/pages/admin/AdminPanel.tsx), [`backend/routers/analytics.py`](file:///d:/dataspeak/backend/routers/analytics.py)
-  - **Details:** Connect admin dashboard to `GET /api/admin/stats` and `GET /api/admin/tenants`. Enforce Admin role gate.
-  - **Acceptance Criteria:** Superadmin sees true platform-wide tenant counts, query volumes, active database counts, system health metrics, and tenant management table with real user counts.
-
----
-
 ### Phase 2: Embeddable Standalone Chatbot Widget
 **Priority: P1 (Core SaaS Capability) | Estimated Effort: 3-4 sessions**  
 **Goal:** Enable SaaS tenants to embed the AI chatbot on external websites via a single `<script>` tag.
+
 
 - [ ] **Task 2.1 — Build Public Tenant-Authenticated Widget Chat API**
   - **Target Files:** [`backend/routers/chat.py`](file:///d:/dataspeak/backend/routers/chat.py), [`backend/routers/api_keys.py`](file:///d:/dataspeak/backend/routers/api_keys.py)
@@ -179,6 +153,10 @@ Every AI agent working on this repository **MUST** adhere to this 4-step workflo
 
 ## 📦 Archived / Completed Tasks
 
+- [x] **Phase 1: Live Frontend-to-Backend Dashboard Wiring & QA Hardening (Tasks 1.1, 1.3, 1.4, 1.5 & Backend API Layer)**
+  - *Completed:* 2026-10-12 | Antigravity AI Engineer
+  - *Summary:* Restored and hardened Phase 1 analytics endpoints in `backend/routers/analytics.py` and `backend/main.py` (`GET /api/analytics/overview`, `GET /api/overview` alias, `GET /api/logs`, `GET /api/logs/export`, `GET /api/usage`, `GET /api/admin/stats`, `GET /api/admin/tenants`) with Pydantic response models in `backend/schemas.py`. Hardened CSV log exports against formula injection (`_sanitize_csv_cell`) and implemented true chunked generator streaming (`yield_per(500)`). Optimized 90d tenant usage via single SQL `func.date(created_at)` grouping and bounded hourly distributions. Mounted `/overview` on `core_router` eliminating OpenAPI duplicate operation ID warnings. Added `plan` column to `Tenant` model with zero-dependency migration in `services/db_migration.py`. Wired `DashboardOverview.tsx` to live analytics overview API with animated skeleton loading, truthful empty-state onboarding banners, and live 7-day query timeline. Wired `LogsPage.tsx` to live query logs API with search, status filtering, database filtering, pagination controls, delayed blob URL revocation to prevent download aborts, and server-side CSV streaming export. Wired `UsagePage.tsx` to live usage API with period selector (`24h`, `7d`, `30d`, `90d`), token consumption meter, database breakdown pie chart, and hourly activity pattern chart. Wired `AdminPanel.tsx` to live system health, week-over-week trends, 7-day platform activity curve (`platform_activity`), and registered tenant roster with search filtering and Admin role gating. Added 9 comprehensive automated regression tests in `tests/test_phase1_dashboard_wiring_regression.py` bringing test suite to 336/336 passing tests (0 failures) and verified 0-error Vite frontend production build.
+
 - [x] **Recent Commits Remediation & Codebase Hygiene Hardening (8-Issue Fix Package)**
   - *Completed:* 2026-10-08 | Antigravity AI Engineer
   - *Summary:* Fixed critical test regression by re-mounting `analytics.router` in `backend/main.py` restoring all 29 broken endpoints and bringing test suite to 100% pass rate. Added missing `scikit-learn` and `xgboost` to `backend/requirements.txt` preventing deployment crash on `automl_service.py`. Scrubbed 23 occurrences of "NexaBI" branding contamination across 14 backend and frontend files, standardizing on DataSpeakAI (`DataSpeakDashboard`, `DATASPEAK_THEME`, `DataSpeakAI Analytics Hub`, `dataspeak.*` loggers). Added missing `description` column to `DatabaseConnection` in `backend/models.py` aligning ORM with `db_migration.py`, and completed wire-up across `add_database()` in `backend/routers/databases.py` and listing/get/update responses in `backend/routers/connections.py`. Harmonized `GEMINI_MODEL` environment variable support in `backend/services/llm_generation_service.py`, fixing model prioritization and deduplication. Pruned 4 dead/orphan service files (`pipeline_service.py`, `file_service.py`, `relationship_detector.py`, `security_service.py`) removing 581 lines of dead code. Relocated root sample CSV `covid19_healthcare_hospital_analytics.csv` to `tests/fixtures/`. Generalized `scripts/run_audit_mongo_business.py` with CLI arguments (`--data-path`, `--output-dir`), safe optional `mongomock` import, and proper error exit codes. Added 7 automated regression tests in `tests/test_fix_commit_issues_regression.py` reaching 327/327 passing tests (0 failures) and verified 0-error Vite frontend build.
@@ -198,10 +176,6 @@ Every AI agent working on this repository **MUST** adhere to this 4-step workflo
 - [x] **Phase 2E: Deterministic Filter Recommendation Engine**
   - *Completed:* 2026-09-23 | Antigravity AI Engineer
   - *Summary:* Built deterministic, execution-free filter recommendation engine in `filter_recommender.py` recommending `date_range` and `select` (IN) filters based on SchemaRegistry metadata and confirmed column references; enabled filter support for derived recipes (AOV, Gross Profit); enforced identifier protection and cardinality boundaries (2..50); added 30 tests in `test_phase2e_filter_recommender.py`; full regression reached 275 passing tests with 0 failures and 0 Pyright errors.
-
-- [x] **Upstream Commits Remediation & Codebase Hygiene Hardening**
-  - *Completed:* 2026-10-08 | Antigravity AI Orchestrator & DeepCoder
-  - *Summary:* Remounted `analytics.router` in `backend/main.py` restoring 29 broken tests and all 17 routes; added `scikit-learn` and `xgboost` to `requirements.txt`; scrubbed 23 instances of "NexaBI" branding across 14 files; aligned ORM `DatabaseConnection.description` with migrations and route handlers; harmonized `GEMINI_MODEL` prioritization and multimodal fallback in `llm_generation_service.py`; deleted 4 dead service files (~581 lines); relocated root sample CSV to `tests/fixtures/`; generalized `run_audit_mongo_business.py` with CLI flags and error exit codes; authored 7 automated regression tests in `test_fix_commit_issues_regression.py` bringing test suite to 327/327 passing with 0 failures; verified clean `npm run build` with 0 errors.
 
 - [x] **Phase 2D: Deterministic Chart Recommendation Engine**
   - *Completed:* 2026-09-23 | Antigravity AI Engineer

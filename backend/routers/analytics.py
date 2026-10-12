@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status, Query
+from fastapi.responses import StreamingResponse
+import csv
+import io
 from sqlalchemy.orm import Session
 from typing import List, Optional, Any, Union, cast
 import models, schemas
@@ -32,13 +35,15 @@ from services.adaptive_chart_recommender import (
     AdaptiveChartRecommendation,
 )
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import text
+from sqlalchemy import text, func
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
+core_router = APIRouter(prefix="/api", tags=["core"])
 
 DATE_RANGE_DAYS = {"7days": 7, "30days": 30, "90days": 90, "1year": 365}
+
 
 
 def get_owned_connection(
@@ -1538,4 +1543,572 @@ def apply_user_confirmed_mapping(
         "warnings": validation_warnings,
         "mappings": confirmed_mappings,
     }
+
+
+# ===========================================================================
+# Phase 1: Core Dashboard Analytics, Query Logs, Usage & Admin Endpoints
+# ===========================================================================
+
+def get_analytics_overview(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    tenant_id = current_user.tenant_id
+    if not tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User does not belong to an active tenant."
+        )
+
+    # 1. KPI Counts
+    total_queries = db.query(models.QueryLog).filter(models.QueryLog.tenant_id == tenant_id).count()
+    connected_databases = db.query(models.DatabaseConnection).filter(models.DatabaseConnection.tenant_id == tenant_id).count()
+    uploaded_documents = db.query(models.Document).filter(models.Document.tenant_id == tenant_id).count()
+
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start_naive = today_start.replace(tzinfo=None)
+    api_calls_today = db.query(models.QueryLog).filter(
+        models.QueryLog.tenant_id == tenant_id,
+        (models.QueryLog.created_at >= today_start) | (models.QueryLog.created_at >= today_start_naive)
+    ).count()
+
+    # 2. Query timeline (last 7 days)
+    now = datetime.now(timezone.utc)
+    query_data = []
+    for i in range(6, -1, -1):
+        day_date = now - timedelta(days=i)
+        day_start = day_date.replace(hour=0, minute=0, second=0, microsecond=0)
+        day_end = day_start + timedelta(days=1)
+        day_start_naive = day_start.replace(tzinfo=None)
+        day_end_naive = day_end.replace(tzinfo=None)
+
+        cnt = db.query(models.QueryLog).filter(
+            models.QueryLog.tenant_id == tenant_id,
+            ((models.QueryLog.created_at >= day_start) & (models.QueryLog.created_at < day_end)) |
+            ((models.QueryLog.created_at >= day_start_naive) & (models.QueryLog.created_at < day_end_naive))
+        ).count()
+        query_data.append({
+            "name": day_date.strftime("%a"),
+            "date": day_date.strftime("%b %d"),
+            "queries": cnt
+        })
+
+    # 3. Database Activity
+    db_conns = db.query(models.DatabaseConnection).filter(models.DatabaseConnection.tenant_id == tenant_id).all()
+    database_activity = []
+    if db_conns:
+        for db_c in db_conns:
+            cnt = db.query(models.QueryLog).filter(
+                models.QueryLog.tenant_id == tenant_id,
+                models.QueryLog.database_id == db_c.id
+            ).count()
+            database_activity.append({
+                "name": db_c.name,
+                "db_type": db_c.db_type,
+                "queries": cnt
+            })
+    else:
+        database_activity = [
+            {"name": "No Databases Connected", "queries": 0}
+        ]
+
+    # 4. Recent Queries
+    recent_logs = db.query(models.QueryLog).filter(
+        models.QueryLog.tenant_id == tenant_id
+    ).order_by(models.QueryLog.created_at.desc()).limit(10).all()
+
+    recent_queries = []
+    for log in recent_logs:
+        db_name = log.database.name if log.database else "Database"
+        formatted_time = log.created_at.strftime("%Y-%m-%d %H:%M") if log.created_at else ""
+        recent_queries.append({
+            "id": log.id,
+            "question": log.natural_query or "NL Query",
+            "database": db_name,
+            "status": log.status or "success",
+            "time": formatted_time,
+            "created_at": log.created_at.isoformat() if log.created_at else ""
+        })
+
+    return {
+        "total_queries": total_queries,
+        "connected_databases": connected_databases,
+        "uploaded_documents": uploaded_documents,
+        "api_calls_today": api_calls_today,
+        "subscription_plan": "Starter",
+        "query_data": query_data,
+        "database_activity": database_activity,
+        "recent_queries": recent_queries
+    }
+
+
+def get_query_logs(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    status_filter: Optional[str] = Query(None, alias="status"),
+    database_id: Optional[int] = Query(None),
+    search: Optional[str] = Query(None),
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    tenant_id = current_user.tenant_id
+    if not tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User does not belong to an active tenant."
+        )
+
+    # Tenant-wide stats
+    all_logs = db.query(models.QueryLog).filter(models.QueryLog.tenant_id == tenant_id)
+    total_queries = all_logs.count()
+    successful = db.query(models.QueryLog).filter(
+        models.QueryLog.tenant_id == tenant_id,
+        models.QueryLog.status == "success"
+    ).count()
+    failed = db.query(models.QueryLog).filter(
+        models.QueryLog.tenant_id == tenant_id,
+        models.QueryLog.status == "failed"
+    ).count()
+
+    success_rate = round((successful / total_queries * 100), 1) if total_queries > 0 else 0.0
+
+    avg_res = db.query(func.avg(models.QueryLog.execution_time_ms)).filter(
+        models.QueryLog.tenant_id == tenant_id
+    ).scalar()
+    avg_response_time_ms = round(float(avg_res), 1) if avg_res is not None else 0.0
+
+    # Filtered query
+    q = db.query(models.QueryLog).filter(models.QueryLog.tenant_id == tenant_id)
+    if status_filter and status_filter.lower() != "all":
+        q = q.filter(models.QueryLog.status == status_filter.lower())
+    if database_id:
+        q = q.filter(models.QueryLog.database_id == database_id)
+    if search:
+        search_pattern = f"%{search}%"
+        q = q.filter(
+            (models.QueryLog.natural_query.ilike(search_pattern)) |
+            (models.QueryLog.generated_sql.ilike(search_pattern))
+        )
+
+    filtered_total = q.count()
+    logs_page = q.order_by(models.QueryLog.created_at.desc()).offset((page - 1) * limit).limit(limit).all()
+
+    items = []
+    for log in logs_page:
+        db_name = log.database.name if log.database else "Database"
+        items.append({
+            "id": log.id,
+            "userQuestion": log.natural_query or "",
+            "generatedQuery": log.generated_sql or "",
+            "database": db_name,
+            "status": log.status or "success",
+            "executionTime": f"{int(log.execution_time_ms or 0)}ms",
+            "timestamp": log.created_at.strftime("%Y-%m-%d %H:%M:%S") if log.created_at else "",
+            "rows": log.rows_returned or 0,
+            "tokens": log.tokens_used or 0,
+            "error": log.error_message
+        })
+
+    return {
+        "items": items,
+        "total": filtered_total,
+        "page": page,
+        "limit": limit,
+        "total_queries": total_queries,
+        "successful": successful,
+        "failed": failed,
+        "success_rate": success_rate,
+        "avg_response_time_ms": avg_response_time_ms,
+    }
+
+
+def _sanitize_csv_cell(val: Any) -> Any:
+    """Neutralize formula injection by prefixing dangerous characters with single quote."""
+    if val is None:
+        return ""
+    s = str(val)
+    if s and s[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return f"'{s}"
+    return s
+
+
+def export_query_logs(
+    status_filter: Optional[str] = Query(None, alias="status"),
+    database_id: Optional[int] = Query(None),
+    search: Optional[str] = Query(None),
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    tenant_id = current_user.tenant_id
+    if not tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User does not belong to an active tenant."
+        )
+
+    q = db.query(models.QueryLog).filter(models.QueryLog.tenant_id == tenant_id)
+    if status_filter and status_filter.lower() != "all":
+        q = q.filter(models.QueryLog.status == status_filter.lower())
+    if database_id is not None:
+        q = q.filter(models.QueryLog.database_id == database_id)
+    if search:
+        search_pattern = f"%{search}%"
+        q = q.filter(
+            (models.QueryLog.natural_query.ilike(search_pattern)) |
+            (models.QueryLog.generated_sql.ilike(search_pattern))
+        )
+
+    def generate_csv_stream():
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow([
+            "id", "timestamp", "database", "status", "execution_time_ms", "rows_returned", "tokens_used", "user_question", "generated_sql", "error_message"
+        ])
+        yield buf.getvalue()
+        buf.seek(0)
+        buf.truncate(0)
+
+        for log in q.order_by(models.QueryLog.created_at.desc()).yield_per(500):
+            db_name = log.database.name if log.database else "Database"
+            writer.writerow([
+                log.id,
+                log.created_at.strftime("%Y-%m-%d %H:%M:%S") if log.created_at else "",
+                _sanitize_csv_cell(db_name),
+                _sanitize_csv_cell(log.status or "success"),
+                log.execution_time_ms or 0.0,
+                log.rows_returned or 0,
+                log.tokens_used or 0,
+                _sanitize_csv_cell(log.natural_query),
+                _sanitize_csv_cell(log.generated_sql),
+                _sanitize_csv_cell(log.error_message),
+            ])
+            yield buf.getvalue()
+            buf.seek(0)
+            buf.truncate(0)
+
+    timestamp_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return StreamingResponse(
+        generate_csv_stream(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=query_logs_{timestamp_str}.csv"}
+    )
+
+
+def get_tenant_usage(
+    period: str = Query("7d", pattern="^(24h|7d|30d|90d)$"),
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    tenant_id = current_user.tenant_id
+    if not tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User does not belong to an active tenant."
+        )
+
+    now = datetime.now(timezone.utc)
+    if period == "24h":
+        start_cutoff = now - timedelta(hours=24)
+        num_intervals = 24
+        interval_type = "hour"
+    elif period == "30d":
+        start_cutoff = now - timedelta(days=30)
+        num_intervals = 30
+        interval_type = "day"
+    elif period == "90d":
+        start_cutoff = now - timedelta(days=90)
+        num_intervals = 90
+        interval_type = "day"
+    else:  # default 7d
+        start_cutoff = now - timedelta(days=7)
+        num_intervals = 7
+        interval_type = "day"
+
+    start_cutoff_naive = start_cutoff.replace(tzinfo=None)
+
+    # Period queries and tokens
+    period_logs_query = db.query(models.QueryLog).filter(
+        models.QueryLog.tenant_id == tenant_id,
+        (models.QueryLog.created_at >= start_cutoff) | (models.QueryLog.created_at >= start_cutoff_naive)
+    )
+    total_queries = period_logs_query.count()
+    token_sum = period_logs_query.with_entities(func.sum(models.QueryLog.tokens_used)).scalar()
+    tokens_used = int(token_sum) if token_sum else 0
+    token_limit = 500000
+
+    connected_databases = db.query(models.DatabaseConnection).filter(
+        models.DatabaseConnection.tenant_id == tenant_id
+    ).count()
+
+    # Timeline points using optimized single aggregated group query
+    usage_data = []
+    if interval_type == "day":
+        daily_stats = db.query(
+            func.date(models.QueryLog.created_at).label("day_str"),
+            func.count(models.QueryLog.id).label("q_count"),
+            func.coalesce(func.sum(models.QueryLog.tokens_used), 0).label("tok_sum")
+        ).filter(
+            models.QueryLog.tenant_id == tenant_id,
+            (models.QueryLog.created_at >= start_cutoff) | (models.QueryLog.created_at >= start_cutoff_naive)
+        ).group_by(func.date(models.QueryLog.created_at)).all()
+
+        stats_map = {str(row.day_str): (row.q_count, int(row.tok_sum)) for row in daily_stats}
+
+        for i in range(num_intervals - 1, -1, -1):
+            day_date = now - timedelta(days=i)
+            day_key = day_date.strftime("%Y-%m-%d")
+            q_cnt, tok_cnt = stats_map.get(day_key, (0, 0))
+            usage_data.append({
+                "date": day_date.strftime("%b %d"),
+                "queries": q_cnt,
+                "tokens": tok_cnt
+            })
+    else:  # 24h
+        for i in range(23, -1, -1):
+            h_time = now - timedelta(hours=i)
+            h_start = h_time.replace(minute=0, second=0, microsecond=0)
+            h_end = h_start + timedelta(hours=1)
+            h_start_naive = h_start.replace(tzinfo=None)
+            h_end_naive = h_end.replace(tzinfo=None)
+
+            h_queries = db.query(models.QueryLog).filter(
+                models.QueryLog.tenant_id == tenant_id,
+                ((models.QueryLog.created_at >= h_start) & (models.QueryLog.created_at < h_end)) |
+                ((models.QueryLog.created_at >= h_start_naive) & (models.QueryLog.created_at < h_end_naive))
+            ).count()
+            h_tok_sum = db.query(func.sum(models.QueryLog.tokens_used)).filter(
+                models.QueryLog.tenant_id == tenant_id,
+                ((models.QueryLog.created_at >= h_start) & (models.QueryLog.created_at < h_end)) |
+                ((models.QueryLog.created_at >= h_start_naive) & (models.QueryLog.created_at < h_end_naive))
+            ).scalar()
+            usage_data.append({
+                "date": h_time.strftime("%H:00"),
+                "queries": h_queries,
+                "tokens": int(h_tok_sum or 0)
+            })
+
+    # Database type distribution grouped query
+    db_types_query = db.query(
+        models.DatabaseConnection.db_type,
+        func.count(models.QueryLog.id).label("cnt")
+    ).outerjoin(
+        models.QueryLog,
+        (models.QueryLog.database_id == models.DatabaseConnection.id) &
+        ((models.QueryLog.created_at >= start_cutoff) | (models.QueryLog.created_at >= start_cutoff_naive))
+    ).filter(
+        models.DatabaseConnection.tenant_id == tenant_id
+    ).group_by(models.DatabaseConnection.db_type).all()
+
+    type_counts = {}
+    colors = ["#3b82f6", "#8b5cf6", "#ec4899", "#10b981", "#f59e0b"]
+    for db_type, cnt in db_types_query:
+        t_name = db_type.capitalize() if db_type else "Database"
+        type_counts[t_name] = type_counts.get(t_name, 0) + cnt
+
+    database_type_data = []
+    idx = 0
+    for name, val in type_counts.items():
+        database_type_data.append({
+            "name": name,
+            "value": val,
+            "color": colors[idx % len(colors)]
+        })
+        idx += 1
+    if not database_type_data:
+        database_type_data = [
+            {"name": "No Databases", "value": 0, "color": "#3b82f6"}
+        ]
+
+    # Hourly query distribution (00:00 to 23:00) bounded by start_cutoff
+    hourly_data = [
+        {"hour": "00:00", "queries": 0},
+        {"hour": "04:00", "queries": 0},
+        {"hour": "08:00", "queries": 0},
+        {"hour": "12:00", "queries": 0},
+        {"hour": "16:00", "queries": 0},
+        {"hour": "20:00", "queries": 0}
+    ]
+    period_logs = db.query(models.QueryLog.created_at).filter(
+        models.QueryLog.tenant_id == tenant_id,
+        (models.QueryLog.created_at >= start_cutoff) | (models.QueryLog.created_at >= start_cutoff_naive)
+    ).all()
+    for (c_at,) in period_logs:
+        if c_at:
+            h = c_at.hour
+            bin_idx = min(5, h // 4)
+            hourly_data[bin_idx]["queries"] += 1
+
+    return {
+        "total_queries": total_queries,
+        "tokens_used": tokens_used,
+        "token_limit": token_limit,
+        "available_tokens": max(0, token_limit - tokens_used),
+        "avg_tokens_per_query": round(tokens_used / max(1, total_queries), 1),
+        "databases_count": connected_databases,
+        "current_cost": "$29",
+        "plan": "Starter",
+        "usage_data": usage_data,
+        "database_type_data": database_type_data,
+        "hourly_data": hourly_data
+    }
+
+
+def get_admin_stats(
+    current_user: models.User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    total_tenants = db.query(models.Tenant).count()
+    total_users = db.query(models.User).count()
+    total_queries = db.query(models.QueryLog).count()
+    active_databases = db.query(models.DatabaseConnection).count()
+    document_count = db.query(models.Document).count()
+
+    now = datetime.now(timezone.utc)
+    w1_start = now - timedelta(days=7)
+    w2_start = now - timedelta(days=14)
+    w1_start_naive = w1_start.replace(tzinfo=None)
+    w2_start_naive = w2_start.replace(tzinfo=None)
+
+    # Week-over-week queries
+    curr_queries = db.query(models.QueryLog).filter(
+        (models.QueryLog.created_at >= w1_start) | (models.QueryLog.created_at >= w1_start_naive)
+    ).count()
+    prev_queries = db.query(models.QueryLog).filter(
+        ((models.QueryLog.created_at >= w2_start) & (models.QueryLog.created_at < w1_start)) |
+        ((models.QueryLog.created_at >= w2_start_naive) & (models.QueryLog.created_at < w1_start_naive))
+    ).count()
+
+    q_change_pct = round(((curr_queries - prev_queries) / max(1, prev_queries)) * 100, 1) if prev_queries > 0 else (100.0 if curr_queries > 0 else 0.0)
+    q_trend = "up" if q_change_pct > 0 else ("down" if q_change_pct < 0 else "neutral")
+    q_change_str = f"+{q_change_pct}%" if q_change_pct > 0 else f"{q_change_pct}%"
+
+    # Week-over-week tenants
+    curr_tenants = db.query(models.Tenant).filter(
+        (models.Tenant.created_at >= w1_start) | (models.Tenant.created_at >= w1_start_naive)
+    ).count()
+    prev_tenants = db.query(models.Tenant).filter(
+        ((models.Tenant.created_at >= w2_start) & (models.Tenant.created_at < w1_start)) |
+        ((models.Tenant.created_at >= w2_start_naive) & (models.Tenant.created_at < w1_start_naive))
+    ).count()
+
+    t_change_pct = round(((curr_tenants - prev_tenants) / max(1, prev_tenants)) * 100, 1) if prev_tenants > 0 else (100.0 if curr_tenants > 0 else 0.0)
+    t_trend = "up" if t_change_pct > 0 else ("down" if t_change_pct < 0 else "neutral")
+    t_change_str = f"+{t_change_pct}%" if t_change_pct > 0 else f"{t_change_pct}%"
+
+    # Platform activity timeline (last 7 days across all tenants)
+    platform_daily = db.query(
+        func.date(models.QueryLog.created_at).label("day_str"),
+        func.count(models.QueryLog.id).label("cnt")
+    ).filter(
+        (models.QueryLog.created_at >= w1_start) | (models.QueryLog.created_at >= w1_start_naive)
+    ).group_by(func.date(models.QueryLog.created_at)).all()
+
+    p_stats_map = {str(row.day_str): row.cnt for row in platform_daily}
+    platform_activity = []
+    for i in range(6, -1, -1):
+        d = now - timedelta(days=i)
+        d_key = d.strftime("%Y-%m-%d")
+        platform_activity.append({
+            "name": d.strftime("%a"),
+            "date": d.strftime("%b %d"),
+            "queries": p_stats_map.get(d_key, 0)
+        })
+
+    return {
+        "total_tenants": total_tenants,
+        "total_users": total_users,
+        "total_queries": total_queries,
+        "active_databases": active_databases,
+        "document_count": document_count,
+        "platform_activity": platform_activity,
+        "platform_stats": [
+            {
+                "title": "Total Tenants",
+                "value": str(total_tenants),
+                "change": t_change_str,
+                "trend": t_trend,
+                "key": "tenants"
+            },
+            {
+                "title": "Total Queries",
+                "value": str(total_queries),
+                "change": q_change_str,
+                "trend": q_trend,
+                "key": "queries"
+            },
+            {
+                "title": "Active Databases",
+                "value": str(active_databases),
+                "change": f"{active_databases} connected",
+                "trend": "neutral",
+                "key": "databases"
+            },
+            {
+                "title": "System Health",
+                "value": "100%",
+                "change": "Operational",
+                "trend": "neutral",
+                "key": "health"
+            }
+        ]
+    }
+
+
+def get_admin_tenants(
+    current_user: models.User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    tenants = db.query(models.Tenant).all()
+    result = []
+    for t in tenants:
+        users_count = db.query(models.User).filter(models.User.tenant_id == t.id).count()
+        db_count = db.query(models.DatabaseConnection).filter(models.DatabaseConnection.tenant_id == t.id).count()
+        query_count = db.query(models.QueryLog).filter(models.QueryLog.tenant_id == t.id).count()
+
+        admin_user = db.query(models.User).filter(
+            models.User.tenant_id == t.id,
+            models.User.role == "Admin"
+        ).first()
+
+        tenant_plan = getattr(t, "plan", None) or "Starter"
+        quota = 500000 if tenant_plan.lower() == "pro" else 50000
+
+        result.append({
+            "id": t.id,
+            "company": t.name,
+            "email": admin_user.email if admin_user else (db.query(models.User.email).filter(models.User.tenant_id == t.id).scalar() or "No users"),
+            "plan": tenant_plan,
+            "queries": query_count,
+            "databases": db_count,
+            "users_count": users_count,
+            "status": "active",
+            "joined": t.created_at.strftime("%b %d, %Y") if t.created_at else "Jan 15, 2026",
+            "usage": min(100, max(0, int((query_count / max(1, quota)) * 100)))
+        })
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# API Route Bindings for /api/analytics and /api (Dual Mounted)
+# ---------------------------------------------------------------------------
+
+# Bindings on router (prefixed with /api/analytics)
+router.add_api_route("/overview", get_analytics_overview, methods=["GET"], response_model=schemas.AnalyticsOverviewResponse)
+router.add_api_route("/logs", get_query_logs, methods=["GET"], response_model=schemas.QueryLogsResponse)
+router.add_api_route("/logs/export", export_query_logs, methods=["GET"])
+router.add_api_route("/usage", get_tenant_usage, methods=["GET"], response_model=schemas.TenantUsageResponse)
+router.add_api_route("/admin/stats", get_admin_stats, methods=["GET"], response_model=schemas.AdminStatsResponse)
+router.add_api_route("/admin/tenants", get_admin_tenants, methods=["GET"], response_model=List[schemas.AdminTenantItem])
+
+# Bindings on core_router (prefixed with /api)
+# Note: /api/overview binds as alias to /api/analytics/overview, eliminating duplicate operation ID warning
+core_router.add_api_route("/overview", get_analytics_overview, methods=["GET"], response_model=schemas.AnalyticsOverviewResponse)
+core_router.add_api_route("/logs", get_query_logs, methods=["GET"], response_model=schemas.QueryLogsResponse)
+core_router.add_api_route("/logs/export", export_query_logs, methods=["GET"])
+core_router.add_api_route("/usage", get_tenant_usage, methods=["GET"], response_model=schemas.TenantUsageResponse)
+core_router.add_api_route("/admin/stats", get_admin_stats, methods=["GET"], response_model=schemas.AdminStatsResponse)
+core_router.add_api_route("/admin/tenants", get_admin_tenants, methods=["GET"], response_model=List[schemas.AdminTenantItem])
+
+
 
