@@ -24,6 +24,17 @@ from services.llm_generation_service import generate
 logger = logging.getLogger("dataspeak.insights_engine")
 
 
+def _safe_float(val: Any, default: float = 0.0) -> float:
+    try:
+        if val is None:
+            return default
+        if isinstance(val, str):
+            val = val.replace("%", "").strip()
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
+
 class InsightsEngine:
     @staticmethod
     def collect_tenant_telemetry(
@@ -293,10 +304,13 @@ Return ONLY raw JSON. Do NOT wrap in markdown formatting or explanation text.
 
             parsed = json.loads(cleaned)
             if isinstance(parsed, list) and len(parsed) > 0:
-                # Add database_id link if scoped
+                valid_items = []
                 for item in parsed:
-                    item["database_id"] = database_id
-                return parsed
+                    if isinstance(item, dict) and "title" in item and "summary" in item:
+                        item["database_id"] = database_id
+                        valid_items.append(item)
+                if valid_items:
+                    return valid_items
         except Exception as ex:
             logger.warning(f"[InsightsEngine] AI synthesis failed or returned invalid JSON ({ex}). Falling back to deterministic engine.")
 
@@ -443,12 +457,24 @@ Return ONLY raw JSON. Do NOT wrap in markdown formatting or explanation text.
         if database_id is not None:
             existing_active = existing_active.filter(models.GeneratedInsight.database_id == database_id)
 
-        # Remove previous active insights (cascades to recommendations)
-        existing_active.delete(synchronize_session=False)
+        # Explicitly delete child recommendations first to prevent orphaned records in SQLite
+        active_insights = existing_active.all()
+        active_insight_ids = [i.id for i in active_insights]
+        if active_insight_ids:
+            db.query(models.Recommendation).filter(
+                models.Recommendation.insight_id.in_(active_insight_ids)
+            ).delete(synchronize_session=False)
+
+        # Remove previous active insights cleanly from session and database
+        for ins in active_insights:
+            db.delete(ins)
+        db.flush()
 
         persisted_records: List[models.GeneratedInsight] = []
 
         for data in insights_data:
+            if not isinstance(data, dict):
+                continue
             insight = models.GeneratedInsight(
                 tenant_id=tenant_id,
                 database_id=data.get("database_id") or database_id,
@@ -456,23 +482,27 @@ Return ONLY raw JSON. Do NOT wrap in markdown formatting or explanation text.
                 category=str(data.get("category", "Operational"))[:100],
                 severity=str(data.get("severity", "opportunity")).lower()[:50],
                 summary=str(data.get("summary", "")),
-                impact_score=float(data.get("impact_score", 0.0) or 0.0),
-                confidence_score=float(data.get("confidence_score", 1.0) or 1.0),
+                impact_score=_safe_float(data.get("impact_score"), 0.0),
+                confidence_score=_safe_float(data.get("confidence_score"), 1.0),
                 status="active"
             )
             db.add(insight)
             db.flush()  # Flush to obtain insight.id
 
-            for rec_data in data.get("recommendations", []):
-                rec = models.Recommendation(
-                    insight_id=insight.id,
-                    action_step=str(rec_data.get("action_step", "")),
-                    priority=str(rec_data.get("priority", "medium")).lower()[:20],
-                    action_type=str(rec_data.get("action_type", "general"))[:50],
-                    action_url=str(rec_data.get("action_url", ""))[:255] if rec_data.get("action_url") else None,
-                    status="pending"
-                )
-                db.add(rec)
+            recs = data.get("recommendations", [])
+            if isinstance(recs, list):
+                for rec_data in recs:
+                    if not isinstance(rec_data, dict):
+                        continue
+                    rec = models.Recommendation(
+                        insight_id=insight.id,
+                        action_step=str(rec_data.get("action_step", "")),
+                        priority=str(rec_data.get("priority", "medium")).lower()[:20],
+                        action_type=str(rec_data.get("action_type", "general"))[:50],
+                        action_url=str(rec_data.get("action_url", ""))[:255] if rec_data.get("action_url") else None,
+                        status="pending"
+                    )
+                    db.add(rec)
 
             persisted_records.append(insight)
 
@@ -507,7 +537,13 @@ Return ONLY raw JSON. Do NOT wrap in markdown formatting or explanation text.
         telemetry = cls.collect_tenant_telemetry(tenant_id, database_id, db)
         anomalies = cls.detect_deterministic_anomalies(telemetry)
         insights_data = cls.synthesize_insights_with_ai(telemetry, anomalies, database_id)
-        persisted = cls.persist_tenant_insights(tenant_id, database_id, insights_data, db)
+        try:
+            persisted = cls.persist_tenant_insights(tenant_id, database_id, insights_data, db)
+        except Exception as ex:
+            logger.warning(f"[InsightsEngine] Persistence failed ({ex}). Retrying with deterministic fallback.")
+            db.rollback()
+            fallback_data = cls.generate_deterministic_fallback(telemetry, anomalies, database_id)
+            persisted = cls.persist_tenant_insights(tenant_id, database_id, fallback_data, db)
         return persisted
 
 

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "react-router";
 import { API_BASE_URL } from "../../config/api";
 import { toast } from "sonner";
 import {
@@ -75,13 +76,24 @@ export function LogsPage() {
   const [exporting, setExporting] = useState(false);
 
   // Filters and pagination state
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [searchParams] = useSearchParams();
+  const initialStatus = searchParams.get("status") || "all";
+  const [statusFilter, setStatusFilter] = useState<string>(initialStatus);
   const [selectedDb, setSelectedDb] = useState<string>("all");
   const [searchInput, setSearchInput] = useState<string>("");
   const [activeSearch, setActiveSearch] = useState<string>("");
   const [page, setPage] = useState<number>(1);
   const [limit] = useState<number>(20);
   const [total, setTotal] = useState<number>(0);
+
+  // Sync status filter if URL search params change
+  useEffect(() => {
+    const urlStatus = searchParams.get("status");
+    if (urlStatus && urlStatus !== statusFilter) {
+      setStatusFilter(urlStatus);
+      setPage(1);
+    }
+  }, [searchParams]);
 
   // Fetch databases list for the filter dropdown
   useEffect(() => {

@@ -227,6 +227,13 @@ export function AIInsightsPage() {
             ),
           }))
         );
+        setSummary((prev) => ({
+          ...prev,
+          pending_actions_count: Math.max(
+            0,
+            prev.pending_actions_count + (newStatus === "completed" ? -1 : 1)
+          ),
+        }));
       } else {
         toast.error("Could not update recommendation status.");
       }

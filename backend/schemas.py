@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, model_validator, field_validator, Field
+from pydantic import BaseModel, EmailStr, model_validator, field_validator, Field, ConfigDict
 from typing import Optional, List, Any, Dict
 from datetime import datetime
 from urllib.parse import urlparse, unquote
@@ -709,8 +709,7 @@ class RecommendationItem(BaseModel):
     action_url: Optional[str] = None
     status: str = "pending"  # pending, completed
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class RecommendationStatusUpdate(BaseModel):
@@ -732,8 +731,7 @@ class GeneratedInsightItem(BaseModel):
     created_at: datetime
     recommendations: List[RecommendationItem] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class GeneratedInsightStatusUpdate(BaseModel):

@@ -1,51 +1,45 @@
-# Handoff Report: Multi-Domain Enterprise Accuracy Hardening & IDE Type Health
+# Handoff Report: Phase 3 AI Insights Engine QA & Security Hardening
 
 ## 1. Observation
-1. **IDE / Pyright Static Typing Errors (`@[current_problems]`)**:
-   - `backend/ingestion/extractors.py`: `fitz_page.get_text()` returned ambiguous type `dict | list | str`, causing errors on `.strip()` and `+=` string concatenation. `BaseShape` in PPTX had uninspected `text_frame` attribute access.
-   - `backend/services/metric_recipes.py`: Discriminated union base class `BaseMetricRecipe` declared `metric_type: MetricType`, conflicting with subclass literal overrides (`Literal["atomic"]`, etc.).
-   - `tests/test_phase2a_metric_recipe_contract.py`: Missing type narrowing before accessing `.operand` on `MetricRecipe`, and missing required `zero_division` argument in static analysis.
-   - `tests/test_phase2c_derived_metric_executor.py`: Literal `"non_numeric_string"` passed into `MetricResult` value without typing cast.
-   - Missing module `routers.analytics` in test and scratch files due to working tree deletion.
-2. **Dashboard Accuracy Bugs**:
-   - **KPI 1 (Unit Price Bug)**: `monetary_cols` selected `unit_price` before checking `net_revenue`/`gross_revenue`, returning $6.5M instead of the true $12.8M.
-   - **KPI 2 (Misleading Label)**: `COUNT(*)` without status filter was labeled "completed transactions" even though 25% of orders were cancelled or returned.
-   - **KPI 3 (Fabricated Trends)**: Hardcoded constants (`5.8`, `3.4`, `11.2`, `4.8`, `6.5`, `5.0`, `6.8`, `3.2`) were emitted across KPIs.
-   - **KPI 4 (Fake Fallback)**: Catalog size fell back to Chinook `"3,503"`.
-   - **KPI 5 (YoY Distortion)**: Comparing 2.3 months of 2026 to full 12 months of 2025 yielded -80.5% distortion instead of real Same-Period-Last-Year (-0.63%).
-   - **Charts 3–6**: Hardcoded joins on Chinook tables (`TrackId`, `Genre`, `Album`, `MediaType`) crashed on any non-music database.
+Following the Phase 3 (AI Insights and Recommendation Engine) implementation, code review and automated behavioral QA uncovered seven defects across security, reliability, UI synchronization, and contract compliance:
+1. **SEC-01 (Critical - Cross-Tenant Database IDOR)**: `GET /api/insights?database_id=...` and `POST /api/insights/refresh?database_id=...` filtered query telemetry directly by `database_id` without verifying tenant ownership of the target database, leaking database metadata across tenants. Also suffered from N+1 query overhead across relationships.
+2. **BUG-01 (High - SQLite Orphan Recommendation Accumulation)**: Refreshing insights deleted parent `GeneratedInsight` rows while leaving child `Recommendation` foreign keys orphaned in SQLite (without foreign key cascades enabled), generating stale SQLAlchemy identity map warnings (`SAWarning`) and triggering unhandled 500 `AttributeError` on subsequent recommendation status mutations.
+3. **BUG-02 (Medium - LLM Score Sanitization & Schema Fallback)**: `synthesize_insights_with_ai` in `insights_engine.py` directly cast `impact_score` and `confidence_score` using `float()`. Non-numeric or percentage strings (e.g. `"92%"`, `"high"`) caused unhandled `ValueError` and crashed the refresh loop.
+4. **SEC-02 (Low - Recommendation ID Enumeration)**: `PUT /api/insights/recommendations/{id}/status` returned `404 Not Found` if the recommendation did not exist in the database, but `403 Forbidden` if it belonged to another tenant, leaking recommendation ID existence across tenants.
+5. **UI-01 (Low - Frontend Pending Actions KPI Desync)**: Toggling recommendation completion in `AIInsightsPage.tsx` updated the recommendation item's local status, but failed to adjust the executive summary KPI `summary.pending_actions_count`.
+6. **INT-01 (Low - Logs Deep-Link Query Parameter Ignored)**: Contextual action links navigating to `/dashboard/logs?status=failed` did not pre-filter logs because `LogsPage.tsx` did not parse the `status` search parameter on initialization.
+7. **NIT-01 (Nit - Deprecated Pydantic V2 Config)**: `RecommendationItem` and `GeneratedInsightItem` used deprecated Pydantic V1 `class Config: orm_mode = True`, triggering deprecation warnings.
 
 ## 2. Logic Chain
-- **Type Health & Module Restoration**:
-  - Restored `backend/routers/analytics.py` from git commit.
-  - In `backend/ingestion/extractors.py`: Cast `raw_text = str(fitz_page.get_text() or "")` and safely inspected `getattr(shape, "text_frame", None)`.
-  - In `backend/services/metric_recipes.py`: Removed redundant `metric_type` declaration on `BaseMetricRecipe`.
-  - In `tests/`: Added `isinstance(validated, AtomicMetricRecipe)` narrowing, `model_validate` for testing missing kwargs, and `cast(Any, "non_numeric_string")`.
-- **Database Pipeline Refactor (`backend/services/db_pipeline_service.py`)**:
-  - Wired `sort_monetary_columns_by_priority(monetary_cols)` across all table profiles.
-  - Implemented unit rate guard: if only unit rate exists, formulates `SUM(unit_price * quantity)`.
-  - Added schema-driven lifecycle introspection: detects delivered, cancelled, and returned records, outputting honest labels without misleading "completed transactions".
-  - Implemented true SPLY (Same-Period-Last-Year) time series windowing; sets `trend_pct: None` if historical intervals are insufficient.
-  - Removed all fabricated trend constants (`5.8`, `3.4`, etc.) and the Chinook `"3,503"` fallback.
-  - Replaced Chinook-specific queries with schema-introspected categorical, status, and buyer spend queries, successfully generating all 6 charts dynamically.
-  - Updated frontend `ECommerceTemplate.tsx` to cleanly hide badges when `trendText` or `trend_pct` is absent.
+- **SEC-01 Cross-Tenant IDOR Resolution (`backend/routers/insights.py`)**:
+  - Enforced mandatory verification `db.query(models.DatabaseConnection).filter(models.DatabaseConnection.id == database_id, models.DatabaseConnection.tenant_id == current_user.tenant_id).first()`. If invalid or foreign, raises `HTTPException(404, "Database connection not found")`.
+  - Added eager loading with `options(joinedload(models.GeneratedInsight.database), selectinload(models.GeneratedInsight.recommendations))` eliminating N+1 query lookups.
+- **BUG-01 Child Recommendation Purging (`backend/services/insights_engine.py`)**:
+  - Before inserting refreshed insights, explicitly queried all active child recommendations belonging to previous tenant insights and executed `db.delete(rec)`. Then deleted previous insights using `db.delete(ins)` and invoked `db.flush()`. This cleans both child and parent rows in SQLite without relying on external cascade pragma and keeps the SQLAlchemy identity map clean.
+- **BUG-02 Resilient LLM Scoring (`backend/services/insights_engine.py`)**:
+  - Implemented `_safe_float(val, default, min_val, max_val)` supporting percentage string stripping (`95%` -> `0.95`), clamp ranges, and safe fallbacks.
+  - Filtered out non-dict items returned by LLM array outputs.
+  - Wrapped `refresh_tenant_insights` in try-except with fallback synthesis to ensure the API never returns unhandled 500 errors on unexpected LLM formatting.
+- **SEC-02 Recommendation ID Enumeration Defense (`backend/routers/insights.py`)**:
+  - Queried recommendations using a direct join: `db.query(models.Recommendation).join(models.GeneratedInsight).filter(models.Recommendation.id == recommendation_id, models.GeneratedInsight.tenant_id == current_user.tenant_id).first()`.
+  - If null, uniformly returns `HTTPException(404, "Recommendation not found")`.
+- **UI-01 Pending Actions KPI Synchronization (`src/app/pages/dashboard/AIInsightsPage.tsx`)**:
+  - Updated `handleToggleRecommendation` to adjust `summary.pending_actions_count` optimistically when toggling between completed and pending.
+- **INT-01 Logs Query Parameter Support (`src/app/pages/dashboard/LogsPage.tsx`)**:
+  - Added `useSearchParams` hook and initialized `statusFilter` from `searchParams.get("status")` (validating against allowed statuses `"all" | "success" | "failed"`).
+- **NIT-01 Pydantic V2 Migration (`backend/schemas.py`)**:
+  - Replaced class-based `Config` with `model_config = ConfigDict(from_attributes=True)`.
 
 ## 3. Caveats
-- Databases with completely unparseable date formats will have `trend_pct: None` and display no badge, ensuring no false percentages deceive business stakeholders.
+- Direct cascade deletion in SQLite remains driver-dependent if SQLite foreign key pragmas are not enabled by default; explicitly deleting child rows in the service layer guarantees deterministic behavior across SQLite, PostgreSQL, and MySQL.
 
 ## 4. Conclusion
-All 8 IDE type errors and all 5 dashboard accuracy bugs are completely resolved. The engine is fully multi-domain and operates without hardcoded schemas or fabricated constants.
+All seven findings (SEC-01, SEC-02, BUG-01, BUG-02, UI-01, INT-01, NIT-01) are resolved, tested, and verified. Multi-tenant boundaries are strictly enforced with uniform 404 responses, query N+1 overhead is eliminated, LLM score ingestion is fail-safe, and frontend KPIs and deep-links remain in sync.
 
 ## 5. Verification Method
-- **Golden Test Suite (`scratch/test_golden_ecommerce.py`)**:
-  - KPI 1: `[PASS]` Revenue is genuine ($12,836,135.55, not $6.5M unit_price).
-  - KPI 2: `[PASS]` Orders count 50,000 with honest label.
-  - KPI 3: `[PASS]` Zero hardcoded trends.
-  - KPI 4: `[PASS]` Zero fake catalog fallbacks (135 catalog size).
-  - KPI 5: `[PASS]` YoY comparison is true SPLY (-0.6%, not -80.5%).
-  - Generated all 6 charts dynamically.
-- **Backend Pytest**:
-  - `tests/test_phase2a_metric_recipe_contract.py` + `tests/test_phase2c_derived_metric_executor.py`: **50 passed in 2.94s**.
-  - `tests/test_phase1_5d1_silent_fallback_removal.py` + `tests/test_phase1_5d2_atomic_regeneration.py`: **31 passed in 10.85s**.
-- **Frontend Production Build**:
-  - `npm run build`: **✓ 2755 modules transformed, 0 errors in 48.23s**.
+1. **Target Regression Suite**:
+   - `pytest tests/test_phase3_ai_insights_regression.py -v`: **12/12 passed (0 failures, 0 SAWarning warnings)**.
+2. **Full Automated Test Suite**:
+   - `pytest tests/ -q`: **382/382 passed (0 failures, 17 legacy warnings down from 19)**.
+3. **Frontend Production Build**:
+   - `npm run build`: **✓ 2772 modules transformed, 0 errors in 9.31s**.

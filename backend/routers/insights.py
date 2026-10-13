@@ -5,7 +5,7 @@ and multi-table relational insights.
 """
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse, HTMLResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 from typing import Optional, Dict, Any, List
 import json
 
@@ -68,6 +68,15 @@ def get_ai_insights(
         raise HTTPException(status_code=403, detail="User must belong to a tenant.")
 
     tenant_id = current_user.tenant_id
+
+    # Verify database ownership if scoped to prevent cross-tenant enumeration or leaks
+    if database_id is not None:
+        db_conn = db.query(models.DatabaseConnection).filter(
+            models.DatabaseConnection.id == database_id,
+            models.DatabaseConnection.tenant_id == tenant_id
+        ).first()
+        if not db_conn:
+            raise HTTPException(status_code=404, detail="Database connection not found.")
 
     # Check if any insights exist for this tenant (scoped to database_id if provided)
     check_query = db.query(models.GeneratedInsight).filter(
@@ -132,7 +141,15 @@ def get_ai_insights(
     if severity and severity.lower() != "all":
         filtered_query = filtered_query.filter(models.GeneratedInsight.severity == severity.lower())
 
-    insights_records = filtered_query.order_by(models.GeneratedInsight.created_at.desc()).all()
+    insights_records = (
+        filtered_query
+        .options(
+            joinedload(models.GeneratedInsight.database),
+            selectinload(models.GeneratedInsight.recommendations)
+        )
+        .order_by(models.GeneratedInsight.created_at.desc())
+        .all()
+    )
 
     # Check if tenant has any connected databases or query logs
     has_sources = (
@@ -162,6 +179,15 @@ def refresh_ai_insights(
     if not current_user.tenant_id:
         raise HTTPException(status_code=403, detail="User must belong to a tenant.")
 
+    # Verify database ownership if scoped to prevent cross-tenant enumeration or leaks
+    if database_id is not None:
+        db_conn = db.query(models.DatabaseConnection).filter(
+            models.DatabaseConnection.id == database_id,
+            models.DatabaseConnection.tenant_id == current_user.tenant_id
+        ).first()
+        if not db_conn:
+            raise HTTPException(status_code=404, detail="Database connection not found.")
+
     refreshed = insights_engine.refresh_tenant_insights(
         tenant_id=current_user.tenant_id,
         database_id=database_id,
@@ -184,18 +210,22 @@ def update_recommendation_status(
 ):
     """
     Updates a recommendation's status (pending vs completed).
-    Ensures strict tenant ownership verification.
+    Ensures strict tenant ownership verification via join with GeneratedInsight.
     """
     if not current_user.tenant_id:
         raise HTTPException(status_code=403, detail="User must belong to a tenant.")
 
-    rec = db.query(models.Recommendation).filter(models.Recommendation.id == recommendation_id).first()
+    rec = (
+        db.query(models.Recommendation)
+        .join(models.GeneratedInsight)
+        .filter(
+            models.Recommendation.id == recommendation_id,
+            models.GeneratedInsight.tenant_id == current_user.tenant_id
+        )
+        .first()
+    )
     if not rec:
         raise HTTPException(status_code=404, detail="Recommendation not found.")
-
-    # Verify tenant ownership through parent insight
-    if rec.insight.tenant_id != current_user.tenant_id:
-        raise HTTPException(status_code=403, detail="Unauthorized to modify this recommendation.")
 
     valid_statuses = {"pending", "completed"}
     if payload.status.lower() not in valid_statuses:

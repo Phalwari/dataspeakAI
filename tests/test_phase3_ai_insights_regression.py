@@ -431,6 +431,71 @@ def test_strict_tenant_isolation(test_env):
     res_mutate_insight = client.put(f"/api/insights/{insight_t1.id}/status", json={"status": "dismissed"})
     assert res_mutate_insight.status_code == 404
 
-    # 3. Tenant B cannot mutate Tenant A's recommendation status (403 unauthorized)
+    # 3. Tenant B cannot mutate Tenant A's recommendation status (404 not found to prevent ID enumeration)
     res_mutate_rec = client.put(f"/api/insights/recommendations/{rec_t1.id}/status", json={"status": "completed"})
-    assert res_mutate_rec.status_code == 403
+    assert res_mutate_rec.status_code == 404
+
+    # 4. Tenant B cannot scope to Tenant A's database_id (404 on both GET and POST refresh)
+    res_db_get = client.get("/api/insights?database_id=1")
+    assert res_db_get.status_code == 404
+
+    res_db_refresh = client.post("/api/insights/refresh?database_id=1")
+    assert res_db_refresh.status_code == 404
+
+
+# ── Test 11: Child Recommendation Cleanup on Sequential Refreshes ─────────────
+
+def test_child_recommendations_not_orphaned_on_refresh(test_env):
+    session = test_env["session"]
+
+    # First refresh generates insights and recommendations
+    persisted_1 = insights_engine.refresh_tenant_insights(tenant_id=1, database_id=1, db=session)
+    count_recs_1 = session.query(models.Recommendation).count()
+    assert count_recs_1 > 0
+
+    # Second refresh replaces active insights
+    persisted_2 = insights_engine.refresh_tenant_insights(tenant_id=1, database_id=1, db=session)
+    count_recs_2 = session.query(models.Recommendation).count()
+
+    # Recommendations must NOT accumulate as orphaned rows
+    assert count_recs_2 == sum(len(i.recommendations) for i in persisted_2)
+    # Zero orphaned recommendations without parent insight
+    orphaned_count = session.query(models.Recommendation).filter(models.Recommendation.insight == None).count()
+    assert orphaned_count == 0
+
+
+# ── Test 12: Malformed LLM Output Resilience ──────────────────────────────────
+
+def test_malformed_llm_output_resilience(test_env):
+    session = test_env["session"]
+
+    malformed_data = [
+        {
+            "title": "String Impact Score",
+            "category": "Performance",
+            "severity": "critical",
+            "summary": "Impact score was string instead of float",
+            "impact_score": "high",
+            "confidence_score": "95%",
+            "recommendations": [
+                {
+                    "action_step": "Fix database indices",
+                    "priority": "high",
+                    "action_type": "general",
+                    "action_url": None,
+                }
+            ],
+        },
+        "invalid string item",
+    ]
+
+    persisted = insights_engine.persist_tenant_insights(
+        tenant_id=1,
+        database_id=1,
+        insights_data=malformed_data,
+        db=session,
+    )
+    assert len(persisted) == 1
+    assert persisted[0].impact_score == 0.0
+    assert persisted[0].confidence_score == 95.0
+
