@@ -49,7 +49,9 @@ def get_client_ip(request: Request) -> str:
     if remote_host in trusted_proxies:
         forwarded = request.headers.get("x-forwarded-for")
         if forwarded:
-            return forwarded.split(",")[0].strip()
+            candidate = forwarded.split(",")[0].strip()
+            if candidate:
+                return candidate
     return remote_host
 
 

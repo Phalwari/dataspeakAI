@@ -1,7 +1,7 @@
 from pydantic import BaseModel, EmailStr, model_validator, field_validator, Field
 from typing import Optional, List, Any, Dict
 from datetime import datetime
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
 
 class TenantBase(BaseModel):
     name: str
@@ -170,9 +170,10 @@ def _sanitize_and_validate_origin(origin_val: str) -> str:
     if not (origin_str.startswith("http://") or origin_str.startswith("https://")):
         raise ValueError(f"Origin '{origin_str}' must start with http:// or https://")
 
-    # Strictly disallow characters that could inject into CSP or HTTP headers (SEC-07)
+    # Strictly disallow characters that could inject into CSP or HTTP headers (both literal and percent-encoded) (SEC-07)
+    decoded_origin = unquote(origin_str)
     for forbidden_char in [";", ",", "\n", "\r", '"', "'", " "]:
-        if forbidden_char in origin_str:
+        if forbidden_char in origin_str or forbidden_char in decoded_origin:
             raise ValueError(f"Origin '{origin_str}' contains forbidden character '{forbidden_char}' (preventing header injection)")
 
     parsed = urlparse(origin_str)
@@ -180,6 +181,8 @@ def _sanitize_and_validate_origin(origin_val: str) -> str:
         raise ValueError(f"Origin '{origin_str}' must have a valid scheme (http or https)")
     if not parsed.netloc:
         raise ValueError(f"Origin '{origin_str}' has invalid hostname structure")
+    if "@" in parsed.netloc:
+        raise ValueError(f"Origin '{origin_str}' must not contain user credentials ('@')")
     if parsed.path and parsed.path != "/":
         raise ValueError(f"Origin '{origin_str}' must not include path segments ('{parsed.path}'). Specify only scheme, host, and optional port.")
     if parsed.query or parsed.params or parsed.fragment:

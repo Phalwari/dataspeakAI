@@ -38,4 +38,3 @@ groq
 langchain-groq
 pymongo
 sqlglot
-lxml

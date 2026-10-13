@@ -191,7 +191,14 @@ def extract_sql_referenced_tables(clean_sql: str) -> List[str]:
         for t in parsed.find_all(exp.Table):
             name = t.name.lower().strip()
             if name and name not in ctes and not name.startswith("safe_limit_wrapper"):
-                if t.db:
+                if t.catalog:
+                    catalog_part = t.catalog.lower().strip()
+                    db_part = t.db.lower().strip() if t.db else ""
+                    if db_part:
+                        tables.add(f"{catalog_part}.{db_part}.{name}")
+                    else:
+                        tables.add(f"{catalog_part}.{name}")
+                elif t.db:
                     tables.add(f"{t.db.lower().strip()}.{name}")
                 else:
                     tables.add(name)

@@ -48,6 +48,11 @@ def test_sec01_exact_table_matching_blocks_cross_schema_bypass():
     assert valid is False
     assert "private.products" in msg
 
+    # 6. 3-part catalog identifier bypass attempt is rejected
+    valid, msg = validate_widget_sql("SELECT * FROM evil_cat.public.products;", allowed_tables=["public.products"])
+    assert valid is False
+    assert "evil_cat.public.products" in msg
+
 
 # ==============================================================================
 # SEC-02: AST Fail-Closed Parsing Tests (Task 2.1.2)
@@ -110,6 +115,14 @@ def test_sec03_trusted_proxy_ip_validation():
         mock_req.headers = {"x-forwarded-for": "192.0.2.1"}
         assert get_client_ip(mock_req) == "127.0.0.1"
 
+    # Case 5: Whitespace or empty first item in X-Forwarded-For falls back to remote host
+    mock_req.client.host = "127.0.0.1"
+    mock_req.headers = {"x-forwarded-for": "   "}
+    assert get_client_ip(mock_req) == "127.0.0.1"
+
+    mock_req.headers = {"x-forwarded-for": "  , 192.0.2.1"}
+    assert get_client_ip(mock_req) == "127.0.0.1"
+
 
 # ==============================================================================
 # SEC-04 & SEC-05 & SEC-06: Quotas, Bucket Cleanup & Stream TTL (Task 2.1.4)
@@ -123,6 +136,15 @@ def test_sec04_key_scoped_monthly_quota():
             db.add(tenant)
             db.commit()
             db.refresh(tenant)
+
+        # Clean up any leftover keys from prior runs
+        leftover_keys = db.query(models.WidgetKey).filter(
+            models.WidgetKey.public_key.in_(["pk_live_quota_test_key_a", "pk_live_quota_test_key_b"])
+        ).all()
+        for lk in leftover_keys:
+            db.query(models.QueryLog).filter(models.QueryLog.widget_key_id == lk.id).delete(synchronize_session=False)
+            db.delete(lk)
+        db.commit()
 
         # Create two distinct widget keys
         key_a = models.WidgetKey(
@@ -143,6 +165,10 @@ def test_sec04_key_scoped_monthly_quota():
         db.commit()
         db.refresh(key_a)
         db.refresh(key_b)
+
+        # Clear any preexisting query logs if auto-increment IDs were recycled
+        db.query(models.QueryLog).filter(models.QueryLog.widget_key_id.in_([key_a.id, key_b.id])).delete(synchronize_session=False)
+        db.commit()
 
         # Insert 5 QueryLogs specifically for Key A
         now = datetime.now(timezone.utc)
@@ -217,6 +243,18 @@ def test_sec05_rate_limiter_in_memory_bucket_pruning():
     assert len(limiter._ip_buckets) == 5
 
 
+def test_sec06_redis_stream_ttl():
+    limiter = WidgetRateLimiter()
+    mock_redis = MagicMock()
+    mock_redis.incr.return_value = 1
+    limiter.redis_client = mock_redis
+
+    acquired = limiter.acquire_stream("pk_live_test_sec06", max_concurrent=5)
+    assert acquired is True
+    mock_redis.incr.assert_called_once_with("widget_streams:pk_live_test_sec06")
+    mock_redis.expire.assert_called_once_with("widget_streams:pk_live_test_sec06", 300)
+
+
 # ==============================================================================
 # SEC-07: Origin URL Validation Tests (Task 2.1.5)
 # ==============================================================================
@@ -266,6 +304,22 @@ def test_sec07_origin_url_validation():
             allowed_origins=["*"]
         )
     assert "Wildcard origins" in str(exc.value)
+
+    # 6. Embedded user credentials (@) are rejected
+    with pytest.raises(ValidationError) as exc:
+        schemas.WidgetKeyCreate(
+            name="Evil Credentials",
+            allowed_origins=["https://admin:secret@example.com"]
+        )
+    assert "user credentials" in str(exc.value)
+
+    # 7. Percent-encoded CRLF is rejected
+    with pytest.raises(ValidationError) as exc:
+        schemas.WidgetKeyCreate(
+            name="Evil Encoded CRLF",
+            allowed_origins=["https://example.com%0d%0aInjected:1"]
+        )
+    assert "forbidden character" in str(exc.value)
 
 
 # ==============================================================================
@@ -328,8 +382,34 @@ def test_sec08_revoke_key_endpoint_and_disabled_state():
         assert hs_res2.status_code == 200
         assert "session_token" in hs_res2.json()
 
+        # Re-revoke key, then rotate: rotation must reset enabled to True
+        client.put(f"/api/keys/widget/{wkey.id}/revoke", headers={"Authorization": f"Bearer {auth_token}"})
+        db.refresh(wkey)
+        assert wkey.enabled is False
+
+        rot_res = client.post(f"/api/keys/widget/{wkey.id}/rotate", headers={"Authorization": f"Bearer {auth_token}"})
+        assert rot_res.status_code == 200
+        db.refresh(wkey)
+        assert wkey.enabled is True
+
+        # Test deletion with associated QueryLog nullifies FK cleanly
+        qlog = models.QueryLog(
+            tenant_id=user.tenant_id,
+            widget_key_id=wkey.id,
+            source="widget",
+            natural_query="SELECT 1",
+            status="success"
+        )
+        db.add(qlog)
+        db.commit()
+
+        del_res = client.delete(f"/api/keys/widget/{wkey.id}", headers={"Authorization": f"Bearer {auth_token}"})
+        assert del_res.status_code == 200
+        db.refresh(qlog)
+        assert qlog.widget_key_id is None
+
         # Cleanup
-        db.delete(wkey)
+        db.delete(qlog)
         db.commit()
     finally:
         db.close()

@@ -272,10 +272,13 @@ export function ChatbotWidgetPage() {
     );
     if (!confirmRotate) return;
 
-    setIsRotating(true);
     const token = localStorage.getItem("token");
-    if (!token) return;
+    if (!token) {
+      toast.error("Authentication required");
+      return;
+    }
 
+    setIsRotating(true);
     try {
       const res = await fetch(`${API_BASE_URL}/api/keys/widget/${widgetKey.id}/rotate`, {
         method: "POST",
@@ -291,7 +294,8 @@ export function ChatbotWidgetPage() {
               ...prev,
               public_key: rotData.new_key,
               previous_key: rotData.previous_key,
-              previous_key_expires_at: rotData.previous_key_expires_at
+              previous_key_expires_at: rotData.previous_key_expires_at,
+              enabled: true
             }
           : null
       );
@@ -308,10 +312,13 @@ export function ChatbotWidgetPage() {
   // Revoke Key (SEC-08)
   const handleRevokeKey = async () => {
     if (!widgetKey) return;
-    setIsRevoking(true);
     const token = localStorage.getItem("token");
-    if (!token) return;
+    if (!token) {
+      toast.error("Authentication required");
+      return;
+    }
 
+    setIsRevoking(true);
     try {
       const res = await fetch(`${API_BASE_URL}/api/keys/widget/${widgetKey.id}/revoke`, {
         method: "PUT",
@@ -336,10 +343,13 @@ export function ChatbotWidgetPage() {
   // Re-enable Key
   const handleReenableKey = async () => {
     if (!widgetKey) return;
-    setIsReenabling(true);
     const token = localStorage.getItem("token");
-    if (!token) return;
+    if (!token) {
+      toast.error("Authentication required");
+      return;
+    }
 
+    setIsReenabling(true);
     try {
       const res = await fetch(`${API_BASE_URL}/api/keys/widget/${widgetKey.id}`, {
         method: "PUT",

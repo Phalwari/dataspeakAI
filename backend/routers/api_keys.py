@@ -206,6 +206,7 @@ def rotate_widget_key(
     widget_key.previous_key = old_key
     widget_key.previous_key_expires_at = now + timedelta(hours=24)
     widget_key.public_key = new_key
+    widget_key.enabled = True
 
     db.commit()
     db.refresh(widget_key)
@@ -258,6 +259,9 @@ def delete_widget_key(
     if not widget_key:
         raise HTTPException(status_code=404, detail="Widget key not found")
 
+    db.query(models.QueryLog).filter(models.QueryLog.widget_key_id == widget_key.id).update(
+        {"widget_key_id": None}, synchronize_session=False
+    )
     db.delete(widget_key)
     db.commit()
     return {"message": "Widget key deleted successfully"}
