@@ -18,6 +18,29 @@ class Tenant(Base):
     created_at = Column(DateTime, default=utc_now)
 
     users = relationship("User", back_populates="tenant")
+    settings = relationship("TenantSettings", back_populates="tenant", uselist=False, cascade="all, delete-orphan")
+    memberships = relationship("Membership", back_populates="tenant", cascade="all, delete-orphan")
+    collections = relationship("Collection", back_populates="tenant", cascade="all, delete-orphan")
+    query_templates = relationship("QueryTemplate", back_populates="tenant", cascade="all, delete-orphan")
+    dashboards = relationship("Dashboard", back_populates="tenant", cascade="all, delete-orphan")
+    subscriptions = relationship("Subscription", back_populates="tenant", cascade="all, delete-orphan")
+    metered_usages = relationship("MeteredUsage", back_populates="tenant", cascade="all, delete-orphan")
+    rate_limits = relationship("RateLimit", back_populates="tenant", cascade="all, delete-orphan")
+    security_policy = relationship("SecurityPolicy", back_populates="tenant", uselist=False, cascade="all, delete-orphan")
+    audit_logs = relationship("AuditLog", back_populates="tenant", cascade="all, delete-orphan")
+
+class TenantSettings(Base):
+    __tablename__ = "tenant_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), unique=True, nullable=False)
+    theme_mode = Column(String(20), default="light")
+    custom_domain = Column(String(255), nullable=True)
+    notifications_enabled = Column(Boolean, default=True)
+    branding_logo_url = Column(String(500), nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+
+    tenant = relationship("Tenant", back_populates="settings")
 
 class User(Base):
     __tablename__ = "users"
@@ -33,6 +56,43 @@ class User(Base):
     created_at = Column(DateTime, default=utc_now)
 
     tenant = relationship("Tenant", back_populates="users")
+    memberships = relationship("Membership", back_populates="user", cascade="all, delete-orphan")
+
+class Role(Base):
+    __tablename__ = "roles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(50), unique=True, index=True, nullable=False)
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+
+    permissions = relationship("Permission", back_populates="role", cascade="all, delete-orphan")
+    memberships = relationship("Membership", back_populates="role")
+
+class Permission(Base):
+    __tablename__ = "permissions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    role_id = Column(Integer, ForeignKey("roles.id", ondelete="CASCADE"), nullable=False)
+    action = Column(String(50), nullable=False)    # read, write, delete, execute, manage
+    resource = Column(String(50), nullable=False)  # databases, documents, queries, api_keys, users, all
+    created_at = Column(DateTime, default=utc_now)
+
+    role = relationship("Role", back_populates="permissions")
+
+class Membership(Base):
+    __tablename__ = "memberships"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    role_id = Column(Integer, ForeignKey("roles.id", ondelete="SET NULL"), nullable=True)
+    is_owner = Column(Boolean, default=False)
+    joined_at = Column(DateTime, default=utc_now)
+
+    user = relationship("User", back_populates="memberships")
+    tenant = relationship("Tenant", back_populates="memberships")
+    role = relationship("Role", back_populates="memberships")
 
 class UserDatabaseAccess(Base):
     __tablename__ = "user_database_access"
@@ -77,6 +137,58 @@ class DatabaseConnection(Base):
     created_at = Column(DateTime, default=utc_now)
     
     tenant = relationship("Tenant")
+    secrets = relationship("Secret", back_populates="connection", cascade="all, delete-orphan")
+    schemas = relationship("DatabaseSchema", back_populates="connection", cascade="all, delete-orphan")
+    system_metrics = relationship("SystemMetric", back_populates="connection", cascade="all, delete-orphan")
+
+class Secret(Base):
+    __tablename__ = "secrets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    connection_id = Column(Integer, ForeignKey("database_connections.id", ondelete="CASCADE"), nullable=False)
+    provider = Column(String(50), default="local")
+    encrypted_credentials = Column(Text, nullable=False)
+    key_version = Column(String(50), nullable=True)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    connection = relationship("DatabaseConnection", back_populates="secrets")
+
+class DatabaseSchema(Base):
+    __tablename__ = "database_schemas"
+
+    id = Column(Integer, primary_key=True, index=True)
+    connection_id = Column(Integer, ForeignKey("database_connections.id", ondelete="CASCADE"), nullable=False)
+    schema_name = Column(String(255), nullable=False, default="public")
+    last_sync = Column(DateTime, default=utc_now)
+
+    connection = relationship("DatabaseConnection", back_populates="schemas")
+    tables = relationship("TableMetadata", back_populates="schema", cascade="all, delete-orphan")
+
+class TableMetadata(Base):
+    __tablename__ = "table_metadata"
+
+    id = Column(Integer, primary_key=True, index=True)
+    schema_id = Column(Integer, ForeignKey("database_schemas.id", ondelete="CASCADE"), nullable=False)
+    table_name = Column(String(255), nullable=False, index=True)
+    semantic_description = Column(Text, nullable=True)
+    is_fact_table = Column(Boolean, default=False)
+    row_count_estimate = Column(Integer, default=0)
+
+    schema = relationship("DatabaseSchema", back_populates="tables")
+    columns = relationship("ColumnMetadata", back_populates="table", cascade="all, delete-orphan")
+
+class ColumnMetadata(Base):
+    __tablename__ = "column_metadata"
+
+    id = Column(Integer, primary_key=True, index=True)
+    table_id = Column(Integer, ForeignKey("table_metadata.id", ondelete="CASCADE"), nullable=False)
+    column_name = Column(String(255), nullable=False, index=True)
+    data_type = Column(String(100), nullable=False)
+    is_pii = Column(Boolean, default=False)
+    sample_data = Column(JSON, nullable=True)
+    unit_type = Column(String(50), nullable=True)
+
+    table = relationship("TableMetadata", back_populates="columns")
 
 class ApiKey(Base):
     __tablename__ = "api_keys"
@@ -254,16 +366,83 @@ class ExecutedQuery(Base):
     __tablename__ = "executed_queries"
 
     id = Column(Integer, primary_key=True, index=True)
-    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    database_id = Column(Integer, ForeignKey("database_connections.id"), nullable=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    database_id = Column(Integer, ForeignKey("database_connections.id", ondelete="SET NULL"), nullable=True)
+    message_id = Column(Integer, ForeignKey("messages.id", ondelete="CASCADE"), nullable=True)
     raw_query = Column(Text, nullable=True)
     sql_generated = Column(Text, nullable=True)
     execution_time_ms = Column(Float, default=0.0)
     rows_returned = Column(Integer, default=0)
     status = Column(String, default="success") # success, failed, blocked
+    was_successful = Column(Boolean, default=True)
     error_message = Column(Text, nullable=True)
     executed_at = Column(DateTime, default=utc_now)
+
+    tenant = relationship("Tenant")
+    user = relationship("User")
+    database = relationship("DatabaseConnection")
+    message = relationship("Message", back_populates="executed_queries")
+    safety_logs = relationship("QuerySafetyLog", back_populates="executed_query", cascade="all, delete-orphan")
+
+class QueryTemplate(Base):
+    __tablename__ = "query_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String(255), nullable=False)
+    sql_template = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+
+    tenant = relationship("Tenant", back_populates="query_templates")
+
+class QuerySafetyLog(Base):
+    __tablename__ = "query_safety_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    query_id = Column(Integer, ForeignKey("executed_queries.id", ondelete="CASCADE"), nullable=False)
+    passed_validation = Column(Boolean, nullable=False, default=True)
+    violation_details = Column(Text, nullable=True)
+    checked_at = Column(DateTime, default=utc_now)
+
+    executed_query = relationship("ExecutedQuery", back_populates="safety_logs")
+
+class Intent(Base):
+    __tablename__ = "intents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    message_id = Column(Integer, ForeignKey("messages.id", ondelete="CASCADE"), nullable=False)
+    intent_name = Column(String(255), nullable=False)
+    confidence = Column(Float, default=1.0)
+    created_at = Column(DateTime, default=utc_now)
+
+    message = relationship("Message", back_populates="intents")
+
+class Collection(Base):
+    __tablename__ = "collections"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String(255), nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    vector_provider = Column(String(50), default="faiss")
+    created_at = Column(DateTime, default=utc_now)
+
+    tenant = relationship("Tenant", back_populates="collections")
+    vector_records = relationship("VectorRecord", back_populates="collection", cascade="all, delete-orphan")
+
+class VectorRecord(Base):
+    __tablename__ = "vector_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    chunk_id = Column(Integer, ForeignKey("document_chunks.id", ondelete="CASCADE"), nullable=False)
+    collection_id = Column(Integer, ForeignKey("collections.id", ondelete="CASCADE"), nullable=False)
+    vector_external_id = Column(String(255), nullable=False, index=True)
+    created_at = Column(DateTime, default=utc_now)
+
+    chunk = relationship("DocumentChunk")
+    collection = relationship("Collection", back_populates="vector_records")
 
 class QueryLog(Base):
     __tablename__ = "query_logs"
@@ -316,6 +495,8 @@ class Message(Base):
     created_at = Column(DateTime, default=utc_now)
 
     conversation = relationship("Conversation", back_populates="messages")
+    intents = relationship("Intent", back_populates="message", cascade="all, delete-orphan")
+    executed_queries = relationship("ExecutedQuery", back_populates="message", cascade="all, delete-orphan")
 
 class Dataset(Base):
     __tablename__ = "datasets"
@@ -371,3 +552,130 @@ class Recommendation(Base):
     status = Column(String(50), default="pending")         # pending, completed
 
     insight = relationship("GeneratedInsight", back_populates="recommendations")
+
+
+class Dashboard(Base):
+    __tablename__ = "dashboards"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    title = Column(String(255), nullable=False)
+    layout_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    tenant = relationship("Tenant", back_populates="dashboards")
+    widgets = relationship("Widget", back_populates="dashboard", cascade="all, delete-orphan")
+
+class Widget(Base):
+    __tablename__ = "widgets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    dashboard_id = Column(Integer, ForeignKey("dashboards.id", ondelete="CASCADE"), nullable=False)
+    type = Column(String(50), nullable=False)
+    config_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+
+    dashboard = relationship("Dashboard", back_populates="widgets")
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    stripe_id = Column(String(255), unique=True, index=True, nullable=True)
+    plan_tier = Column(String(50), default="free")
+    status = Column(String(50), default="active")
+    current_period_end = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+
+    tenant = relationship("Tenant", back_populates="subscriptions")
+    invoices = relationship("Invoice", back_populates="subscription", cascade="all, delete-orphan")
+
+class Invoice(Base):
+    __tablename__ = "invoices"
+
+    id = Column(Integer, primary_key=True, index=True)
+    subscription_id = Column(Integer, ForeignKey("subscriptions.id", ondelete="CASCADE"), nullable=False)
+    amount_due = Column(Float, nullable=False, default=0.0)
+    billing_period_start = Column(DateTime, nullable=True)
+    billing_period_end = Column(DateTime, nullable=True)
+    status = Column(String(50), default="pending")
+    created_at = Column(DateTime, default=utc_now)
+
+    subscription = relationship("Subscription", back_populates="invoices")
+    payments = relationship("Payment", back_populates="invoice", cascade="all, delete-orphan")
+
+class Payment(Base):
+    __tablename__ = "payments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    invoice_id = Column(Integer, ForeignKey("invoices.id", ondelete="CASCADE"), nullable=False)
+    payment_method = Column(String(50), default="stripe")
+    status = Column(String(50), default="succeeded")
+    transaction_id = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+
+    invoice = relationship("Invoice", back_populates="payments")
+
+class MeteredUsage(Base):
+    __tablename__ = "metered_usage"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    feature = Column(String(100), nullable=False)
+    quantity = Column(Integer, default=0)
+    recorded_at = Column(DateTime, default=utc_now)
+
+    tenant = relationship("Tenant", back_populates="metered_usages")
+
+class RateLimit(Base):
+    __tablename__ = "rate_limits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    endpoint_group = Column(String(100), nullable=False)
+    max_requests_per_min = Column(Integer, default=60)
+    created_at = Column(DateTime, default=utc_now)
+
+    tenant = relationship("Tenant", back_populates="rate_limits")
+
+class SecurityPolicy(Base):
+    __tablename__ = "security_policies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), unique=True, nullable=False)
+    enforce_2fa = Column(Boolean, default=False)
+    allowed_ip_ranges = Column(Text, nullable=True)
+    pii_redaction_rules = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    tenant = relationship("Tenant", back_populates="security_policy")
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    action = Column(String(255), nullable=False)
+    ip_address = Column(String(50), nullable=True)
+    details = Column(JSON, nullable=True)
+    timestamp = Column(DateTime, default=utc_now)
+
+    tenant = relationship("Tenant", back_populates="audit_logs")
+    user = relationship("User")
+
+class SystemMetric(Base):
+    __tablename__ = "system_metrics"
+
+    id = Column(Integer, primary_key=True, index=True)
+    connection_id = Column(Integer, ForeignKey("database_connections.id", ondelete="CASCADE"), nullable=False)
+    cpu_usage = Column(Float, default=0.0)
+    memory_usage = Column(Float, default=0.0)
+    active_connections = Column(Integer, default=0)
+    timestamp = Column(DateTime, default=utc_now)
+
+    connection = relationship("DatabaseConnection", back_populates="system_metrics")
+

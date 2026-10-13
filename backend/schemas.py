@@ -757,3 +757,372 @@ class AIInsightsRefreshResponse(BaseModel):
     refreshed_count: int
     insights: List[GeneratedInsightItem]
 
+
+# ==========================================
+# Phase 4 - Stage 4A: RBAC, Settings & Catalog Schemas
+# ==========================================
+
+class TenantSettingsBase(BaseModel):
+    theme_mode: Optional[str] = "light"
+    custom_domain: Optional[str] = None
+    notifications_enabled: Optional[bool] = True
+    branding_logo_url: Optional[str] = None
+
+class TenantSettingsUpdate(TenantSettingsBase):
+    pass
+
+class TenantSettingsResponse(TenantSettingsBase):
+    id: int
+    tenant_id: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PermissionBase(BaseModel):
+    action: str
+    resource: str
+
+class PermissionCreate(PermissionBase):
+    pass
+
+class PermissionResponse(PermissionBase):
+    id: int
+    role_id: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RoleBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+class RoleCreate(RoleBase):
+    pass
+
+class RoleResponse(RoleBase):
+    id: int
+    created_at: datetime
+    permissions: List[PermissionResponse] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MembershipBase(BaseModel):
+    user_id: int
+    tenant_id: int
+    role_id: Optional[int] = None
+    is_owner: bool = False
+
+class MembershipCreate(MembershipBase):
+    pass
+
+class MembershipResponse(MembershipBase):
+    id: int
+    joined_at: datetime
+    role: Optional[RoleResponse] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SecretResponse(BaseModel):
+    id: int
+    connection_id: int
+    provider: str = "local"
+    key_version: Optional[str] = None
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ColumnMetadataResponse(BaseModel):
+    id: int
+    table_id: int
+    column_name: str
+    data_type: str
+    is_pii: bool = False
+    sample_data: Optional[Any] = None
+    unit_type: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TableMetadataResponse(BaseModel):
+    id: int
+    schema_id: int
+    table_name: str
+    semantic_description: Optional[str] = None
+    is_fact_table: bool = False
+    row_count_estimate: int = 0
+    columns: List[ColumnMetadataResponse] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DatabaseSchemaResponse(BaseModel):
+    id: int
+    connection_id: int
+    schema_name: str
+    last_sync: Optional[datetime] = None
+    tables: List[TableMetadataResponse] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ==========================================
+# Phase 4 - Stage 4B: Query Auditing, Safety & Vector Collections Schemas
+# ==========================================
+
+class QueryTemplateBase(BaseModel):
+    name: str
+    sql_template: str
+    description: Optional[str] = None
+
+class QueryTemplateCreate(QueryTemplateBase):
+    pass
+
+class QueryTemplateResponse(QueryTemplateBase):
+    id: int
+    tenant_id: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class QuerySafetyLogResponse(BaseModel):
+    id: int
+    query_id: int
+    passed_validation: bool
+    violation_details: Optional[str] = None
+    checked_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ExecutedQueryAuditResponse(BaseModel):
+    id: int
+    tenant_id: int
+    user_id: int
+    database_id: Optional[int] = None
+    message_id: Optional[int] = None
+    sql_generated: Optional[str] = None
+    execution_time_ms: float = 0.0
+    rows_returned: int = 0
+    status: str
+    was_successful: bool = True
+    error_message: Optional[str] = None
+    executed_at: datetime
+    safety_logs: List[QuerySafetyLogResponse] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class IntentBase(BaseModel):
+    intent_name: str
+    confidence: float = 1.0
+
+class IntentCreate(IntentBase):
+    message_id: int
+
+class IntentResponse(IntentBase):
+    id: int
+    message_id: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CollectionBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    vector_provider: str = "faiss"
+
+class CollectionCreate(CollectionBase):
+    pass
+
+class CollectionResponse(CollectionBase):
+    id: int
+    tenant_id: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class VectorRecordBase(BaseModel):
+    chunk_id: int
+    collection_id: int
+    vector_external_id: str
+
+class VectorRecordCreate(VectorRecordBase):
+    pass
+
+class VectorRecordResponse(VectorRecordBase):
+    id: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ==========================================
+# Phase 4 - Stage 4C: Custom Dashboards, Billing & Security Schemas
+# ==========================================
+
+class WidgetBase(BaseModel):
+    type: str
+    config_json: Optional[Any] = None
+
+class WidgetCreate(WidgetBase):
+    pass
+
+class WidgetResponse(WidgetBase):
+    id: int
+    dashboard_id: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DashboardBase(BaseModel):
+    title: str
+    layout_json: Optional[Any] = None
+
+class DashboardCreate(DashboardBase):
+    pass
+
+class DashboardUpdate(BaseModel):
+    title: Optional[str] = None
+    layout_json: Optional[Any] = None
+
+class DashboardResponse(DashboardBase):
+    id: int
+    tenant_id: int
+    created_at: datetime
+    updated_at: datetime
+    widgets: List[WidgetResponse] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SubscriptionBase(BaseModel):
+    stripe_id: Optional[str] = None
+    plan_tier: str = "free"
+    status: str = "active"
+    current_period_end: Optional[datetime] = None
+
+class SubscriptionResponse(SubscriptionBase):
+    id: int
+    tenant_id: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class InvoiceBase(BaseModel):
+    amount_due: float
+    billing_period_start: Optional[datetime] = None
+    billing_period_end: Optional[datetime] = None
+    status: str = "pending"
+
+class InvoiceResponse(InvoiceBase):
+    id: int
+    subscription_id: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PaymentBase(BaseModel):
+    payment_method: str = "stripe"
+    status: str = "succeeded"
+    transaction_id: Optional[str] = None
+
+class PaymentResponse(PaymentBase):
+    id: int
+    invoice_id: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MeteredUsageCreate(BaseModel):
+    feature: str
+    quantity: int = 1
+
+class MeteredUsageResponse(BaseModel):
+    id: int
+    tenant_id: int
+    feature: str
+    quantity: int
+    recorded_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RateLimitBase(BaseModel):
+    endpoint_group: str
+    max_requests_per_min: int = 60
+
+class RateLimitCreate(RateLimitBase):
+    pass
+
+class RateLimitResponse(RateLimitBase):
+    id: int
+    tenant_id: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SecurityPolicyBase(BaseModel):
+    enforce_2fa: bool = False
+    allowed_ip_ranges: Optional[str] = None
+    pii_redaction_rules: Optional[Any] = None
+
+class SecurityPolicyUpdate(SecurityPolicyBase):
+    pass
+
+class SecurityPolicyResponse(SecurityPolicyBase):
+    id: int
+    tenant_id: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AuditLogBase(BaseModel):
+    action: str
+    ip_address: Optional[str] = None
+    details: Optional[Any] = None
+
+class AuditLogCreate(AuditLogBase):
+    user_id: Optional[int] = None
+
+class AuditLogResponse(AuditLogBase):
+    id: int
+    tenant_id: int
+    user_id: Optional[int] = None
+    timestamp: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SystemMetricBase(BaseModel):
+    cpu_usage: float = 0.0
+    memory_usage: float = 0.0
+    active_connections: int = 0
+
+class SystemMetricCreate(SystemMetricBase):
+    pass
+
+class SystemMetricResponse(SystemMetricBase):
+    id: int
+    connection_id: int
+    timestamp: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+
+

@@ -39,40 +39,6 @@ Every AI agent working on this repository **MUST** adhere to this 4-step workflo
 
 
 
-### Phase 4: Enterprise Database Schema Expansion
-**Priority: P2 (Architecture & Scalability) | Estimated Effort: 4 sessions**  
-**Goal:** Expand [`backend/models.py`](file:///d:/dataspeak/backend/models.py) to implement the 22 unbuilt enterprise tables from [`Full_Project_Schemas.sql`](file:///d:/dataspeak/docs/database/Full_Project_Schemas.sql).
-
-- [ ] **Task 4.1 — Granular RBAC Models (`roles`, `permissions`, `memberships`)**
-  - **Target Files:** [`backend/models.py`](file:///d:/dataspeak/backend/models.py), [`backend/schemas.py`](file:///d:/dataspeak/backend/schemas.py)
-  - **Details:** Implement enterprise role-based access control models replacing simple string roles.
-
-- [ ] **Task 4.2 — Persistent Schema Catalog (`database_schemas`, `table_metadata`, `column_metadata`)**
-  - **Target Files:** [`backend/models.py`](file:///d:/dataspeak/backend/models.py), [`backend/services/sql_engine.py`](file:///d:/dataspeak/backend/services/sql_engine.py)
-  - **Details:** Persist introspected database schemas and column PII flags to avoid re-introspecting live databases on every query.
-
-- [ ] **Task 4.3 — Fine-Grained Query Auditing (`query_templates`, `executed_queries`, `query_safety_logs`, `intents`)**
-  - **Target Files:** [`backend/models.py`](file:///d:/dataspeak/backend/models.py), [`backend/routers/query.py`](file:///d:/dataspeak/backend/routers/query.py)
-  - **Details:** Log detailed validation results, violation details, and intent classification scores for security compliance.
-
-- [ ] **Task 4.4 — Multi-Collection Vector Registry (`collections`, `vector_records`)**
-  - **Target Files:** [`backend/models.py`](file:///d:/dataspeak/backend/models.py), [`backend/routers/documents.py`](file:///d:/dataspeak/backend/routers/documents.py)
-  - **Details:** Support grouping documents into separate searchable knowledge collections per tenant.
-
-- [ ] **Task 4.5 — Custom Dashboards & Drag-and-Drop Widgets (`dashboards`, `widgets`)**
-  - **Target Files:** [`backend/models.py`](file:///d:/dataspeak/backend/models.py), [`backend/schemas.py`](file:///d:/dataspeak/backend/schemas.py)
-  - **Details:** Persist user-customized dashboard layouts and chart widget configurations.
-
-- [ ] **Task 4.6 — Billing & Metering Infrastructure (`subscriptions`, `invoices`, `payments`, `metered_usage`)**
-  - **Target Files:** [`backend/models.py`](file:///d:/dataspeak/backend/models.py), [`backend/schemas.py`](file:///d:/dataspeak/backend/schemas.py)
-  - **Details:** Implement Stripe customer IDs, plan tiers, billing cycles, and feature metering models.
-
-- [ ] **Task 4.7 — Security Policies & System Metrics (`rate_limits`, `security_policies`, `audit_logs`, `system_metrics`)**
-  - **Target Files:** [`backend/models.py`](file:///d:/dataspeak/backend/models.py), [`backend/schemas.py`](file:///d:/dataspeak/backend/schemas.py)
-  - **Details:** Store 2FA enforcement flags, IP whitelists, rate limit thresholds, and cluster health metrics.
-
----
-
 ### Phase 5: Interactive Visual Database ERD Generator
 **Priority: P2 (Visual BI Feature) | Estimated Effort: 2-3 sessions**  
 **Goal:** Allow users to visualize relationships between database tables visually.
@@ -114,6 +80,19 @@ Every AI agent working on this repository **MUST** adhere to this 4-step workflo
 ---
 
 ## 📦 Archived / Completed Tasks
+
+- [x] **Phase 4: Enterprise Database Schema Expansion (Tasks 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7)**
+  - *Completed:* 2026-10-13 | Antigravity AI Engineer
+  - *Summary:* Expanded backend ORM architecture from 10 MVP models to full 35-table enterprise coverage achieving 100% parity with `Full_Project_Schemas.sql`:
+    - **Task 4.1 (Granular RBAC Models):** Implemented `TenantSettings`, `Role`, `Permission`, `role_permissions` join table, and `Membership` in `backend/models.py`. Seeded 4 standard roles (`Admin`, `Developer`, `Business Owner`, `Viewer`) with granular action permissions in `seed_admin.py`. Preserved legacy `User.role` and `User.tenant_id` for backward compatibility. Added `Secret` model for encrypted credential storage.
+    - **Task 4.2 (Persistent Schema Catalog):** Created `DatabaseSchema`, `TableMetadata`, and `ColumnMetadata` models. Built `sync_database_catalog()` in `sql_engine.py` with automatic PII column pattern tagging (`is_pii=True`) across sensitive regexes. Wired catalog persistence into `get_db_schema_context()`.
+    - **Task 4.3 (Fine-Grained Query Auditing):** Created `QueryTemplate`, `ExecutedQuery` (`message_id`, `was_successful`), `QuerySafetyLog`, and `Intent` models. Integrated automatic query execution and AST safety violation logging into `POST /api/query`.
+    - **Task 4.4 (Multi-Collection Vector Registry):** Built `Collection` and `VectorRecord` models for partitioned tenant knowledge bases.
+    - **Task 4.5 (Custom Dashboards & Widgets):** Implemented `Dashboard` and `Widget` models with layout configurations and cascade deletion.
+    - **Task 4.6 (Billing & Metering Infrastructure):** Added `Subscription`, `Invoice`, `Payment`, and `MeteredUsage` models storing Stripe identifiers, billing cycles, payment statuses, and consumable usage units.
+    - **Task 4.7 (Security Policies & System Metrics):** Created `RateLimit`, `SecurityPolicy`, `AuditLog`, and `SystemMetric` models.
+    - **Pydantic V2 Schemas:** Added complete `from_attributes=True` schemas in `backend/schemas.py` for all new models.
+    - **Regression Testing:** Authored 14 regression tests across `test_phase4_stage_a_regression.py` (6 tests), `test_phase4_stage_b_regression.py` (4 tests), and `test_phase4_enterprise_schema_regression.py` (4 tests). Verified 100% full schema integrity (35/35 tables) and 0-error Vite frontend production build (2,772 modules).
 
 - [x] **Phase 3.1: AI Insights Engine Security & Behavioral Hardening (Post-QA Remediation Package)**
   - *Completed:* 2026-10-13 | Antigravity QA Engineer

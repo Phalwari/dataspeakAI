@@ -67,6 +67,9 @@ MIGRATION_COLUMNS = [
     ("recommendations", "action_type", "VARCHAR DEFAULT 'general'", "VARCHAR(50) DEFAULT 'general'"),
     ("recommendations", "action_url", "VARCHAR", "VARCHAR(255)"),
     ("recommendations", "status", "VARCHAR DEFAULT 'pending'", "VARCHAR(50) DEFAULT 'pending'"),
+    # Phase 4 - Stage 4B: Executed Queries extensions
+    ("executed_queries", "message_id", "INTEGER", "INTEGER"),
+    ("executed_queries", "was_successful", "BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT TRUE"),
 ]
 
 

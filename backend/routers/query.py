@@ -74,6 +74,30 @@ def execute_nl_to_sql_query(
                 error_message=err_msg
             )
             db.add(q_log)
+
+            # Fine-grained Query Auditing & Safety (Phase 4 - Stage 4B)
+            exec_q = models.ExecutedQuery(
+                tenant_id=current_user.tenant_id,
+                user_id=current_user.id,
+                database_id=payload.database_id,
+                raw_query=payload.query,
+                sql_generated=generated_sql,
+                execution_time_ms=exec_ms,
+                rows_returned=rows_cnt,
+                status=status_str,
+                was_successful=(status_str == "success"),
+                error_message=err_msg
+            )
+            db.add(exec_q)
+            db.flush()
+
+            safety_log = models.QuerySafetyLog(
+                query_id=exec_q.id,
+                passed_validation=(status_str == "success"),
+                violation_details=err_msg
+            )
+            db.add(safety_log)
+
             db.commit()
         except Exception:
             db.rollback()

@@ -34,11 +34,107 @@ def get_connection_url(db_conn: models.DatabaseConnection) -> str | None:
     return None
 
 
+def sync_database_catalog(db_conn: models.DatabaseConnection, db_session) -> Optional[models.DatabaseSchema]:
+    """
+    Introspects the target database and persists its schema, tables, and columns
+    into DatabaseSchema, TableMetadata, and ColumnMetadata models.
+    Flags known PII column patterns (email, password, ssn, phone, credit card, etc.).
+    """
+    if not db_session:
+        return None
+    
+    connection_url = get_connection_url(db_conn)
+    if not connection_url:
+        return None
+        
+    try:
+        engine = create_engine(connection_url, poolclass=NullPool)
+        inspector = inspect(engine)
+        table_names = inspector.get_table_names()
+        
+        schema_name = db_conn.database or "public"
+        db_schema = db_session.query(models.DatabaseSchema).filter(
+            models.DatabaseSchema.connection_id == db_conn.id,
+            models.DatabaseSchema.schema_name == schema_name
+        ).first()
+        
+        if not db_schema:
+            db_schema = models.DatabaseSchema(
+                connection_id=db_conn.id,
+                schema_name=schema_name,
+                last_sync=models.utc_now()
+            )
+            db_session.add(db_schema)
+            db_session.flush()
+        else:
+            db_schema.last_sync = models.utc_now()
+            # Clear old metadata to re-sync cleanly
+            db_session.query(models.TableMetadata).filter(
+                models.TableMetadata.schema_id == db_schema.id
+            ).delete()
+            db_session.flush()
+
+        pii_patterns = re.compile(r"(email|password|secret|ssn|token|phone|credit|card|cvv|hash|salary|auth)", re.IGNORECASE)
+
+        for t_name in table_names:
+            tbl_meta = models.TableMetadata(
+                schema_id=db_schema.id,
+                table_name=t_name,
+                semantic_description=f"Table {t_name} in {db_conn.name}",
+                is_fact_table=bool(re.search(r"(log|event|order|transaction|sale|history|metric)", t_name, re.IGNORECASE)),
+                row_count_estimate=0
+            )
+            db_session.add(tbl_meta)
+            db_session.flush()
+
+            columns = inspector.get_columns(t_name)
+            for col in columns:
+                c_name = col["name"]
+                c_type = str(col["type"])
+                is_pii_flag = bool(pii_patterns.search(c_name))
+
+                col_meta = models.ColumnMetadata(
+                    table_id=tbl_meta.id,
+                    column_name=c_name,
+                    data_type=c_type,
+                    is_pii=is_pii_flag,
+                    unit_type=None
+                )
+                db_session.add(col_meta)
+
+        db_session.commit()
+        engine.dispose()
+        return db_schema
+    except Exception as err:
+        db_session.rollback()
+        print(f"[CATALOG SYNC] Failed to sync schema catalog for {db_conn.name}: {err}")
+        return None
+
+
 def get_db_schema_context(db_conn: models.DatabaseConnection, db_session=None) -> str:
     """
     Introspects the connected database schema and formats tables, columns,
     data types, primary keys, and foreign keys into a clean text prompt context.
+    Checks persistent catalog cache (DatabaseSchema) if db_session is provided.
     """
+    if db_session:
+        cached_schema = db_session.query(models.DatabaseSchema).filter(
+            models.DatabaseSchema.connection_id == db_conn.id
+        ).first()
+        if cached_schema and cached_schema.tables:
+            schema_lines = [
+                f"Database Name: {db_conn.database}",
+                f"Database Type: {db_conn.db_type}",
+                f"Total Tables: {len(cached_schema.tables)}",
+                "--- SCHEMA DETAILS (PERSISTENT CATALOG) ---"
+            ]
+            for tbl in cached_schema.tables:
+                schema_lines.append(f"\nTable: {tbl.table_name}")
+                for col in tbl.columns:
+                    pii_tag = " [PII]" if col.is_pii else ""
+                    schema_lines.append(f"  - {col.column_name} ({col.data_type}){pii_tag}")
+            return "\n".join(schema_lines)
+
     connection_url = get_connection_url(db_conn)
     
     if connection_url:
@@ -82,6 +178,14 @@ def get_db_schema_context(db_conn: models.DatabaseConnection, db_session=None) -
                 schema_lines.extend(col_descriptions)
                 
             engine.dispose()
+
+            # Automatically persist into database_schemas, table_metadata, column_metadata if db_session exists
+            if db_session:
+                try:
+                    sync_database_catalog(db_conn, db_session)
+                except Exception as sync_err:
+                    print(f"[CATALOG SYNC] Opportunistic sync note: {sync_err}")
+
             return "\n".join(schema_lines)
         except Exception as err:
             # Inspection fallback if physical DB connection fails

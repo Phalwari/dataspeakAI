@@ -17,6 +17,11 @@ DEFAULT_ORG_NAME = os.getenv("DEFAULT_ORG_NAME", "DataSpeak Enterprise")
 
 def seed_superadmin():
     Base.metadata.create_all(bind=engine)
+    try:
+        from services.db_migration import run_schema_migrations
+        run_schema_migrations(engine)
+    except Exception as err:
+        print(f"[MIGRATION] Note during seed: {err}")
     db = SessionLocal()
     try:
         # 1. Ensure default tenant exists
@@ -75,6 +80,63 @@ def seed_superadmin():
             db.add(cb_config)
             db.commit()
 
+        # 4. Ensure default TenantSettings exists for tenant (Stage 4A)
+        settings = db.query(models.TenantSettings).filter(models.TenantSettings.tenant_id == tenant.id).first()
+        if not settings:
+            settings = models.TenantSettings(
+                tenant_id=tenant.id,
+                theme_mode="light",
+                notifications_enabled=True
+            )
+            db.add(settings)
+            db.commit()
+
+        # 5. Ensure standard RBAC Roles & Permissions exist (Stage 4A)
+        standard_roles = [
+            ("Admin", "Full enterprise administrative control across all resources and configurations.", [
+                ("manage", "all"), ("read", "all"), ("write", "all"), ("delete", "all")
+            ]),
+            ("Developer", "Database connections, SQL querying, schema introspection, and API key management.", [
+                ("read", "databases"), ("write", "databases"), ("execute", "queries"),
+                ("read", "documents"), ("write", "documents"), ("manage", "api_keys")
+            ]),
+            ("Business Owner", "Business dashboards, executive analytics, and AI insights management.", [
+                ("read", "analytics"), ("read", "insights"), ("read", "dashboards"), ("write", "dashboards"),
+                ("execute", "queries"), ("read", "reports")
+            ]),
+            ("Viewer", "Read-only access to published dashboards and performance insights.", [
+                ("read", "dashboards"), ("read", "insights"), ("read", "analytics")
+            ]),
+        ]
+
+        for role_name, description, permissions in standard_roles:
+            role = db.query(models.Role).filter(models.Role.name == role_name).first()
+            if not role:
+                role = models.Role(name=role_name, description=description)
+                db.add(role)
+                db.flush()
+                for action, resource in permissions:
+                    perm = models.Permission(role_id=role.id, action=action, resource=resource)
+                    db.add(perm)
+                db.commit()
+
+        # 6. Ensure default Admin user has Membership record (Stage 4A)
+        admin_role = db.query(models.Role).filter(models.Role.name == "Admin").first()
+        membership = db.query(models.Membership).filter(
+            models.Membership.user_id == admin_user.id,
+            models.Membership.tenant_id == tenant.id
+        ).first()
+        if not membership:
+            membership = models.Membership(
+                user_id=admin_user.id,
+                tenant_id=tenant.id,
+                role_id=admin_role.id if admin_role else None,
+                is_owner=True
+            )
+            db.add(membership)
+            db.commit()
+
+        db.expunge_all()
         return admin_user
     finally:
         db.close()
