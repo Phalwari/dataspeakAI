@@ -696,3 +696,66 @@ class AdminTenantItem(BaseModel):
     usage: int
 
 
+# ==========================================
+# Phase 3: AI Insights & Recommendation Engine Schemas
+# ==========================================
+
+class RecommendationItem(BaseModel):
+    id: int
+    insight_id: int
+    action_step: str
+    priority: str = "medium"  # high, medium, low
+    action_type: Optional[str] = "general"  # navigate_logs, navigate_databases, navigate_analytics, general
+    action_url: Optional[str] = None
+    status: str = "pending"  # pending, completed
+
+    class Config:
+        from_attributes = True
+
+
+class RecommendationStatusUpdate(BaseModel):
+    status: str  # pending, completed
+
+
+class GeneratedInsightItem(BaseModel):
+    id: int
+    tenant_id: int
+    database_id: Optional[int] = None
+    database_name: Optional[str] = None
+    title: str
+    category: str  # Revenue, Performance, Customer Success, Operational
+    severity: str  # critical, warning, alert, opportunity
+    summary: str
+    impact_score: float = 0.0
+    confidence_score: float = 1.0
+    status: str = "active"  # active, dismissed, actioned
+    created_at: datetime
+    recommendations: List[RecommendationItem] = []
+
+    class Config:
+        from_attributes = True
+
+
+class GeneratedInsightStatusUpdate(BaseModel):
+    status: str  # active, dismissed, actioned
+
+
+class AIInsightsSummaryStats(BaseModel):
+    total_insights: int = 0
+    critical_count: int = 0
+    opportunities_count: int = 0
+    pending_actions_count: int = 0
+
+
+class AIInsightsOverviewResponse(BaseModel):
+    summary: AIInsightsSummaryStats
+    insights: List[GeneratedInsightItem]
+    available_categories: List[str] = ["All", "Revenue", "Performance", "Customer Success", "Operational"]
+    has_connected_sources: bool = True
+
+
+class AIInsightsRefreshResponse(BaseModel):
+    message: str
+    refreshed_count: int
+    insights: List[GeneratedInsightItem]
+

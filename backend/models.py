@@ -338,3 +338,36 @@ class Dataset(Base):
     tenant = relationship("Tenant")
     owner = relationship("User")
 
+
+class GeneratedInsight(Base):
+    __tablename__ = "generated_insights"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    database_id = Column(Integer, ForeignKey("database_connections.id", ondelete="SET NULL"), nullable=True)
+    title = Column(String(255), nullable=False)
+    category = Column(String(100), default="Operational")  # Revenue, Performance, Customer Success, Operational
+    severity = Column(String(50), default="opportunity")   # critical, warning, alert, opportunity
+    summary = Column(Text, nullable=False)
+    impact_score = Column(Float, default=0.0)
+    confidence_score = Column(Float, default=1.0)
+    status = Column(String(50), default="active")          # active, dismissed, actioned
+    created_at = Column(DateTime, default=utc_now)
+
+    tenant = relationship("Tenant")
+    database = relationship("DatabaseConnection")
+    recommendations = relationship("Recommendation", back_populates="insight", cascade="all, delete-orphan")
+
+
+class Recommendation(Base):
+    __tablename__ = "recommendations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    insight_id = Column(Integer, ForeignKey("generated_insights.id", ondelete="CASCADE"), nullable=False)
+    action_step = Column(Text, nullable=False)
+    priority = Column(String(20), default="medium")        # high, medium, low
+    action_type = Column(String(50), default="general")    # navigate_logs, navigate_databases, navigate_analytics, general
+    action_url = Column(String(255), nullable=True)
+    status = Column(String(50), default="pending")         # pending, completed
+
+    insight = relationship("GeneratedInsight", back_populates="recommendations")

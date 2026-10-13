@@ -53,6 +53,20 @@ MIGRATION_COLUMNS = [
     ("widget_keys", "allowed_tables", "JSON", "JSONB"),
     # Widget key reference for query logs (SEC-04)
     ("query_logs", "widget_key_id", "INTEGER", "INTEGER"),
+    # Phase 3: Generated Insights & Recommendations columns
+    ("generated_insights", "database_id", "INTEGER", "INTEGER"),
+    ("generated_insights", "title", "VARCHAR DEFAULT 'AI Insight'", "VARCHAR(255) DEFAULT 'AI Insight'"),
+    ("generated_insights", "category", "VARCHAR DEFAULT 'Operational'", "VARCHAR(100) DEFAULT 'Operational'"),
+    ("generated_insights", "severity", "VARCHAR DEFAULT 'opportunity'", "VARCHAR(50) DEFAULT 'opportunity'"),
+    ("generated_insights", "summary", "TEXT", "TEXT"),
+    ("generated_insights", "impact_score", "FLOAT DEFAULT 0.0", "FLOAT DEFAULT 0.0"),
+    ("generated_insights", "confidence_score", "FLOAT DEFAULT 1.0", "FLOAT DEFAULT 1.0"),
+    ("generated_insights", "status", "VARCHAR DEFAULT 'active'", "VARCHAR(50) DEFAULT 'active'"),
+    ("recommendations", "action_step", "TEXT", "TEXT"),
+    ("recommendations", "priority", "VARCHAR DEFAULT 'medium'", "VARCHAR(20) DEFAULT 'medium'"),
+    ("recommendations", "action_type", "VARCHAR DEFAULT 'general'", "VARCHAR(50) DEFAULT 'general'"),
+    ("recommendations", "action_url", "VARCHAR", "VARCHAR(255)"),
+    ("recommendations", "status", "VARCHAR DEFAULT 'pending'", "VARCHAR(50) DEFAULT 'pending'"),
 ]
 
 

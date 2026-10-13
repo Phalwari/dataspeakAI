@@ -10,11 +10,237 @@ from typing import Optional, Dict, Any, List
 import json
 
 import models
+import schemas
 from database import get_db
 from dependencies import get_current_user
 from services.db_pipeline_service import db_pipeline_service
+from services.insights_engine import insights_engine
 
 router = APIRouter(prefix="/api/insights", tags=["Database Insights"])
+
+
+# ── Phase 3: Dynamic AI Insights & Recommendation Engine ──────────────────
+
+def _serialize_insight(insight: models.GeneratedInsight) -> schemas.GeneratedInsightItem:
+    return schemas.GeneratedInsightItem(
+        id=insight.id,
+        tenant_id=insight.tenant_id,
+        database_id=insight.database_id,
+        database_name=insight.database.name if insight.database else None,
+        title=insight.title,
+        category=insight.category,
+        severity=insight.severity,
+        summary=insight.summary,
+        impact_score=insight.impact_score,
+        confidence_score=insight.confidence_score,
+        status=insight.status,
+        created_at=insight.created_at,
+        recommendations=[
+            schemas.RecommendationItem(
+                id=rec.id,
+                insight_id=rec.insight_id,
+                action_step=rec.action_step,
+                priority=rec.priority,
+                action_type=rec.action_type,
+                action_url=rec.action_url,
+                status=rec.status,
+            )
+            for rec in insight.recommendations
+        ]
+    )
+
+
+@router.get("", response_model=schemas.AIInsightsOverviewResponse)
+@router.get("/", response_model=schemas.AIInsightsOverviewResponse)
+def get_ai_insights(
+    database_id: Optional[int] = Query(None, description="Optional database connection filter"),
+    category: Optional[str] = Query(None, description="Category filter (All, Revenue, Performance, etc.)"),
+    severity: Optional[str] = Query(None, description="Severity filter (critical, warning, alert, opportunity)"),
+    status: Optional[str] = Query("active", description="Status filter (active, dismissed, all)"),
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Retrieves tenant-wide or database-scoped dynamic AI insights and recommendations.
+    If no insights exist yet for the tenant, triggers initial synthesis.
+    """
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="User must belong to a tenant.")
+
+    tenant_id = current_user.tenant_id
+
+    # Check if any insights exist for this tenant (scoped to database_id if provided)
+    check_query = db.query(models.GeneratedInsight).filter(
+        models.GeneratedInsight.tenant_id == tenant_id
+    )
+    if database_id is not None:
+        check_query = check_query.filter(models.GeneratedInsight.database_id == database_id)
+
+    # Opportunistically generate initial insights if empty and tenant has data
+    if check_query.count() == 0:
+        telemetry = insights_engine.collect_tenant_telemetry(tenant_id, database_id, db)
+        if telemetry.get("has_data"):
+            insights_engine.refresh_tenant_insights(tenant_id, database_id, db)
+
+    # Base query for tenant
+    base_query = db.query(models.GeneratedInsight).filter(
+        models.GeneratedInsight.tenant_id == tenant_id
+    )
+
+    if database_id is not None:
+        base_query = base_query.filter(
+            (models.GeneratedInsight.database_id == database_id) | (models.GeneratedInsight.database_id.is_(None))
+        )
+
+    # Summary metrics across active insights
+    active_insights = base_query.filter(models.GeneratedInsight.status == "active").all()
+    total_active = len(active_insights)
+    critical_count = sum(1 for i in active_insights if i.severity in ("critical", "warning"))
+    opportunities_count = sum(1 for i in active_insights if i.severity == "opportunity")
+
+    # Pending recommendations count
+    active_insight_ids = [i.id for i in active_insights]
+    pending_actions = 0
+    if active_insight_ids:
+        pending_actions = db.query(models.Recommendation).filter(
+            models.Recommendation.insight_id.in_(active_insight_ids),
+            models.Recommendation.status == "pending"
+        ).count()
+
+    summary_stats = schemas.AIInsightsSummaryStats(
+        total_insights=total_active,
+        critical_count=critical_count,
+        opportunities_count=opportunities_count,
+        pending_actions_count=pending_actions,
+    )
+
+    # Filtered query
+    filtered_query = db.query(models.GeneratedInsight).filter(
+        models.GeneratedInsight.tenant_id == tenant_id
+    )
+    if database_id is not None:
+        filtered_query = filtered_query.filter(
+            (models.GeneratedInsight.database_id == database_id) | (models.GeneratedInsight.database_id.is_(None))
+        )
+
+    if status and status.lower() != "all":
+        filtered_query = filtered_query.filter(models.GeneratedInsight.status == status.lower())
+
+    if category and category.lower() != "all":
+        filtered_query = filtered_query.filter(models.GeneratedInsight.category.ilike(f"%{category}%"))
+
+    if severity and severity.lower() != "all":
+        filtered_query = filtered_query.filter(models.GeneratedInsight.severity == severity.lower())
+
+    insights_records = filtered_query.order_by(models.GeneratedInsight.created_at.desc()).all()
+
+    # Check if tenant has any connected databases or query logs
+    has_sources = (
+        db.query(models.DatabaseConnection).filter(models.DatabaseConnection.tenant_id == tenant_id).count() > 0 or
+        db.query(models.QueryLog).filter(models.QueryLog.tenant_id == tenant_id).count() > 0 or
+        db.query(models.Document).filter(models.Document.tenant_id == tenant_id).count() > 0
+    )
+
+    return schemas.AIInsightsOverviewResponse(
+        summary=summary_stats,
+        insights=[_serialize_insight(i) for i in insights_records],
+        available_categories=["All", "Revenue", "Performance", "Customer Success", "Operational"],
+        has_connected_sources=has_sources,
+    )
+
+
+@router.post("/refresh", response_model=schemas.AIInsightsRefreshResponse)
+def refresh_ai_insights(
+    database_id: Optional[int] = Query(None, description="Optional database connection filter"),
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Triggers fresh synthesis of AI business insights and recommendations using Google Gemini 2.5 Flash
+    (or deterministic fallback) based on real telemetry.
+    """
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="User must belong to a tenant.")
+
+    refreshed = insights_engine.refresh_tenant_insights(
+        tenant_id=current_user.tenant_id,
+        database_id=database_id,
+        db=db,
+    )
+
+    return schemas.AIInsightsRefreshResponse(
+        message="AI insights and recommendations successfully synthesized.",
+        refreshed_count=len(refreshed),
+        insights=[_serialize_insight(i) for i in refreshed],
+    )
+
+
+@router.put("/recommendations/{recommendation_id}/status", response_model=schemas.RecommendationItem)
+def update_recommendation_status(
+    recommendation_id: int,
+    payload: schemas.RecommendationStatusUpdate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Updates a recommendation's status (pending vs completed).
+    Ensures strict tenant ownership verification.
+    """
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="User must belong to a tenant.")
+
+    rec = db.query(models.Recommendation).filter(models.Recommendation.id == recommendation_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Recommendation not found.")
+
+    # Verify tenant ownership through parent insight
+    if rec.insight.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Unauthorized to modify this recommendation.")
+
+    valid_statuses = {"pending", "completed"}
+    if payload.status.lower() not in valid_statuses:
+        raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of {valid_statuses}")
+
+    rec.status = payload.status.lower()
+    db.commit()
+    db.refresh(rec)
+
+    return schemas.RecommendationItem.model_validate(rec)
+
+
+@router.put("/{insight_id}/status", response_model=schemas.GeneratedInsightItem)
+def update_insight_status(
+    insight_id: int,
+    payload: schemas.GeneratedInsightStatusUpdate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Updates an insight's status (active vs dismissed vs actioned).
+    Ensures strict tenant ownership verification.
+    """
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="User must belong to a tenant.")
+
+    insight = db.query(models.GeneratedInsight).filter(
+        models.GeneratedInsight.id == insight_id,
+        models.GeneratedInsight.tenant_id == current_user.tenant_id
+    ).first()
+    if not insight:
+        raise HTTPException(status_code=404, detail="Insight not found.")
+
+    valid_statuses = {"active", "dismissed", "actioned"}
+    if payload.status.lower() not in valid_statuses:
+        raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of {valid_statuses}")
+
+    insight.status = payload.status.lower()
+    db.commit()
+    db.refresh(insight)
+
+    return _serialize_insight(insight)
+
+
+# ── Existing Database AI Insights Endpoints ────────────────────────────────
 
 
 @router.get("/generate/{connection_id}")

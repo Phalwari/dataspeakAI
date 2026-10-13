@@ -38,26 +38,6 @@ Every AI agent working on this repository **MUST** adhere to this 4-step workflo
 ---
 
 
-### Phase 3: Dynamic AI Insights & Recommendation Engine
-**Priority: P1 (Core BI Value) | Estimated Effort: 3 sessions**  
-**Goal:** Transform [`AIInsightsPage.tsx`](file:///d:/dataspeak/src/app/pages/dashboard/AIInsightsPage.tsx) from static mock cards into an AI-powered business anomaly and recommendation engine.
-
-- [ ] **Task 3.1 — Create Database Models for Insights & Recommendations**
-  - **Target Files:** [`backend/models.py`](file:///d:/dataspeak/backend/models.py), [`backend/schemas.py`](file:///d:/dataspeak/backend/schemas.py)
-  - **Details:** Implement `GeneratedInsight` and `Recommendation` SQLAlchemy models matching [`Full_Project_Schemas.sql`](file:///d:/dataspeak/docs/database/Full_Project_Schemas.sql) lines 216-231.
-  - **Acceptance Criteria:** Tables created in SQLite/PostgreSQL with foreign key links to `tenants.id`.
-
-- [ ] **Task 3.2 — Build AI Insights Generator Worker & Router**
-  - **Target Files:** `backend/services/insights_engine.py`, `backend/routers/insights.py`, [`backend/main.py`](file:///d:/dataspeak/backend/main.py)
-  - **Details:** Develop an analytics worker that analyzes tenant query patterns, table row growth, execution errors, and database metrics using Gemini 2.5 Flash to identify anomalies, trends, and action items. Expose `GET /api/insights` and `POST /api/insights/refresh`.
-  - **Acceptance Criteria:** Backend generates structured insights (`warning`, `alert`, `opportunity`, `critical`) with confidence scores and action recommendations.
-
-- [ ] **Task 3.3 — Connect AI Insights UI to Live Backend**
-  - **Target Files:** [`src/app/pages/dashboard/AIInsightsPage.tsx`](file:///d:/dataspeak/src/app/pages/dashboard/AIInsightsPage.tsx)
-  - **Details:** Fetch live insights from `GET /api/insights`. Add a "⚡ Refresh AI Insights" trigger button with loading animation and toast notifications.
-  - **Acceptance Criteria:** Real anomalies and recommendations render with interactive action triggers and category filtering (`All`, `Revenue`, `Performance`, `Customer Success`).
-
----
 
 ### Phase 4: Enterprise Database Schema Expansion
 **Priority: P2 (Architecture & Scalability) | Estimated Effort: 4 sessions**  
@@ -134,6 +114,10 @@ Every AI agent working on this repository **MUST** adhere to this 4-step workflo
 ---
 
 ## 📦 Archived / Completed Tasks
+
+- [x] **Phase 3: Dynamic AI Insights & Recommendation Engine (Tasks 3.1, 3.2, 3.3)**
+  - *Completed:* 2026-10-13 | Antigravity AI Engineer
+  - *Summary:* Built dynamic AI Insights & Recommendation Engine spanning backend ORM, telemetry aggregation worker, router endpoints, and React UI. Created `GeneratedInsight` and `Recommendation` models in `backend/models.py` with foreign key links to `tenants.id`, cascade deletion, zero-dependency migrations in `backend/services/db_migration.py`, and Pydantic validation schemas in `backend/schemas.py`. Built `InsightsEngine` worker in `backend/services/insights_engine.py` collecting genuine telemetry (query volume, error spikes, average execution latency, top error messages, introspected tables, and vector knowledge base documents), detecting deterministic statistical anomalies, and synthesizing structured business insights using Gemini 2.5 Flash via `llm_generation_service` (with Groq and deterministic zero-hallucination fallback). Added endpoints in `backend/routers/insights.py` (`GET /api/insights`, `POST /api/insights/refresh`, `PUT /api/insights/{id}/status`, `PUT /api/insights/recommendations/{id}/status`) with category, severity, status, and database scoping. Overhauled `AIInsightsPage.tsx` with live data fetching, executive KPI strip, category filtering pills (`All`, `Revenue`, `Performance`, `Customer Success`, `Operational`), severity badges, interactive recommendation completion toggles, insight dismiss/restore actions, contextual deep-links (`/dashboard/logs`, `/dashboard/databases`), and truthful cold-start onboarding states. Authored 10 regression tests in `tests/test_phase3_ai_insights_regression.py` reaching 380/380 passing tests (0 failures) and verified 0-error Vite frontend production build (2,772 modules).
 
 - [x] **Phase 2.1: Chatbot Widget Hardening & Extended Testing (Post-QA Backlog)**
   - *Completed:* 2026-10-13 | Antigravity AI Orchestrator
