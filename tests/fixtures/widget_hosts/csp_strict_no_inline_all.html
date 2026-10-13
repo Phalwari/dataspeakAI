@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- CSP WITHOUT 'unsafe-inline' for BOTH script-src and style-src -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' http://localhost:8000; connect-src 'self' http://localhost:8000; style-src 'self' http://localhost:8000;">
+  <title>QA Check G: CSP Without unsafe-inline in script-src AND style-src</title>
+</head>
+<body>
+  <h1>QA Check G: script-src and style-src WITHOUT 'unsafe-inline'</h1>
+  <script src="http://localhost:8000/widget.js" data-key="pk_live_testfixturekey1234567890123" async></script>
+</body>
+</html>

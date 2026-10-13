@@ -49,6 +49,8 @@ MIGRATION_COLUMNS = [
     ("tenants", "plan", "VARCHAR DEFAULT 'Starter'", "VARCHAR(50) DEFAULT 'Starter'"),
     # Query log source column
     ("query_logs", "source", "VARCHAR DEFAULT 'web'", "VARCHAR(50) DEFAULT 'web'"),
+    # Query log widget key column
+    ("query_logs", "widget_key_id", "INTEGER", "INTEGER"),
     # Widget key table allowlist column
     ("widget_keys", "allowed_tables", "JSON", "JSONB"),
 ]
@@ -75,5 +77,14 @@ def run_schema_migrations(engine: Engine) -> None:
                     col_type = sqlite_type if is_sqlite else pg_type
                     logger.info(f"[MIGRATION] Adding missing column '{column_name}' ({col_type}) to table '{table_name}'")
                     conn.execute(text(f'ALTER TABLE "{table_name}" ADD COLUMN "{column_name}" {col_type}'))
+
+            # Ensure composite index on query_logs (widget_key_id, created_at)
+            if "query_logs" in existing_tables:
+                existing_indexes = {idx["name"] for idx in inspector.get_indexes("query_logs")}
+                if "idx_query_logs_widget_key_created" not in existing_indexes:
+                    try:
+                        conn.execute(text('CREATE INDEX IF NOT EXISTS "idx_query_logs_widget_key_created" ON "query_logs" ("widget_key_id", "created_at")'))
+                    except Exception as ex:
+                        logger.debug(f"[MIGRATION] Index creation notice: {ex}")
     except Exception as e:
         logger.warning(f"[MIGRATION] Schema auto-sync check encountered: {e}")

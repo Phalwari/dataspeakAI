@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Float, JSON
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Float, JSON, Index
 from sqlalchemy.orm import relationship
 from database import Base
 from datetime import datetime, timezone
@@ -271,6 +271,7 @@ class QueryLog(Base):
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    widget_key_id = Column(Integer, ForeignKey("widget_keys.id"), nullable=True, index=True)
     database_id = Column(Integer, ForeignKey("database_connections.id"), nullable=True)
     natural_query = Column(Text, nullable=True)
     generated_sql = Column(Text, nullable=True)
@@ -282,9 +283,14 @@ class QueryLog(Base):
     source = Column(String(50), default="web")
     created_at = Column(DateTime, default=utc_now)
 
+    __table_args__ = (
+        Index("idx_query_logs_widget_key_created", "widget_key_id", "created_at"),
+    )
+
     tenant = relationship("Tenant")
     user = relationship("User")
     database = relationship("DatabaseConnection")
+    widget_key = relationship("WidgetKey")
 
 class Conversation(Base):
     __tablename__ = "conversations"

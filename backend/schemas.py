@@ -1,6 +1,34 @@
+import re
 from pydantic import BaseModel, EmailStr, model_validator, field_validator, Field
 from typing import Optional, List, Any, Dict
 from datetime import datetime
+
+ORIGIN_REGEX = re.compile(r"^https?://[A-Za-z0-9.-]+(?::[0-9]{1,5})?$", re.IGNORECASE)
+
+def validate_origin_item(origin: Any) -> str:
+    if not isinstance(origin, str):
+        raise ValueError("Origin must be a string")
+    if origin != origin.strip() or any(c.isspace() for c in origin):
+        raise ValueError(f"Origin '{origin}' cannot contain whitespace")
+    if ";" in origin or "," in origin or '"' in origin or "'" in origin or "*" in origin:
+        raise ValueError(f"Origin '{origin}' contains invalid characters")
+    if not ORIGIN_REGEX.match(origin):
+        raise ValueError(
+            f"Origin '{origin}' is invalid. Format must be http(s)://domain(:port) with no path, query, or special characters"
+        )
+    parts = origin.split("://", 1)
+    scheme = parts[0].lower()
+    rest = parts[1]
+    if ":" in rest:
+        host, port_str = rest.split(":", 1)
+        try:
+            port = int(port_str)
+            if port < 1 or port > 65535:
+                raise ValueError()
+        except Exception:
+            raise ValueError(f"Invalid port in origin '{origin}'")
+        return f"{scheme}://{host.lower()}:{port}"
+    return f"{scheme}://{rest.lower()}"
 
 class TenantBase(BaseModel):
     name: str
@@ -175,15 +203,7 @@ class WidgetKeyCreate(BaseModel):
     def validate_allowed_origins(cls, v: List[str]) -> List[str]:
         if not v:
             raise ValueError("allowed_origins cannot be empty")
-        cleaned = []
-        for o in v:
-            origin_str = str(o).strip()
-            if origin_str == "*":
-                raise ValueError("Wildcard origins ('*') are strictly disallowed for widget security")
-            if not (origin_str.startswith("http://") or origin_str.startswith("https://")):
-                raise ValueError(f"Origin '{origin_str}' must start with http:// or https://")
-            cleaned.append(origin_str.rstrip("/"))
-        return cleaned
+        return [validate_origin_item(o) for o in v]
 
 class WidgetKeyUpdate(BaseModel):
     name: Optional[str] = None
@@ -199,15 +219,9 @@ class WidgetKeyUpdate(BaseModel):
     def validate_allowed_origins(cls, v: Optional[List[str]]) -> Optional[List[str]]:
         if v is None:
             return v
-        cleaned = []
-        for o in v:
-            origin_str = str(o).strip()
-            if origin_str == "*":
-                raise ValueError("Wildcard origins ('*') are strictly disallowed for widget security")
-            if not (origin_str.startswith("http://") or origin_str.startswith("https://")):
-                raise ValueError(f"Origin '{origin_str}' must start with http:// or https://")
-            cleaned.append(origin_str.rstrip("/"))
-        return cleaned
+        if len(v) == 0:
+            raise ValueError("allowed_origins cannot be empty if specified")
+        return [validate_origin_item(o) for o in v]
 
 class WidgetKeyResponse(BaseModel):
     id: int

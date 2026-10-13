@@ -77,6 +77,9 @@ export function ChatbotWidgetPage() {
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [isSavingSecurity, setIsSavingSecurity] = useState(false);
   const [isRotating, setIsRotating] = useState(false);
+  const [isRevoking, setIsRevoking] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isCreatingKey, setIsCreatingKey] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [copiedSnippet, setCopiedSnippet] = useState(false);
   const [copiedIframe, setCopiedIframe] = useState(false);
@@ -288,6 +291,135 @@ export function ChatbotWidgetPage() {
     }
   };
 
+  // Revoke / Disable or Re-enable Key
+  const handleToggleKey = async () => {
+    if (!widgetKey) return;
+    const isCurrentlyEnabled = widgetKey.enabled;
+    const actionLabel = isCurrentlyEnabled ? "Revoke / Disable" : "Re-enable";
+    const confirmAction = window.confirm(
+      isCurrentlyEnabled
+        ? "Revoke and disable this widget key? All websites using this key will immediately be blocked with HTTP 403."
+        : "Re-enable this widget key?"
+    );
+    if (!confirmAction) return;
+
+    setIsRevoking(true);
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    try {
+      const url = isCurrentlyEnabled
+        ? `${API_BASE_URL}/api/keys/widget/${widgetKey.id}/revoke`
+        : `${API_BASE_URL}/api/keys/widget/${widgetKey.id}`;
+      const method = "PUT";
+      const body = isCurrentlyEnabled ? undefined : JSON.stringify({ enabled: true });
+
+      const res = await fetch(url, {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.detail || `Failed to ${actionLabel.toLowerCase()} key`);
+      }
+
+      const updated = await res.json();
+      setWidgetKey(updated);
+      toast.success(isCurrentlyEnabled ? "Widget key revoked and disabled." : "Widget key re-enabled successfully.");
+      setPreviewReloadKey((k) => k + 1);
+    } catch (err: any) {
+      console.error("Key toggle error:", err);
+      toast.error(err.message || `Failed to ${actionLabel.toLowerCase()} key`);
+    } finally {
+      setIsRevoking(false);
+    }
+  };
+
+  // Delete Key permanently
+  const handleDeleteKey = async () => {
+    if (!widgetKey) return;
+    const confirmDelete = window.confirm(
+      "Are you sure you want to PERMANENTLY DELETE this widget key?\n\nThis cannot be undone. All websites embedding this key will cease to function."
+    );
+    if (!confirmDelete) return;
+
+    setIsDeleting(true);
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/keys/widget/${widgetKey.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Failed to delete key");
+      }
+
+      setWidgetKey(null);
+      setOriginsList([]);
+      setAllowSql(false);
+      setAllowedDbIds([]);
+      toast.success("Widget key deleted successfully.");
+      setPreviewReloadKey((k) => k + 1);
+    } catch (err: any) {
+      console.error("Key deletion error:", err);
+      toast.error(err.message || "Failed to delete key");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  // Create New Key
+  const handleCreateNewKey = async () => {
+    setIsCreatingKey(true);
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    try {
+      const currentOrigin = window.location.origin;
+      const res = await fetch(`${API_BASE_URL}/api/keys/widget`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          name: "Website Widget",
+          allowed_origins: [currentOrigin],
+          monthly_message_cap: 2500,
+          allow_sql: false,
+          allowed_database_ids: []
+        })
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Failed to create new widget key");
+      }
+
+      const createdKey = await res.json();
+      setWidgetKey(createdKey);
+      setOriginsList(createdKey.allowed_origins || []);
+      setAllowSql(createdKey.allow_sql || false);
+      setAllowedDbIds(createdKey.allowed_database_ids || []);
+      toast.success("New publishable widget key generated!");
+      setPreviewReloadKey((k) => k + 1);
+    } catch (err: any) {
+      console.error("Key create error:", err);
+      toast.error(err.message || "Failed to create widget key");
+    } finally {
+      setIsCreatingKey(false);
+    }
+  };
+
   // Origin List Management
   const handleAddOrigin = () => {
     const trimmed = newOriginInput.trim();
@@ -465,26 +597,80 @@ export function ChatbotWidgetPage() {
         </div>
 
         {/* Public Key Display & Actions */}
-        {widgetKey && (
-          <div className="flex items-center gap-2 bg-gray-50 border rounded-xl p-2.5 shadow-sm">
-            <div className="flex flex-col text-right">
-              <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Publishable Key</span>
-              <span className="font-mono text-xs font-semibold text-gray-700">
-                {widgetKey.public_key.substring(0, 14)}...{widgetKey.public_key.slice(-6)}
-              </span>
+        {widgetKey ? (
+          <div className="flex flex-wrap items-center gap-2 bg-gray-50 border rounded-xl p-2.5 shadow-sm">
+            <div className="flex items-center gap-2 mr-1">
+              <Badge
+                variant="outline"
+                className={widgetKey.enabled
+                  ? "bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px]"
+                  : "bg-rose-50 text-rose-700 border-rose-200 text-[10px]"
+                }
+              >
+                {widgetKey.enabled ? "Active" : "Disabled"}
+              </Badge>
+              <div className="flex flex-col text-right">
+                <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Publishable Key</span>
+                <span className="font-mono text-xs font-semibold text-gray-700">
+                  {widgetKey.public_key.substring(0, 14)}...{widgetKey.public_key.slice(-6)}
+                </span>
+              </div>
             </div>
-            <Button size="sm" variant="ghost" className="h-8 px-2" onClick={copyPublicKey}>
+
+            <Button size="sm" variant="ghost" className="h-8 px-2" onClick={copyPublicKey} title="Copy Key">
               {copiedKey ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5 text-gray-600" />}
             </Button>
+
             <Button
               size="sm"
               variant="outline"
               className="h-8 gap-1.5 text-xs font-medium text-amber-700 border-amber-300 hover:bg-amber-50"
               onClick={handleRotateKey}
-              disabled={isRotating}
+              disabled={isRotating || isRevoking || isDeleting}
+              title="Rotate Key with 24h grace window"
             >
               <RefreshCw className={`w-3 h-3 ${isRotating ? "animate-spin" : ""}`} />
               Rotate
+            </Button>
+
+            <Button
+              size="sm"
+              variant="outline"
+              className={`h-8 gap-1.5 text-xs font-medium ${
+                widgetKey.enabled
+                  ? "text-orange-700 border-orange-300 hover:bg-orange-50"
+                  : "text-emerald-700 border-emerald-300 hover:bg-emerald-50"
+              }`}
+              onClick={handleToggleKey}
+              disabled={isRotating || isRevoking || isDeleting}
+              title={widgetKey.enabled ? "Revoke & disable key" : "Re-enable key"}
+            >
+              <ShieldAlert className="w-3 h-3" />
+              {widgetKey.enabled ? "Revoke / Disable" : "Re-enable"}
+            </Button>
+
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 gap-1.5 text-xs font-medium text-rose-700 border-rose-300 hover:bg-rose-50"
+              onClick={handleDeleteKey}
+              disabled={isRotating || isRevoking || isDeleting}
+              title="Delete key permanently"
+            >
+              <Trash2 className="w-3 h-3" />
+              Delete
+            </Button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              className="h-9 gap-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
+              onClick={handleCreateNewKey}
+              disabled={isCreatingKey}
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Generate Publishable Key
             </Button>
           </div>
         )}

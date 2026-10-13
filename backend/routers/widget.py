@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse, HTMLResponse
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
+import ipaddress
 import models, schemas
 from database import get_db
 from services.widget_session_service import (
@@ -19,6 +20,68 @@ from services.widget_rate_limiter import widget_limiter
 from services.sql_engine import validate_widget_sql, generate_sql_from_nl, execute_safe_sql
 
 router = APIRouter(prefix="/api/widget", tags=["widget"])
+
+def _is_ip_in_trusted_proxies(ip_str: str, trusted_proxies_cfg: Optional[str] = None) -> bool:
+    cfg = trusted_proxies_cfg if trusted_proxies_cfg is not None else os.getenv("TRUSTED_PROXIES", "")
+    if not cfg or not cfg.strip():
+        return False
+    try:
+        target_ip = ipaddress.ip_address(ip_str.strip())
+    except ValueError:
+        return False
+
+    for item in cfg.split(","):
+        token = item.strip()
+        if not token:
+            continue
+        try:
+            if "/" in token:
+                net = ipaddress.ip_network(token, strict=False)
+                if target_ip in net:
+                    return True
+            else:
+                trusted_ip = ipaddress.ip_address(token)
+                if target_ip == trusted_ip:
+                    return True
+        except ValueError:
+            continue
+    return False
+
+
+def extract_client_ip(request: Request, trusted_proxies_cfg: Optional[str] = None) -> str:
+    """
+    Extracts the authenticated client IP safely against X-Forwarded-For spoofing (SEC-03).
+    - If request.client is None, defaults to '127.0.0.1'.
+    - If request.client.host is NOT in TRUSTED_PROXIES (or TRUSTED_PROXIES is unset),
+      request.client.host is returned directly. X-Forwarded-For headers from untrusted clients
+      are strictly ignored to prevent rate limiter bypass.
+    - If request.client.host IS in TRUSTED_PROXIES, walks X-Forwarded-For backwards from right
+      to left, returning the right-most untrusted IP in the proxy chain.
+    """
+    direct_host = request.client.host if request.client else "127.0.0.1"
+    
+    if not _is_ip_in_trusted_proxies(direct_host, trusted_proxies_cfg):
+        return direct_host
+
+    forwarded = request.headers.get("x-forwarded-for")
+    if not forwarded:
+        return direct_host
+
+    entries = [x.strip() for x in forwarded.split(",") if x.strip()]
+    if not entries:
+        return direct_host
+
+    # Walk from right to left (closest to trusted proxy) to find the right-most untrusted entry
+    for entry in reversed(entries):
+        if not _is_ip_in_trusted_proxies(entry, trusted_proxies_cfg):
+            try:
+                ipaddress.ip_address(entry)
+                return entry
+            except ValueError:
+                continue
+
+    return entries[0]
+
 
 # -------------------------------------------------------------
 # PII Column Masking Helper
@@ -229,10 +292,7 @@ def process_widget_chat(
     session_conv_id = claims["conversation_id"]
 
     # 3. Rate limiting checks (Key, IP, Session)
-    client_ip = request.client.host if request.client else "127.0.0.1"
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        client_ip = forwarded.split(",")[0].strip()
+    client_ip = extract_client_ip(request)
 
     allowed, retry_after = widget_limiter.check_rate_limits(
         public_key=public_key,
@@ -263,7 +323,7 @@ def process_widget_chat(
     now = datetime.now(timezone.utc)
     month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
     current_month_usage = db.query(models.QueryLog).filter(
-        models.QueryLog.tenant_id == tenant_id,
+        models.QueryLog.widget_key_id == widget_key.id,
         models.QueryLog.source == "widget",
         models.QueryLog.created_at >= month_start
     ).count()
@@ -460,6 +520,7 @@ def process_widget_chat(
 
     log_entry = models.QueryLog(
         tenant_id=tenant_id,
+        widget_key_id=widget_key.id,
         source="widget",
         natural_query=user_query,
         status="success",
@@ -475,7 +536,7 @@ def process_widget_chat(
     is_stream = req.stream or (request.headers.get("accept") == "text/event-stream")
     if is_stream:
         # Check concurrent streams cap
-        if not widget_limiter.acquire_stream(public_key, max_concurrent=5):
+        if not widget_limiter.acquire_stream(public_key):
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="Maximum concurrent streams reached for this widget key",
@@ -551,18 +612,27 @@ def get_widget_embed_page(public_key: str, request: Request, db: Session = Depen
         err_res.headers["Content-Security-Policy"] = "frame-ancestors 'none';"
         return err_res
 
-    # Check key allowed_origins
-    allowed_origins = [o for o in (widget_key.allowed_origins or []) if o != "*"]
-    if not allowed_origins:
+    # Check key allowed_origins strictly
+    raw_origins = widget_key.allowed_origins or []
+    has_invalid = False
+    valid_origins = []
+    for o in raw_origins:
+        try:
+            valid_origins.append(schemas.validate_origin_item(o))
+        except Exception:
+            has_invalid = True
+            break
+
+    if has_invalid or not valid_origins:
         denied_res = HTMLResponse(
             status_code=403,
-            content="<html><body><h3 style='font-family:sans-serif;padding:20px;'>Widget allowlist is empty. Embedding disallowed.</h3></body></html>"
+            content="<html><body><h3 style='font-family:sans-serif;padding:20px;'>Widget allowlist contains invalid origins or is empty. Embedding disallowed.</h3></body></html>"
         )
         denied_res.headers["Content-Security-Policy"] = "frame-ancestors 'none';"
         return denied_res
 
     api_origin = str(request.base_url).rstrip("/")
-    ancestors_str = f"'self' {' '.join(allowed_origins)}"
+    ancestors_str = f"'self' {' '.join(valid_origins)}"
     html_content = f"""<!DOCTYPE html>
 <html lang="en">
 <head>

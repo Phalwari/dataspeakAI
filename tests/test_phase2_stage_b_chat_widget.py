@@ -339,6 +339,7 @@ def test_widget_monthly_cap_exceeded(stage_b_setup):
     for i in range(2):
         q = models.QueryLog(
             tenant_id=1,
+            widget_key_id=wk_rag.id,
             source="widget",
             natural_query=f"Past query {i}",
             created_at=datetime.now(timezone.utc)
@@ -417,32 +418,27 @@ def test_validate_widget_sql_deterministic_security():
 # Test 5: GET /widget.js Route
 # ---------------------------------------------------------------------------
 
-def test_widget_js_route(stage_b_setup):
+def test_widget_js_route(stage_b_setup, monkeypatch, tmp_path):
     client = stage_b_setup["client"]
 
-    # 1. Non-existent file returns 404 with helpful message
+    # 1. Test real compiled bundle properties without modifying files
+    resp = client.get("/widget.js")
+    assert resp.status_code == 200
+    assert "application/javascript" in resp.headers["content-type"]
+    assert resp.headers.get("x-content-type-options") == "nosniff"
+    assert "max-age=300" in resp.headers.get("cache-control", "")
+    assert len(resp.text) > 20000, f"Expected widget bundle > 20kB, got {len(resp.text)} bytes"
+    assert "attachShadow" in resp.text
+
+    # 2. Test 404 when bundle missing by monkeypatching backend_dir to empty tmp_path
+    empty_backend_dir = str(tmp_path / "empty_bundle_dir")
+    os.makedirs(empty_backend_dir, exist_ok=True)
+    import main
+    monkeypatch.setattr(main, "backend_dir", empty_backend_dir)
+
     resp_missing = client.get("/widget.js")
-    # If not yet built, returns 404
-    if resp_missing.status_code == 404:
-        assert "Widget bundle not built yet" in resp_missing.json()["detail"]
-
-    # 2. Test with dummy script in public/widget.js
-    public_dir = os.path.abspath(os.path.join(backend_dir, "..", "public"))
-    os.makedirs(public_dir, exist_ok=True)
-    widget_file = os.path.join(public_dir, "widget.js")
-    with open(widget_file, "w", encoding="utf-8") as f:
-        f.write("(function(){ console.log('DataSpeakAI Widget'); })();")
-
-    try:
-        resp = client.get("/widget.js")
-        assert resp.status_code == 200
-        assert "application/javascript" in resp.headers["content-type"]
-        assert resp.headers["x-content-type-options"] == "nosniff"
-        assert "max-age=300" in resp.headers["cache-control"]
-        assert "DataSpeakAI" in resp.text
-    finally:
-        if os.path.exists(widget_file) and not os.path.exists(os.path.join(public_dir, "..", "dist", "widget.js")):
-            os.remove(widget_file)
+    assert resp_missing.status_code == 404
+    assert "Widget bundle not built yet" in resp_missing.json()["detail"]
 
 
 # ---------------------------------------------------------------------------
@@ -584,10 +580,18 @@ def test_sql_hardening_injection_vectors():
     assert is_valid is False
     assert "secret_payroll" in msg
 
-    # 5g. Schema-qualified allowed table succeeds
-    is_valid, _ = validate_widget_sql(
+    # 5g. Schema-qualified table rejected when only base name in allowlist (SEC-01)
+    is_valid, msg = validate_widget_sql(
         "SELECT * FROM public.products;",
         allowed_tables=["products"]
+    )
+    assert is_valid is False
+    assert "public.products" in msg
+
+    # 5h. Schema-qualified table allowed when exact qualified name in allowlist (SEC-01)
+    is_valid, _ = validate_widget_sql(
+        "SELECT * FROM public.products;",
+        allowed_tables=["public.products"]
     )
     assert is_valid is True
 

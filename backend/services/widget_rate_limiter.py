@@ -50,6 +50,7 @@ class WidgetRateLimiter:
 
         # Concurrent active streams per widget key
         self._active_streams: Dict[str, int] = {}
+        self._last_cleanup = time.time()
 
         # Redis backend (optional)
         self.redis_client = None
@@ -66,6 +67,52 @@ class WidgetRateLimiter:
                 print(f"[WARNING] [WIDGET_RATE_LIMITER] REDIS_URL is configured but Redis is unreachable ({e}). Falling back to in-memory rate limiting. Multi-worker deployments will enforce rate limits per worker.")
         else:
             print("[WARNING] [WIDGET_RATE_LIMITER] REDIS_URL is unset. Falling back to in-memory rate limiting. In multi-worker deployments (e.g., Docker, Gunicorn, Uvicorn with multiple workers), limits will be enforced per worker process rather than globally.")
+
+    @property
+    def key_limit(self) -> int:
+        try:
+            return int(os.getenv("WIDGET_RATE_LIMIT_KEY_PER_MIN", "60"))
+        except (ValueError, TypeError):
+            return 60
+
+    @property
+    def ip_limit(self) -> int:
+        try:
+            return int(os.getenv("WIDGET_RATE_LIMIT_IP_PER_MIN", "30"))
+        except (ValueError, TypeError):
+            return 30
+
+    @property
+    def session_limit(self) -> int:
+        try:
+            return int(os.getenv("WIDGET_RATE_LIMIT_SESSION_PER_MIN", "20"))
+        except (ValueError, TypeError):
+            return 20
+
+    @property
+    def max_concurrent_streams(self) -> int:
+        try:
+            return int(os.getenv("WIDGET_MAX_CONCURRENT_STREAMS", "5"))
+        except (ValueError, TypeError):
+            return 5
+
+    def cleanup_idle_buckets(self, ttl_seconds: int = 600) -> int:
+        """
+        SEC-05: Evicts idle in-memory token buckets older than ttl_seconds (default 10 min).
+        """
+        now = time.time()
+        evicted = 0
+        with self._lock:
+            for registry in (self._ip_buckets, self._session_buckets, self._key_buckets):
+                to_delete = [
+                    k for k, b in list(registry.items())
+                    if (now - getattr(b, "last_updated", now)) > ttl_seconds
+                ]
+                for k in to_delete:
+                    del registry[k]
+                    evicted += 1
+            self._last_cleanup = now
+        return evicted
 
     def _get_or_create_bucket(
         self,
@@ -100,26 +147,34 @@ class WidgetRateLimiter:
         public_key: str,
         client_ip: str,
         session_id: str,
-        key_limit: int = 60,
-        ip_limit: int = 30,
-        session_limit: int = 20
+        key_limit: Optional[int] = None,
+        ip_limit: Optional[int] = None,
+        session_limit: Optional[int] = None
     ) -> Tuple[bool, int]:
         """
         Evaluates token buckets for key, ip, and session.
         Uses Redis if configured, otherwise in-memory token buckets.
         Returns (is_allowed, retry_after_seconds).
         """
+        k_limit = key_limit if key_limit is not None else self.key_limit
+        i_limit = ip_limit if ip_limit is not None else self.ip_limit
+        s_limit = session_limit if session_limit is not None else self.session_limit
+
+        # Periodic idle bucket cleanup (once every 60s)
+        if time.time() - self._last_cleanup > 60:
+            self.cleanup_idle_buckets(ttl_seconds=600)
+
         if self.redis_client:
             # 1. Key limit
-            ok, retry = self._check_redis_limit(f"widget_rl:key:{public_key}", key_limit, 60)
+            ok, retry = self._check_redis_limit(f"widget_rl:key:{public_key}", k_limit, 60)
             if not ok:
                 return False, retry
             # 2. IP limit
-            ok, retry = self._check_redis_limit(f"widget_rl:ip:{client_ip}", ip_limit, 60)
+            ok, retry = self._check_redis_limit(f"widget_rl:ip:{client_ip}", i_limit, 60)
             if not ok:
                 return False, retry
             # 3. Session limit
-            ok, retry = self._check_redis_limit(f"widget_rl:sess:{session_id}", session_limit, 60)
+            ok, retry = self._check_redis_limit(f"widget_rl:sess:{session_id}", s_limit, 60)
             if not ok:
                 return False, retry
             return True, 0
@@ -127,7 +182,7 @@ class WidgetRateLimiter:
         # In-memory fallback
         # 1. Key limit
         key_bucket = self._get_or_create_bucket(
-            self._key_buckets, public_key, capacity=key_limit, fill_rate=key_limit / 60.0
+            self._key_buckets, public_key, capacity=k_limit, fill_rate=k_limit / 60.0
         )
         ok, retry = key_bucket.consume(1)
         if not ok:
@@ -135,7 +190,7 @@ class WidgetRateLimiter:
 
         # 2. IP limit
         ip_bucket = self._get_or_create_bucket(
-            self._ip_buckets, client_ip, capacity=ip_limit, fill_rate=ip_limit / 60.0
+            self._ip_buckets, client_ip, capacity=i_limit, fill_rate=i_limit / 60.0
         )
         ok, retry = ip_bucket.consume(1)
         if not ok:
@@ -143,7 +198,7 @@ class WidgetRateLimiter:
 
         # 3. Session limit
         session_bucket = self._get_or_create_bucket(
-            self._session_buckets, session_id, capacity=session_limit, fill_rate=session_limit / 60.0
+            self._session_buckets, session_id, capacity=s_limit, fill_rate=s_limit / 60.0
         )
         ok, retry = session_bucket.consume(1)
         if not ok:
@@ -151,15 +206,19 @@ class WidgetRateLimiter:
 
         return True, 0
 
-    def acquire_stream(self, public_key: str, max_concurrent: int = 5) -> bool:
+    def acquire_stream(self, public_key: str, max_concurrent: Optional[int] = None) -> bool:
         """
         Attempts to acquire a concurrent streaming slot for the widget key.
         Returns True if acquired, False if limit exceeded.
         """
+        max_streams = max_concurrent if max_concurrent is not None else self.max_concurrent_streams
+
         if self.redis_client:
             try:
                 cur = self.redis_client.incr(f"widget_streams:{public_key}")
-                if cur > max_concurrent:
+                # SEC-06: set 120s TTL with refresh so crashed worker cannot leak slots
+                self.redis_client.expire(f"widget_streams:{public_key}", 120)
+                if cur > max_streams:
                     self.redis_client.decr(f"widget_streams:{public_key}")
                     return False
                 return True
@@ -168,7 +227,7 @@ class WidgetRateLimiter:
 
         with self._lock:
             current = self._active_streams.get(public_key, 0)
-            if current >= max_concurrent:
+            if current >= max_streams:
                 return False
             self._active_streams[public_key] = current + 1
             return True
@@ -180,8 +239,10 @@ class WidgetRateLimiter:
         if self.redis_client:
             try:
                 cur = self.redis_client.decr(f"widget_streams:{public_key}")
-                if cur < 0:
-                    self.redis_client.set(f"widget_streams:{public_key}", 0)
+                if cur <= 0:
+                    self.redis_client.delete(f"widget_streams:{public_key}")
+                else:
+                    self.redis_client.expire(f"widget_streams:{public_key}", 120)
                 return
             except Exception:
                 pass

@@ -336,7 +336,7 @@ export function WidgetApp({ initialConfig }: WidgetAppProps): VNode {
             ? h('div', { class: 'dataspeak-error-banner' }, [
                 h('span', null, errorMessage),
                 retryCountdown !== null
-                  ? h('span', { style: 'font-weight: 600;' }, ` (${retryCountdown}s)`)
+                  ? h('span', { class: 'dataspeak-countdown' }, ` (${retryCountdown}s)`)
                   : null,
               ])
             : null,
