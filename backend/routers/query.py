@@ -10,9 +10,12 @@ if backend_dir not in sys.path:
 
 import models
 import schemas
+import logging
 from database import get_db
 from dependencies import get_current_user
 from services import sql_engine
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/query", tags=["query"])
 
@@ -99,8 +102,9 @@ def execute_nl_to_sql_query(
             db.add(safety_log)
 
             db.commit()
-        except Exception:
+        except Exception as log_err:
             db.rollback()
+            logger.exception(f"[QUERY AUDIT] Failed to persist query execution telemetry: {log_err}")
 
     if gen_error or not generated_sql:
         log_query(status_str="failed", err_msg=gen_error or "No SQL query generated.")

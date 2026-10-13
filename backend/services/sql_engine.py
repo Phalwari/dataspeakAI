@@ -68,11 +68,21 @@ def sync_database_catalog(db_conn: models.DatabaseConnection, db_session) -> Opt
             db_session.flush()
         else:
             db_schema.last_sync = models.utc_now()
-            # Clear old metadata to re-sync cleanly
+            # Clear old metadata to re-sync cleanly:
+            # Delete child ColumnMetadata explicitly first to avoid SQLite orphan column accumulation
+            old_table_ids = [
+                t.id for t in db_session.query(models.TableMetadata.id)
+                .filter(models.TableMetadata.schema_id == db_schema.id).all()
+            ]
+            if old_table_ids:
+                db_session.query(models.ColumnMetadata).filter(
+                    models.ColumnMetadata.table_id.in_(old_table_ids)
+                ).delete(synchronize_session=False)
             db_session.query(models.TableMetadata).filter(
                 models.TableMetadata.schema_id == db_schema.id
-            ).delete()
+            ).delete(synchronize_session=False)
             db_session.flush()
+            db_session.expunge_all()
 
         pii_patterns = re.compile(r"(email|password|secret|ssn|token|phone|credit|card|cvv|hash|salary|auth)", re.IGNORECASE)
 
@@ -88,16 +98,31 @@ def sync_database_catalog(db_conn: models.DatabaseConnection, db_session) -> Opt
             db_session.flush()
 
             columns = inspector.get_columns(t_name)
+            pk_constraint = inspector.get_pk_constraint(t_name)
+            pk_cols = pk_constraint.get("constrained_columns", []) if pk_constraint else []
+            fk_constraints = inspector.get_foreign_keys(t_name) or []
+
+            fk_map = {}
+            for fk in fk_constraints:
+                for local_col, ref_col in zip(fk.get("constrained_columns", []), fk.get("referred_columns", [])):
+                    fk_map[local_col] = f"{fk.get('referred_table')}.{ref_col}"
+
             for col in columns:
                 c_name = col["name"]
                 c_type = str(col["type"])
                 is_pii_flag = bool(pii_patterns.search(c_name))
+                is_pk = c_name in pk_cols
+                is_fk = c_name in fk_map
+                fk_target = fk_map.get(c_name)
 
                 col_meta = models.ColumnMetadata(
                     table_id=tbl_meta.id,
                     column_name=c_name,
                     data_type=c_type,
                     is_pii=is_pii_flag,
+                    is_primary_key=is_pk,
+                    is_foreign_key=is_fk,
+                    foreign_key_target=fk_target,
                     unit_type=None
                 )
                 db_session.add(col_meta)
@@ -131,8 +156,15 @@ def get_db_schema_context(db_conn: models.DatabaseConnection, db_session=None) -
             for tbl in cached_schema.tables:
                 schema_lines.append(f"\nTable: {tbl.table_name}")
                 for col in tbl.columns:
-                    pii_tag = " [PII]" if col.is_pii else ""
-                    schema_lines.append(f"  - {col.column_name} ({col.data_type}){pii_tag}")
+                    flags = []
+                    if getattr(col, "is_primary_key", False):
+                        flags.append("PRIMARY KEY")
+                    if getattr(col, "is_foreign_key", False) and getattr(col, "foreign_key_target", None):
+                        flags.append(f"FOREIGN KEY -> {col.foreign_key_target}")
+                    if col.is_pii:
+                        flags.append("PII")
+                    flag_str = f" [{', '.join(flags)}]" if flags else ""
+                    schema_lines.append(f"  - {col.column_name} ({col.data_type}){flag_str}")
             return "\n".join(schema_lines)
 
     connection_url = get_connection_url(db_conn)

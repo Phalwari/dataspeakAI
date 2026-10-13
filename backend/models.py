@@ -185,6 +185,9 @@ class ColumnMetadata(Base):
     column_name = Column(String(255), nullable=False, index=True)
     data_type = Column(String(100), nullable=False)
     is_pii = Column(Boolean, default=False)
+    is_primary_key = Column(Boolean, default=False)
+    is_foreign_key = Column(Boolean, default=False)
+    foreign_key_target = Column(String(255), nullable=True)
     sample_data = Column(JSON, nullable=True)
     unit_type = Column(String(50), nullable=True)
 

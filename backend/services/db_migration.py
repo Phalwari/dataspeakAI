@@ -67,9 +67,23 @@ MIGRATION_COLUMNS = [
     ("recommendations", "action_type", "VARCHAR DEFAULT 'general'", "VARCHAR(50) DEFAULT 'general'"),
     ("recommendations", "action_url", "VARCHAR", "VARCHAR(255)"),
     ("recommendations", "status", "VARCHAR DEFAULT 'pending'", "VARCHAR(50) DEFAULT 'pending'"),
+    # Phase 4 - Stage 4A: Column Metadata constraints
+    ("column_metadata", "is_primary_key", "BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE"),
+    ("column_metadata", "is_foreign_key", "BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE"),
+    ("column_metadata", "foreign_key_target", "VARCHAR", "VARCHAR(255)"),
     # Phase 4 - Stage 4B: Executed Queries extensions
+    ("executed_queries", "tenant_id", "INTEGER", "INTEGER"),
+    ("executed_queries", "user_id", "INTEGER", "INTEGER"),
+    ("executed_queries", "database_id", "INTEGER", "INTEGER"),
     ("executed_queries", "message_id", "INTEGER", "INTEGER"),
+    ("executed_queries", "raw_query", "TEXT", "TEXT"),
+    ("executed_queries", "sql_generated", "TEXT", "TEXT"),
+    ("executed_queries", "execution_time_ms", "FLOAT DEFAULT 0.0", "FLOAT DEFAULT 0.0"),
+    ("executed_queries", "rows_returned", "INTEGER DEFAULT 0", "INTEGER DEFAULT 0"),
+    ("executed_queries", "status", "VARCHAR DEFAULT 'success'", "VARCHAR(50) DEFAULT 'success'"),
     ("executed_queries", "was_successful", "BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT TRUE"),
+    ("executed_queries", "error_message", "TEXT", "TEXT"),
+    ("executed_queries", "executed_at", "DATETIME", "TIMESTAMP WITH TIME ZONE"),
 ]
 
 

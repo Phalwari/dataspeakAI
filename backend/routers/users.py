@@ -50,6 +50,14 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
             db.flush()
             tenant_id = new_tenant.id
 
+            # Initialize default TenantSettings (Stage 4A)
+            tenant_settings = models.TenantSettings(
+                tenant_id=tenant_id,
+                theme_mode="light",
+                notifications_enabled=True
+            )
+            db.add(tenant_settings)
+
         hashed_password = auth.get_password_hash(user.password)
         new_user = models.User(
             email=user_email,
@@ -60,6 +68,16 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
         )
         db.add(new_user)
         db.flush() # Populate new_user.id
+        
+        # Initialize Membership record (Stage 4A)
+        matched_role = db.query(models.Role).filter(models.Role.name == role).first()
+        membership = models.Membership(
+            user_id=new_user.id,
+            tenant_id=tenant_id,
+            role_id=matched_role.id if matched_role else None,
+            is_owner=(not bool(user.invite_token))
+        )
+        db.add(membership)
         
         # Populate database access if this was an invite
         if user.invite_token:

@@ -81,18 +81,18 @@ Every AI agent working on this repository **MUST** adhere to this 4-step workflo
 
 ## 📦 Archived / Completed Tasks
 
-- [x] **Phase 4: Enterprise Database Schema Expansion (Tasks 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7)**
-  - *Completed:* 2026-10-13 | Antigravity AI Engineer
-  - *Summary:* Expanded backend ORM architecture from 10 MVP models to full 35-table enterprise coverage achieving 100% parity with `Full_Project_Schemas.sql`:
-    - **Task 4.1 (Granular RBAC Models):** Implemented `TenantSettings`, `Role`, `Permission`, `role_permissions` join table, and `Membership` in `backend/models.py`. Seeded 4 standard roles (`Admin`, `Developer`, `Business Owner`, `Viewer`) with granular action permissions in `seed_admin.py`. Preserved legacy `User.role` and `User.tenant_id` for backward compatibility. Added `Secret` model for encrypted credential storage.
-    - **Task 4.2 (Persistent Schema Catalog):** Created `DatabaseSchema`, `TableMetadata`, and `ColumnMetadata` models. Built `sync_database_catalog()` in `sql_engine.py` with automatic PII column pattern tagging (`is_pii=True`) across sensitive regexes. Wired catalog persistence into `get_db_schema_context()`.
-    - **Task 4.3 (Fine-Grained Query Auditing):** Created `QueryTemplate`, `ExecutedQuery` (`message_id`, `was_successful`), `QuerySafetyLog`, and `Intent` models. Integrated automatic query execution and AST safety violation logging into `POST /api/query`.
+- [x] **Phase 4: Enterprise Database Schema Expansion & QA Remediation (Tasks 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7)**
+  - *Completed:* 2026-10-13 | Antigravity AI Engineer & QA Lead
+  - *Summary:* Expanded backend ORM architecture from 10 MVP models to full 35-table enterprise coverage achieving 100% parity with `Full_Project_Schemas.sql` and remediated all 7 post-expansion QA review findings:
+    - **Task 4.1 (Granular RBAC Models & Lifecycle):** Implemented `TenantSettings`, `Role`, `Permission` (1-to-many via `role_id`), and `Membership` in `backend/models.py`. Seeded 4 standard roles (`Admin`, `Developer`, `Business Owner`, `Viewer`) with granular action permissions in `seed_admin.py`. Wired automatic initialization of `TenantSettings` and `Membership(is_owner=True)` into `register_user()` in `routers/users.py`. Preserved legacy `User.role` and `User.tenant_id` for backward compatibility. Added `Secret` model for encrypted credential storage.
+    - **Task 4.2 (Persistent Schema Catalog & Relational Context Preservation):** Created `DatabaseSchema`, `TableMetadata`, and `ColumnMetadata` models with `is_primary_key`, `is_foreign_key`, and `foreign_key_target`. Built `sync_database_catalog()` in `sql_engine.py` with automatic PII column pattern tagging (`is_pii=True`) and explicit child `ColumnMetadata` purging to eliminate SQLite column multiplication on re-sync. Formatted `[PRIMARY KEY]`, `[FOREIGN KEY -> target.col]`, and `[PII]` in persistent schema prompt context in `get_db_schema_context()`, matching live introspection with 100% fidelity.
+    - **Task 4.3 (Fine-Grained Query Auditing & Observable Telemetry):** Created `QueryTemplate`, `ExecutedQuery`, `QuerySafetyLog`, and `Intent` models. Integrated query execution telemetry and AST safety violation logging into `POST /api/query` in `routers/query.py` with structured `logger.exception()` failure logging. Unified `executed_queries` columns with `Full_Project_Schemas.sql` and added zero-dependency auto-migrations in `services/db_migration.py`.
     - **Task 4.4 (Multi-Collection Vector Registry):** Built `Collection` and `VectorRecord` models for partitioned tenant knowledge bases.
     - **Task 4.5 (Custom Dashboards & Widgets):** Implemented `Dashboard` and `Widget` models with layout configurations and cascade deletion.
     - **Task 4.6 (Billing & Metering Infrastructure):** Added `Subscription`, `Invoice`, `Payment`, and `MeteredUsage` models storing Stripe identifiers, billing cycles, payment statuses, and consumable usage units.
     - **Task 4.7 (Security Policies & System Metrics):** Created `RateLimit`, `SecurityPolicy`, `AuditLog`, and `SystemMetric` models.
     - **Pydantic V2 Schemas:** Added complete `from_attributes=True` schemas in `backend/schemas.py` for all new models.
-    - **Regression Testing:** Authored 14 regression tests across `test_phase4_stage_a_regression.py` (6 tests), `test_phase4_stage_b_regression.py` (4 tests), and `test_phase4_enterprise_schema_regression.py` (4 tests). Verified 100% full schema integrity (35/35 tables) and 0-error Vite frontend production build (2,772 modules).
+    - **Regression & Behavioral Testing:** Expanded regression suite to 16 tests across `test_phase4_stage_a_regression.py` (6 tests), `test_phase4_stage_b_regression.py` (4 tests), and `test_phase4_enterprise_schema_regression.py` (6 tests, including real ORM cascade deletions and registration RBAC lifecycle). Verified 100% schema integrity, behavioral suite passing, and 0-error Vite frontend production build (2,772 modules).
 
 - [x] **Phase 3.1: AI Insights Engine Security & Behavioral Hardening (Post-QA Remediation Package)**
   - *Completed:* 2026-10-13 | Antigravity QA Engineer

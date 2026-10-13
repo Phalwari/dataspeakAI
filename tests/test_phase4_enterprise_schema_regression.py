@@ -234,3 +234,180 @@ def test_full_35_table_schema_integrity_and_cascade(db_session):
 
     missing_tables = canonical_35_tables - table_names
     assert len(missing_tables) == 0, f"Missing canonical tables in database: {missing_tables}"
+
+    # 1. Test Tenant CASCADE across dependent models
+    tenant = models.Tenant(name="Cascade Test Tenant")
+    db_session.add(tenant)
+    db_session.commit()
+
+    user = models.User(email="cascade@example.com", hashed_password="pw", tenant_id=tenant.id)
+    db_session.add(user)
+    db_session.commit()
+
+    t_settings = models.TenantSettings(tenant_id=tenant.id, theme_mode="dark")
+    t_membership = models.Membership(user_id=user.id, tenant_id=tenant.id, is_owner=True)
+    t_col = models.Collection(tenant_id=tenant.id, name="KB Docs")
+    t_dash = models.Dashboard(tenant_id=tenant.id, title="Main Dash")
+    t_sub = models.Subscription(tenant_id=tenant.id, stripe_id="sub_cascade")
+    db_session.add_all([t_settings, t_membership, t_col, t_dash, t_sub])
+    db_session.commit()
+
+    # Verify children exist
+    assert db_session.query(models.TenantSettings).filter_by(tenant_id=tenant.id).count() == 1
+    assert db_session.query(models.Membership).filter_by(tenant_id=tenant.id).count() == 1
+    assert db_session.query(models.Collection).filter_by(tenant_id=tenant.id).count() == 1
+    assert db_session.query(models.Dashboard).filter_by(tenant_id=tenant.id).count() == 1
+    assert db_session.query(models.Subscription).filter_by(tenant_id=tenant.id).count() == 1
+
+    # Delete Tenant via ORM
+    db_session.delete(tenant)
+    db_session.commit()
+
+    # Verify all children were cascade deleted
+    assert db_session.query(models.TenantSettings).filter_by(tenant_id=tenant.id).count() == 0
+    assert db_session.query(models.Membership).filter_by(tenant_id=tenant.id).count() == 0
+    assert db_session.query(models.Collection).filter_by(tenant_id=tenant.id).count() == 0
+    assert db_session.query(models.Dashboard).filter_by(tenant_id=tenant.id).count() == 0
+    assert db_session.query(models.Subscription).filter_by(tenant_id=tenant.id).count() == 0
+
+    # 2. Test Role CASCADE across permissions
+    role = models.Role(name="TestRole", description="Test Role")
+    db_session.add(role)
+    db_session.commit()
+
+    perm1 = models.Permission(role_id=role.id, action="read", resource="databases")
+    perm2 = models.Permission(role_id=role.id, action="write", resource="databases")
+    db_session.add_all([perm1, perm2])
+    db_session.commit()
+
+    assert db_session.query(models.Permission).filter_by(role_id=role.id).count() == 2
+
+    # Delete Role via ORM
+    db_session.delete(role)
+    db_session.commit()
+
+    # Verify child permissions were deleted
+    assert db_session.query(models.Permission).filter_by(role_id=role.id).count() == 0
+
+
+def test_catalog_resync_and_relational_context_preservation(db_session):
+    """Verify that sync_database_catalog preserves PK/FK context and prevents orphan column duplication."""
+    import tempfile
+    import sqlite3
+    from services.sql_engine import sync_database_catalog, get_db_schema_context
+
+    # Create temporary physical SQLite database with foreign keys and PII
+    temp_file = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+    temp_path = temp_file.name
+    temp_file.close()
+
+    try:
+        raw_conn = sqlite3.connect(temp_path)
+        raw_conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT, name TEXT);")
+        raw_conn.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER, amount REAL, FOREIGN KEY(user_id) REFERENCES users(id));")
+        raw_conn.commit()
+        raw_conn.close()
+
+        tenant = models.Tenant(name="Catalog QA Tenant")
+        db_session.add(tenant)
+        db_session.commit()
+
+        db_conn = models.DatabaseConnection(
+            tenant_id=tenant.id,
+            name="Physical SQLite DB",
+            db_type="sqlite",
+            database=temp_path,
+            host="",
+            username="",
+            password=""
+        )
+        db_session.add(db_conn)
+        db_session.commit()
+
+        # 1. Initial sync
+        schema_1 = sync_database_catalog(db_conn, db_session)
+        assert schema_1 is not None
+
+        # Inspect ColumnMetadata constraints
+        user_email_col = db_session.query(models.ColumnMetadata).filter(
+            models.ColumnMetadata.column_name == "email"
+        ).first()
+        assert user_email_col is not None
+        assert user_email_col.is_pii is True
+
+        order_user_id_col = db_session.query(models.ColumnMetadata).filter(
+            models.ColumnMetadata.column_name == "user_id"
+        ).first()
+        assert order_user_id_col is not None
+        assert order_user_id_col.is_foreign_key is True
+        assert order_user_id_col.foreign_key_target == "users.id"
+
+        order_id_col = db_session.query(models.ColumnMetadata).filter(
+            models.ColumnMetadata.column_name == "id",
+            models.ColumnMetadata.table_id == order_user_id_col.table_id
+        ).first()
+        assert order_id_col is not None
+        assert order_id_col.is_primary_key is True
+
+        # Check formatted schema prompt context
+        ctx = get_db_schema_context(db_conn, db_session)
+        assert "[PRIMARY KEY]" in ctx
+        assert "[FOREIGN KEY -> users.id]" in ctx
+        assert "[PII]" in ctx
+
+        initial_col_count = db_session.query(models.ColumnMetadata).count()
+        assert initial_col_count == 6
+
+        # 2. Re-sync (must NOT duplicate columns)
+        schema_2 = sync_database_catalog(db_conn, db_session)
+        assert schema_2 is not None
+
+        after_resync_col_count = db_session.query(models.ColumnMetadata).count()
+        assert after_resync_col_count == 6, f"Expected 6 columns after re-sync, found {after_resync_col_count}"
+
+        # Re-check formatted prompt
+        ctx_2 = get_db_schema_context(db_conn, db_session)
+        assert "[PRIMARY KEY]" in ctx_2
+        assert "[FOREIGN KEY -> users.id]" in ctx_2
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+
+
+def test_user_registration_creates_membership_and_settings(db_session):
+    """Verify that user registration auto-initializes TenantSettings and Membership records."""
+    from routers.users import register_user as register
+
+    # Ensure Admin role exists
+    admin_role = models.Role(name="Admin", description="Administrator")
+    db_session.add(admin_role)
+    db_session.commit()
+
+    class DummyReq:
+        email = "founder@startup.com"
+        password = "SecurePassword123!"
+        full_name = "Founder Bob"
+        company_name = "Acme Corp"
+        invite_token = None
+
+    res = register(user=DummyReq(), db=db_session)
+    assert res["email"] == "founder@startup.com"
+    created_tenant_id = res["tenant_id"]
+
+    # Verify TenantSettings created
+    settings = db_session.query(models.TenantSettings).filter_by(tenant_id=created_tenant_id).first()
+    assert settings is not None
+    assert settings.theme_mode == "light"
+
+    # Verify Membership created with is_owner=True
+    membership = db_session.query(models.Membership).filter_by(
+        user_id=res["id"],
+        tenant_id=created_tenant_id
+    ).first()
+    assert membership is not None
+    assert membership.is_owner is True
+    assert membership.role_id == admin_role.id
+

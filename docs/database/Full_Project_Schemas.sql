@@ -103,6 +103,9 @@ CREATE TABLE column_metadata (
     column_name VARCHAR(255) NOT NULL,
     data_type VARCHAR(100) NOT NULL,
     is_pii BOOLEAN DEFAULT FALSE,
+    is_primary_key BOOLEAN DEFAULT FALSE,
+    is_foreign_key BOOLEAN DEFAULT FALSE,
+    foreign_key_target VARCHAR(255),
     sample_data JSONB,
     unit_type VARCHAR(50)
 );
@@ -158,12 +161,18 @@ CREATE TABLE query_templates (
 
 CREATE TABLE executed_queries (
     id SERIAL PRIMARY KEY,
+    tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    database_id INTEGER REFERENCES database_connections(id) ON DELETE SET NULL,
     message_id INTEGER REFERENCES messages(id) ON DELETE CASCADE,
-    connection_id INTEGER REFERENCES database_connections(id),
-    sql_generated TEXT NOT NULL,
+    raw_query TEXT,
+    sql_generated TEXT,
     execution_time_ms FLOAT,
     rows_returned INTEGER,
-    was_successful BOOLEAN DEFAULT TRUE
+    status VARCHAR(50) DEFAULT 'success',
+    was_successful BOOLEAN DEFAULT TRUE,
+    error_message TEXT,
+    executed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE query_safety_logs (
@@ -199,7 +208,9 @@ CREATE TABLE collections (
     id SERIAL PRIMARY KEY,
     tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
-    vector_provider VARCHAR(50) DEFAULT 'faiss'
+    description TEXT,
+    vector_provider VARCHAR(50) DEFAULT 'faiss',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE vector_records (
@@ -233,14 +244,17 @@ CREATE TABLE dashboards (
     id SERIAL PRIMARY KEY,
     tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
     title VARCHAR(255) NOT NULL,
-    layout_json JSONB
+    layout_json JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE widgets (
     id SERIAL PRIMARY KEY,
     dashboard_id INTEGER REFERENCES dashboards(id) ON DELETE CASCADE,
     type VARCHAR(50) NOT NULL,
-    config_json JSONB
+    config_json JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ==========================================
@@ -253,7 +267,8 @@ CREATE TABLE subscriptions (
     stripe_id VARCHAR(255) UNIQUE,
     plan_tier VARCHAR(50) DEFAULT 'free',
     status VARCHAR(50) DEFAULT 'active',
-    current_period_end TIMESTAMP WITH TIME ZONE
+    current_period_end TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE invoices (
@@ -262,7 +277,8 @@ CREATE TABLE invoices (
     amount_due DECIMAL(10, 2) NOT NULL,
     billing_period_start TIMESTAMP WITH TIME ZONE,
     billing_period_end TIMESTAMP WITH TIME ZONE,
-    status VARCHAR(50)
+    status VARCHAR(50),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE payments (
@@ -270,7 +286,8 @@ CREATE TABLE payments (
     invoice_id INTEGER REFERENCES invoices(id) ON DELETE CASCADE,
     payment_method VARCHAR(50),
     status VARCHAR(50),
-    transaction_id VARCHAR(255)
+    transaction_id VARCHAR(255),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE metered_usage (
@@ -298,7 +315,8 @@ CREATE TABLE rate_limits (
     id SERIAL PRIMARY KEY,
     tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
     endpoint_group VARCHAR(100),
-    max_requests_per_min INTEGER
+    max_requests_per_min INTEGER,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE security_policies (
@@ -306,7 +324,9 @@ CREATE TABLE security_policies (
     tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
     enforce_2fa BOOLEAN DEFAULT FALSE,
     allowed_ip_ranges TEXT,
-    pii_redaction_rules JSONB
+    pii_redaction_rules JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ==========================================

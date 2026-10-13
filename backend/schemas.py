@@ -842,6 +842,9 @@ class ColumnMetadataResponse(BaseModel):
     column_name: str
     data_type: str
     is_pii: bool = False
+    is_primary_key: bool = False
+    is_foreign_key: bool = False
+    foreign_key_target: Optional[str] = None
     sample_data: Optional[Any] = None
     unit_type: Optional[str] = None
 
