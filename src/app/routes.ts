@@ -59,6 +59,13 @@ export const router = createBrowserRouter([
         Component: DatabasesPage,
       },
       {
+        path: "databases/:id/erd",
+        lazy: async () => {
+          const mod = await import("./pages/dashboard/DatabaseErdPage");
+          return { Component: mod.DatabaseErdPage };
+        },
+      },
+      {
         path: "knowledge-base",
         Component: KnowledgeBasePage,
       },

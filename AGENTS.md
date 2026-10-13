@@ -258,7 +258,18 @@ backend/
 * **Rate Limiting & Streaming Caps:** All widget endpoints enforce token bucket rate limits (per key, per IP, per session) returning `429 Too Many Requests` with `Retry-After`. SSE streaming enforces a concurrent stream limit per key to protect ASGI server connection pools.
 * **Data-Access Guardrails:** Widget queries default to safe RAG retrieval (`allow_sql = False`). If SQL is explicitly enabled, queries are bounded to `allowed_database_ids`, validated deterministically (SELECT-only, no multi-statement, no catalog access), row capped at 100 preview rows, executed with query timeouts, and columns masked for sensitive PII. Visitors receive summarized natural language answers, never raw database connection credentials or schema dumps.
 
+### 4.7 Entity-Relationship Diagram (ERD) Architecture & Security Standard
+
+* **Catalog-First Architecture (D1):** `GET /api/databases/{id}/erd` serves schema structures directly from the local metadata catalog (`TableMetadata`, `ColumnMetadata`, `TableRelationship`). Live reflection runs only on cache miss or explicit `refresh=true`.
+* **Constraint-Level Relationships (D2):** Foreign key constraints are persisted in `table_relationships` with JSON arrays of source and target columns, supporting composite foreign keys and multiple relationships between identical tables.
+* **SQLAlchemy 2.0 Bulk Reflection (D3):** Uses `get_multi_columns`, `get_multi_pk_constraint`, and `get_multi_foreign_keys` for minimal round-trip database overhead.
+* **Relational DB Scope (D4):** ERD is restricted to relational dialects (`postgresql`, `mysql`, `mariadb`, `sqlite`). Document databases (MongoDB, Firebase) return HTTP 400.
+* **Host Validation & SSRF Prevention (D5):** Live database connections block loopback (`127.0.0.0/8`), link-local (`169.254.0.0/16`), and private RFC 1918 subnets unless `ALLOW_PRIVATE_DB_HOSTS=true`. SQLite database paths must physically exist and reject directory traversal (`..`).
+* **Tenant Isolation & Cooldown (D6, D7):** Database access is tenant-scoped (cross-tenant returns 404). Schema refresh enforces a per-tenant, per-database cooldown window (default 30 seconds via `ERD_REFRESH_COOLDOWN_SECONDS`) returning HTTP 429 with `Retry-After`.
+* **Frontend Visualization (D8):** Implemented via `@xyflow/react` v12, `@dagrejs/dagre`, and `vitest`. Large schemas (>60 tables) automatically enable viewport virtualization (`onlyRenderVisibleElements`) and compact node rendering. Dragged positions are persisted in `localStorage` per `(database_id, schema)`.
+
 ---
+
 
 ## 5. Instructions for AI Agents
 

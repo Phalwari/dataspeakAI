@@ -15,7 +15,7 @@ from database import engine, get_db
 from routers import (
     users, tenants, databases, api_keys, chatbot_config, documents,
     query, chat, analytics, connections, insights, files, file_insights,
-    widget
+    widget, erd
 )
 from dotenv import load_dotenv
 
@@ -76,6 +76,7 @@ app.include_router(insights.router)
 app.include_router(files.router)
 app.include_router(file_insights.router)
 app.include_router(widget.router)
+app.include_router(erd.router)
 
 
 @app.get("/")

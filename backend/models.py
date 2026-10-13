@@ -163,6 +163,7 @@ class DatabaseSchema(Base):
 
     connection = relationship("DatabaseConnection", back_populates="schemas")
     tables = relationship("TableMetadata", back_populates="schema", cascade="all, delete-orphan")
+    relationships = relationship("TableRelationship", back_populates="schema", cascade="all, delete-orphan")
 
 class TableMetadata(Base):
     __tablename__ = "table_metadata"
@@ -172,6 +173,7 @@ class TableMetadata(Base):
     table_name = Column(String(255), nullable=False, index=True)
     semantic_description = Column(Text, nullable=True)
     is_fact_table = Column(Boolean, default=False)
+    kind = Column(String(50), default="table")  # "table" or "view"
     row_count_estimate = Column(Integer, default=0)
 
     schema = relationship("DatabaseSchema", back_populates="tables")
@@ -188,10 +190,32 @@ class ColumnMetadata(Base):
     is_primary_key = Column(Boolean, default=False)
     is_foreign_key = Column(Boolean, default=False)
     foreign_key_target = Column(String(255), nullable=True)
+    is_nullable = Column(Boolean, default=True)
+    is_unique = Column(Boolean, default=False)
     sample_data = Column(JSON, nullable=True)
     unit_type = Column(String(50), nullable=True)
 
     table = relationship("TableMetadata", back_populates="columns")
+
+class TableRelationship(Base):
+    __tablename__ = "table_relationships"
+
+    id = Column(Integer, primary_key=True, index=True)
+    schema_id = Column(Integer, ForeignKey("database_schemas.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind = Column(String(50), default="foreign_key")  # "foreign_key" | "inferred"
+    constraint_name = Column(String(255), nullable=True)
+    source_table = Column(String(255), nullable=False)
+    source_schema = Column(String(255), nullable=True)
+    source_columns = Column(JSON, nullable=False)
+    target_table = Column(String(255), nullable=False)
+    target_schema = Column(String(255), nullable=True)
+    target_columns = Column(JSON, nullable=False)
+
+    __table_args__ = (
+        Index("idx_table_relationships_schema_id", "schema_id"),
+    )
+
+    schema = relationship("DatabaseSchema", back_populates="relationships")
 
 class ApiKey(Base):
     __tablename__ = "api_keys"

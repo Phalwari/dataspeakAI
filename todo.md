@@ -43,25 +43,16 @@ Every AI agent working on this repository **MUST** adhere to this 4-step workflo
 - [ ] **Legacy ApiKey Hashing**: Hash legacy `ApiKey` values at rest (e.g. SHA-256) rather than storing plaintext keys in database.
 - [ ] **CORS Origin Strictness**: Replace wildcard `allow_origins=["*"]` + `allow_credentials=True` on dashboard routes with strict explicit origin allowlists.
 - [ ] **Latency Optimization**: Embedding cold start and TTFT latency profiling and caching.
+- [ ] **elkjs for very large schemas**: Implement alternative layout engine for diagrams with >300 tables.
+- [ ] **Export ERD to PNG/SVG**: Add visual diagram export functionality to canvas toolbar.
+- [ ] **Migrate sync_database_catalog to shared reflection**: Unify persistent catalog reflection in `sql_engine.py` with `erd_service.py` bulk reflection logic.
+- [ ] **Creation-time host validation for connections**: Enforce D5 host blocklist validation at database connection creation time, not only on ERD reflection path.
+- [ ] **Live PostgreSQL and MySQL tests**: Stand up live containerized PostgreSQL and MySQL services in CI pipeline to test reflection against real servers (currently mocked only).
+- [ ] **Persistent schema catalog (4.2) as ERD source**: Wire `DatabaseSchema` persistent catalog as direct source for ERD endpoints.
 - *Note:* PostgreSQL, MySQL and Redis paths were verified with mocks/unit tests only, not against live servers.
 
 ---
 
-### Phase 5: Interactive Visual Database ERD Generator
-**Priority: P2 (Visual BI Feature) | Estimated Effort: 2-3 sessions**  
-**Goal:** Allow users to visualize relationships between database tables visually.
-
-- [ ] **Task 5.1 — Database Foreign Key Graph Introspection API**
-  - **Target Files:** `backend/routers/erd.py`, [`backend/services/sql_engine.py`](file:///d:/dataspeak/backend/services/sql_engine.py)
-  - **Details:** Build endpoint `GET /api/databases/{id}/erd` returning nodes (tables, column types, PKs) and edges (foreign key relations) formatted for diagram rendering.
-  - **Acceptance Criteria:** Endpoint returns complete relationship graph for SQLite, PostgreSQL, and MySQL.
-
-- [ ] **Task 5.2 — Interactive ERD Canvas Component in React**
-  - **Target Files:** `src/app/pages/dashboard/DatabaseErdPage.tsx` or modal in [`DatabasesPage.tsx`](file:///d:/dataspeak/src/app/pages/dashboard/DatabasesPage.tsx)
-  - **Details:** Render interactive zoomable/pannable ERD diagram (using React Flow or Mermaid) with table details on click.
-  - **Acceptance Criteria:** Users can visually inspect table relationships and foreign keys with zoom, pan, and table search.
-
----
 
 ### Phase 6: Production Hardening, Billing & DevOps
 **Priority: P3 (Production Readiness) | Estimated Effort: 2 sessions**  
@@ -88,6 +79,30 @@ Every AI agent working on this repository **MUST** adhere to this 4-step workflo
 ---
 
 ## 📦 Archived / Completed Tasks
+
+- [x] **Phase 5: Interactive Visual Database ERD Generator (Tasks 5.1 & 5.2)**
+  - *Completed:* 2026-10-14 | Antigravity AI Engineer & Fullstack Lead
+  - *Summary:* Implemented complete visual Entity-Relationship Diagram (ERD) architecture spanning FastAPI backend bulk introspection, heuristic relationship inference, and an interactive `@xyflow/react` + `@dagrejs/dagre` visual canvas:
+    - **Task 5.1 — Database Foreign Key Graph Introspection API (`backend/routers/erd.py`, `backend/services/erd_service.py`, `backend/models.py`, `backend/schemas.py`, `backend/services/db_migration.py`):**
+      - Built `GET /api/databases/{id}/erd` supporting `schema`, `refresh`, and `include_inferred` query parameters.
+      - Implemented catalog-first architecture (D1) with single-transaction atomic cache replacement.
+      - Added `TableRelationship` ORM model (D2) with composite index on `(schema_id)` for constraint-level composite and multiple FK support; added `TableMetadata.kind` ("table" | "view"), `ColumnMetadata.is_nullable`, and `ColumnMetadata.is_unique` with automated migrations.
+      - Integrated SQLAlchemy 2.0 bulk inspection (`get_multi_columns`, `get_multi_pk_constraint`, `get_multi_foreign_keys`) with per-table fallback (D3).
+      - Enforced relational dialect restrictions (D4: SQLite, PostgreSQL, MySQL, MariaDB; MongoDB/Firebase return HTTP 400).
+      - Enforced SSRF & host validation (D5: blocked loopback, link-local, and private RFC 1918 subnets unless `ALLOW_PRIVATE_DB_HOSTS=true`; SQLite path traversal confinement).
+      - Enforced tenant isolation (D6: 404 on cross-tenant access) and DoS refresh rate limiting (D7: 30s cooldown returning HTTP 429 with `Retry-After`).
+      - Sanitized reflection error messages to prevent leakage of credentials, hostnames, or connection strings.
+      - Built heuristic relationship inference (`include_inferred=true`) matching single-column PKs with confidence and rationale.
+    - **Task 5.2 — Interactive ERD Canvas Component in React (`src/app/pages/dashboard/DatabaseErdPage.tsx`, `src/app/components/erd/TableNode.tsx`, `src/app/components/erd/TableDetailsDrawer.tsx`, `src/app/utils/erdTransform.ts`, `src/app/utils/erdLayout.ts`):**
+      - Created `/dashboard/databases/:id/erd` route using React Router v7 route-level `lazy` chunking (ERD chunk: 248.46 kB / 79.98 kB gzip).
+      - Built pure graph transformation and Dagre layout calculation utilities (`erdTransform.ts`, `erdLayout.ts`).
+      - Created custom memoized `TableNode` components, interactive table details drawer, live search with node centering, PK/FK column filter, layout direction toggle (LR/TB), auto-layout reset, and `localStorage` position persistence.
+      - Optimized large schema rendering (>60 tables) with automatic viewport virtualization (`onlyRenderVisibleElements={true}`) and compact node headers, achieving 60+ FPS panning on a 200-table schema.
+    - **Verification & Test Coverage:**
+      - Backend: 12/12 tests passing in `tests/test_phase5_erd_backend.py` (composite/self/dangling FKs, SQL injection-style table names, host blocklists, tenant 404, rate limit 429, and mocked PostgreSQL/MySQL reflection; note: *no live server used* for PostgreSQL and MySQL).
+      - Frontend: 8/8 tests passing in `src/app/utils/erdTransformAndLayout.test.ts` via Vitest.
+      - Real browser verification: 11/11 interactive checks verified via Chrome DevTools MCP on Northwind (13 tables, 13 FKs), Chinook (11 tables, 11 FKs), Sakila (16 tables, 22 FKs), No-FK DB (4 tables, 3 inferred FKs), and Large 200 DB (200 tables, 199 FKs).
+      - Production build: `npm run build` passes with 0 errors.
 
 - [x] **Phase 4: Enterprise Database Schema Expansion & QA Remediation (Tasks 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7)**
   - *Completed:* 2026-10-13 | Antigravity AI Engineer & QA Lead

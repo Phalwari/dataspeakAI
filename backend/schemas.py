@@ -1153,5 +1153,51 @@ class SystemMetricResponse(SystemMetricBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+# ---------------------------------------------------------------------------
+# Phase 5: Entity-Relationship Diagram (ERD) & Schema Models
+# ---------------------------------------------------------------------------
+
+class ErdColumn(BaseModel):
+    name: str
+    type: str
+    nullable: bool = True
+    is_pk: bool = False
+    is_fk: bool = False
+    is_unique: bool = False
 
 
+class ErdTable(BaseModel):
+    id: str  # "schema.table" when schema applies, otherwise table name
+    name: str
+    schema_name: Optional[str] = Field(None, alias="schema")
+    kind: str = "table"  # "table" | "view"
+    columns: List[ErdColumn] = []
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class ErdRelationship(BaseModel):
+    id: str
+    kind: str = "foreign_key"  # "foreign_key" | "inferred"
+    constraint_name: Optional[str] = None
+    confidence: Optional[float] = None
+    reason: Optional[str] = None
+    source_table: str
+    source_columns: List[str]
+    target_table: str
+    target_columns: List[str]
+
+
+class DatabaseErdResponse(BaseModel):
+    database_id: int
+    dialect: str
+    schema_name: Optional[str] = Field(None, alias="schema")
+    last_sync: Optional[datetime] = None
+    source: str = "catalog"  # "catalog" | "live"
+    truncated: bool = False
+    table_count: int
+    warnings: List[str] = []
+    tables: List[ErdTable] = []
+    relationships: List[ErdRelationship] = []
+
+    model_config = ConfigDict(populate_by_name=True)

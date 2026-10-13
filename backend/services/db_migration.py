@@ -86,6 +86,10 @@ MIGRATION_COLUMNS = [
     ("executed_queries", "was_successful", "BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT TRUE"),
     ("executed_queries", "error_message", "TEXT", "TEXT"),
     ("executed_queries", "executed_at", "DATETIME", "TIMESTAMP WITH TIME ZONE"),
+    # Phase 5: ERD & Relational Schema Extensions
+    ("table_metadata", "kind", "VARCHAR DEFAULT 'table'", "VARCHAR(50) DEFAULT 'table'"),
+    ("column_metadata", "is_nullable", "BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT TRUE"),
+    ("column_metadata", "is_unique", "BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE"),
 ]
 
 
@@ -101,6 +105,47 @@ def run_schema_migrations(engine: Engine) -> None:
         is_sqlite = engine.dialect.name == "sqlite"
 
         with engine.begin() as conn:
+            # Phase 5: Ensure table_relationships table exists
+            if "table_relationships" not in existing_tables:
+                logger.info("[MIGRATION] Creating table 'table_relationships'")
+                if is_sqlite:
+                    conn.execute(text("""
+                        CREATE TABLE IF NOT EXISTS "table_relationships" (
+                            "id" INTEGER PRIMARY KEY AUTOINCREMENT,
+                            "schema_id" INTEGER NOT NULL,
+                            "kind" VARCHAR(50) DEFAULT 'foreign_key',
+                            "constraint_name" VARCHAR(255),
+                            "source_table" VARCHAR(255) NOT NULL,
+                            "source_schema" VARCHAR(255),
+                            "source_columns" JSON NOT NULL,
+                            "target_table" VARCHAR(255) NOT NULL,
+                            "target_schema" VARCHAR(255),
+                            "target_columns" JSON NOT NULL,
+                            FOREIGN KEY ("schema_id") REFERENCES "database_schemas" ("id") ON DELETE CASCADE
+                        )
+                    """))
+                else:
+                    conn.execute(text("""
+                        CREATE TABLE IF NOT EXISTS "table_relationships" (
+                            "id" SERIAL PRIMARY KEY,
+                            "schema_id" INTEGER NOT NULL REFERENCES "database_schemas" ("id") ON DELETE CASCADE,
+                            "kind" VARCHAR(50) DEFAULT 'foreign_key',
+                            "constraint_name" VARCHAR(255),
+                            "source_table" VARCHAR(255) NOT NULL,
+                            "source_schema" VARCHAR(255),
+                            "source_columns" JSONB NOT NULL,
+                            "target_table" VARCHAR(255) NOT NULL,
+                            "target_schema" VARCHAR(255),
+                            "target_columns" JSONB NOT NULL
+                        )
+                    """))
+
+            # Ensure index on table_relationships (schema_id)
+            try:
+                conn.execute(text('CREATE INDEX IF NOT EXISTS "idx_table_relationships_schema_id" ON "table_relationships" ("schema_id")'))
+            except Exception as ex:
+                logger.debug(f"[MIGRATION] table_relationships index creation notice: {ex}")
+
             for table_name, column_name, sqlite_type, pg_type in MIGRATION_COLUMNS:
                 if table_name not in existing_tables:
                     continue

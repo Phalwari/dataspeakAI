@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router";
 import { API_BASE_URL } from "../../config/api";
-import { Plus, CheckCircle, XCircle, Settings, Trash2, Database, Table, Search, Loader2, Sparkles } from "lucide-react";
+import { Plus, CheckCircle, XCircle, Settings, Trash2, Database, Table, Search, Loader2, Sparkles, Network } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { QueryChatPanel } from "../../components/QueryChatPanel";
 
@@ -58,6 +59,7 @@ const databases = [
 ];
 
 export function DatabasesPage() {
+  const navigate = useNavigate();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [databases, setDatabases] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -469,6 +471,15 @@ export function DatabasesPage() {
                   </Button>
                   <Button variant="outline" size="sm" onClick={() => openExplorer(db)}>
                     View Data
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => navigate(`/dashboard/databases/${db.id}/erd`)}
+                    className="gap-1.5"
+                  >
+                    <Network className="w-3.5 h-3.5" />
+                    View ERD
                   </Button>
                   <Button variant="ghost" size="icon">
                     <Settings className="w-4 h-4" />
