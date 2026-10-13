@@ -4,32 +4,53 @@ from typing import Optional, List, Any, Dict
 from datetime import datetime
 from urllib.parse import urlparse, unquote
 
-ORIGIN_REGEX = re.compile(r"^https?://[A-Za-z0-9.-]+(?::[0-9]{1,5})?$", re.IGNORECASE)
-
-def validate_origin_item(origin: Any) -> str:
-    if not isinstance(origin, str):
+def _sanitize_and_validate_origin(origin_val: str) -> str:
+    if not isinstance(origin_val, str):
         raise ValueError("Origin must be a string")
-    if origin != origin.strip() or any(c.isspace() for c in origin):
-        raise ValueError(f"Origin '{origin}' cannot contain whitespace")
-    if ";" in origin or "," in origin or '"' in origin or "'" in origin or "*" in origin:
-        raise ValueError(f"Origin '{origin}' contains invalid characters")
-    if not ORIGIN_REGEX.match(origin):
-        raise ValueError(
-            f"Origin '{origin}' is invalid. Format must be http(s)://domain(:port) with no path, query, or special characters"
-        )
-    parts = origin.split("://", 1)
-    scheme = parts[0].lower()
-    rest = parts[1]
-    if ":" in rest:
-        host, port_str = rest.split(":", 1)
+    origin_str = origin_val
+    if origin_str == "*":
+        raise ValueError("Wildcard origins ('*') are strictly disallowed for widget security")
+
+    # Strictly disallow characters that could inject into CSP or HTTP headers (both literal and percent-encoded) (SEC-07)
+    decoded_origin = unquote(origin_str)
+    for forbidden_char in [";", ",", "\n", "\r", '"', "'", "*"]:
+        if forbidden_char in origin_str or forbidden_char in decoded_origin:
+            raise ValueError(f"Origin '{origin_str}' contains forbidden character '{forbidden_char}' (preventing header injection)")
+
+    if origin_str != origin_str.strip() or any(c.isspace() for c in origin_str):
+        raise ValueError(f"Origin '{origin_str}' cannot contain whitespace")
+
+    if not (origin_str.lower().startswith("http://") or origin_str.lower().startswith("https://")):
+        raise ValueError(f"Origin '{origin_str}' must start with http:// or https://")
+
+    parsed = urlparse(origin_str)
+    if not parsed.scheme or parsed.scheme.lower() not in ("http", "https"):
+        raise ValueError(f"Origin '{origin_str}' must have a valid scheme (http or https)")
+    if not parsed.netloc:
+        raise ValueError(f"Origin '{origin_str}' has invalid hostname structure")
+    if "@" in parsed.netloc:
+        raise ValueError(f"Origin '{origin_str}' must not contain user credentials ('@')")
+    if parsed.path and parsed.path != "/":
+        raise ValueError(f"Origin '{origin_str}' must not include path segments ('{parsed.path}'). Specify only scheme, host, and optional port.")
+    if parsed.query or parsed.params or parsed.fragment:
+        raise ValueError(f"Origin '{origin_str}' must not include query parameters or fragments")
+
+    if ":" in parsed.netloc:
+        host, port_str = parsed.netloc.split(":", 1)
         try:
             port = int(port_str)
             if port < 1 or port > 65535:
                 raise ValueError()
         except Exception:
-            raise ValueError(f"Invalid port in origin '{origin}'")
-        return f"{scheme}://{host.lower()}:{port}"
-    return f"{scheme}://{rest.lower()}"
+            raise ValueError(f"Invalid port in origin '{origin_str}'")
+        return f"{parsed.scheme.lower()}://{host.lower()}:{port}"
+
+    return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}"
+
+def validate_origin_item(origin: Any) -> str:
+    if not isinstance(origin, str):
+        raise ValueError("Origin must be a string")
+    return _sanitize_and_validate_origin(origin)
 
 class TenantBase(BaseModel):
     name: str
@@ -191,32 +212,7 @@ class ApiKeyResponse(BaseModel):
     class Config:
         from_attributes = True
 
-def _sanitize_and_validate_origin(origin_val: str) -> str:
-    origin_str = str(origin_val).strip()
-    if origin_str == "*":
-        raise ValueError("Wildcard origins ('*') are strictly disallowed for widget security")
-    if not (origin_str.startswith("http://") or origin_str.startswith("https://")):
-        raise ValueError(f"Origin '{origin_str}' must start with http:// or https://")
 
-    # Strictly disallow characters that could inject into CSP or HTTP headers (both literal and percent-encoded) (SEC-07)
-    decoded_origin = unquote(origin_str)
-    for forbidden_char in [";", ",", "\n", "\r", '"', "'", " "]:
-        if forbidden_char in origin_str or forbidden_char in decoded_origin:
-            raise ValueError(f"Origin '{origin_str}' contains forbidden character '{forbidden_char}' (preventing header injection)")
-
-    parsed = urlparse(origin_str)
-    if not parsed.scheme or parsed.scheme not in ("http", "https"):
-        raise ValueError(f"Origin '{origin_str}' must have a valid scheme (http or https)")
-    if not parsed.netloc:
-        raise ValueError(f"Origin '{origin_str}' has invalid hostname structure")
-    if "@" in parsed.netloc:
-        raise ValueError(f"Origin '{origin_str}' must not contain user credentials ('@')")
-    if parsed.path and parsed.path != "/":
-        raise ValueError(f"Origin '{origin_str}' must not include path segments ('{parsed.path}'). Specify only scheme, host, and optional port.")
-    if parsed.query or parsed.params or parsed.fragment:
-        raise ValueError(f"Origin '{origin_str}' must not include query parameters or fragments")
-
-    return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}"
 
 
 class WidgetKeyCreate(BaseModel):

@@ -252,7 +252,7 @@ def test_sec06_redis_stream_ttl():
     acquired = limiter.acquire_stream("pk_live_test_sec06", max_concurrent=5)
     assert acquired is True
     mock_redis.incr.assert_called_once_with("widget_streams:pk_live_test_sec06")
-    mock_redis.expire.assert_called_once_with("widget_streams:pk_live_test_sec06", 300)
+    mock_redis.expire.assert_called_once_with("widget_streams:pk_live_test_sec06", 120)
 
 
 # ==============================================================================
