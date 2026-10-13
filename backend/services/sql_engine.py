@@ -164,7 +164,7 @@ def extract_sql_referenced_tables(clean_sql: str) -> List[str]:
     - Subqueries: SELECT * FROM (SELECT * FROM sub_tbl) s
     - UNION / INTERSECT / EXCEPT
     - CTEs: WITH cte AS (SELECT * FROM base_tbl) SELECT * FROM cte -> correctly returns ['base_tbl'], ignoring cte alias
-    Falls back to regex if AST parsing fails.
+    Fails closed by raising ValueError if AST parsing fails (SEC-02).
     """
     try:
         import sqlglot
@@ -174,54 +174,42 @@ def extract_sql_referenced_tables(clean_sql: str) -> List[str]:
         for d in [None, "mysql", "postgres", "sqlite"]:
             try:
                 parsed = sqlglot.parse_one(clean_sql, read=d)
-                break
+                if parsed:
+                    break
             except Exception:
                 continue
 
-        if parsed:
-            ctes = set()
-            for cte in parsed.find_all(exp.CTE):
-                if cte.alias_or_name:
-                    ctes.add(cte.alias_or_name.lower().strip())
+        if not parsed:
+            raise ValueError("SQL parsing failed: Unable to parse query AST deterministically.")
 
-            tables = set()
-            for t in parsed.find_all(exp.Table):
-                name = t.name.lower().strip()
-                if name and name not in ctes and not name.startswith("safe_limit_wrapper"):
+        ctes = set()
+        for cte in parsed.find_all(exp.CTE):
+            if cte.alias_or_name:
+                ctes.add(cte.alias_or_name.lower().strip())
+
+        tables = set()
+        for t in parsed.find_all(exp.Table):
+            name = t.name.lower().strip()
+            if name and name not in ctes and not name.startswith("safe_limit_wrapper"):
+                if t.db:
+                    tables.add(f"{t.db.lower().strip()}.{name}")
+                else:
                     tables.add(name)
-                    if t.db:
-                        tables.add(f"{t.db.lower().strip()}.{name}")
-            return sorted(list(tables))
-    except Exception:
-        pass
-
-    # Regex fallback
-    cte_names = set()
-    cte_matches = re.findall(r'\b(?:WITH|,)\s+([a-zA-Z0-9_]+)\s+AS\s*\(', clean_sql, re.IGNORECASE)
-    for cte in cte_matches:
-        cte_names.add(cte.lower().strip())
-
-    table_pattern = r'\b(?:FROM|JOIN|TABLE)\s+[`"\[]?(?:([a-zA-Z0-9_]+)[`"\]]?\.)?[`"\[]?([a-zA-Z0-9_]+)[`"\]]?'
-    matches = re.findall(table_pattern, clean_sql, re.IGNORECASE)
-
-    extracted = set()
-    for schema_part, tbl_part in matches:
-        tbl = tbl_part.lower().strip()
-        if tbl and tbl not in cte_names and not tbl.startswith("safe_limit_wrapper"):
-            extracted.add(tbl)
-            if schema_part:
-                extracted.add(f"{schema_part.lower().strip()}.{tbl}")
-
-    return sorted(list(extracted))
+        return sorted(list(tables))
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError(f"SQL parsing failed: {exc}")
 
 
 def validate_widget_sql(sql_query: str, allowed_tables: Optional[List[str]] = None) -> Tuple[bool, str]:
     """
     Strict deterministic SQL validation for embeddable chatbot widget:
     1. Runs full validate_read_only_sql checks (read-only, no DDL/DML, single statement).
-    2. Enforces table allowlist (if specified and non-empty).
+    2. Enforces fail-closed AST parsing via sqlglot (SEC-02).
     3. Blocks access to system catalog tables (pg_*, sqlite_*, information_schema, sys, etc.).
-    4. Detects CTE trickery, UNION to disallowed tables, and stacked injection attempts.
+    4. Enforces strict exact table allowlist matching (SEC-01).
+    5. Detects CTE trickery, UNION to disallowed tables, and stacked injection attempts.
     """
     is_valid, reason = validate_read_only_sql(sql_query)
     if not is_valid:
@@ -250,13 +238,19 @@ def validate_widget_sql(sql_query: str, allowed_tables: Optional[List[str]] = No
         if re.search(pattern, upper_sql, re.IGNORECASE):
             return False, "Access to system catalog tables is prohibited."
 
-    # If allowed_tables is provided and non-empty, verify all referenced tables
+    # Always enforce AST parsing fail-closed (SEC-02)
+    try:
+        referenced_tables = extract_sql_referenced_tables(clean_sql)
+    except ValueError as parse_err:
+        return False, str(parse_err)
+    except Exception:
+        return False, "SQL parsing failed: Unable to parse query AST deterministically."
+
+    # If allowed_tables is provided and non-empty, verify all referenced tables with strict exact matching (SEC-01)
     if allowed_tables:
         allowed_set = {t.lower().strip() for t in allowed_tables}
-        referenced_tables = extract_sql_referenced_tables(clean_sql)
         for tbl in referenced_tables:
-            base_tbl = tbl.split('.')[-1]
-            if tbl not in allowed_set and base_tbl not in allowed_set:
+            if tbl not in allowed_set:
                 return False, f"Access to table '{tbl}' is not permitted for this widget key."
 
     return True, ""

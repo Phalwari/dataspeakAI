@@ -37,6 +37,22 @@ def mask_pii_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sanitized
 
 
+def get_client_ip(request: Request) -> str:
+    """
+    Extracts the client IP address. Only trusts the X-Forwarded-For header if
+    request.client.host matches a configured trusted proxy list (SEC-03).
+    """
+    remote_host = request.client.host if request.client else "127.0.0.1"
+    raw_trusted = os.getenv("TRUSTED_PROXIES", "127.0.0.1,::1")
+    trusted_proxies = {p.strip() for p in raw_trusted.split(",") if p.strip()}
+
+    if remote_host in trusted_proxies:
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+    return remote_host
+
+
 # -------------------------------------------------------------
 # Handshake Endpoint (Stage A)
 # -------------------------------------------------------------
@@ -229,10 +245,7 @@ def process_widget_chat(
     session_conv_id = claims["conversation_id"]
 
     # 3. Rate limiting checks (Key, IP, Session)
-    client_ip = request.client.host if request.client else "127.0.0.1"
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        client_ip = forwarded.split(",")[0].strip()
+    client_ip = get_client_ip(request)
 
     allowed, retry_after = widget_limiter.check_rate_limits(
         public_key=public_key,
@@ -263,7 +276,7 @@ def process_widget_chat(
     now = datetime.now(timezone.utc)
     month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
     current_month_usage = db.query(models.QueryLog).filter(
-        models.QueryLog.tenant_id == tenant_id,
+        models.QueryLog.widget_key_id == widget_key.id,
         models.QueryLog.source == "widget",
         models.QueryLog.created_at >= month_start
     ).count()
@@ -460,6 +473,7 @@ def process_widget_chat(
 
     log_entry = models.QueryLog(
         tenant_id=tenant_id,
+        widget_key_id=widget_key.id,
         source="widget",
         natural_query=user_query,
         status="success",

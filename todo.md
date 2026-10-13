@@ -37,31 +37,6 @@ Every AI agent working on this repository **MUST** adhere to this 4-step workflo
 
 ---
 
-### Phase 2.1: Chatbot Widget Hardening & Extended Testing (Post-QA Backlog)
-**Priority: P1 (Security & Robustness) | Estimated Effort: 1 session**  
-**Goal:** Address findings identified during the Phase 2 live model QA audit and security review prior to high-traffic production exposure.
-
-- [ ] **Task 2.1.1 — Enforce Exact Table Matching in SQL Engine Validator (SEC-01)**
-  - **Target Files:** `backend/services/sql_engine.py`
-  - **Details:** Prevent table allowlist bypass on schema-qualified table names (`tbl.split('.')[-1]`) by requiring exact identifier matching against `allowed_tables`, preventing cross-schema access (e.g. `other_schema.products`).
-
-- [ ] **Task 2.1.2 — Ensure AST Fail-Closed Parsing (SEC-02)**
-  - **Target Files:** `backend/services/sql_engine.py`
-  - **Details:** When AST parse fails via `sqlglot.parse_one`, fail closed (`return False, "SQL parsing failed"`) rather than falling back to incomplete regex that permits comma-joins without inspection.
-
-- [ ] **Task 2.1.3 — Trusted Proxy IP Validation for Rate Limiting (SEC-03)**
-  - **Target Files:** `backend/routers/widget.py`
-  - **Details:** Only trust `X-Forwarded-For` header when `request.client.host` matches a configured trusted proxy list, preventing IP spoofing to bypass the 30 req/min IP rate limiter.
-
-- [ ] **Task 2.1.4 — Key-Scoped Monthly Quota & Active Bucket Expiration (SEC-04, SEC-05, SEC-06)**
-  - **Target Files:** `backend/routers/widget.py`, `backend/services/widget_rate_limiter.py`
-  - **Details:** Enforce monthly message quota per `widget_key_id` instead of shared tenant pool; add TTL/cleanup to in-memory IP and session rate limit buckets; add TTL to Redis concurrent stream counter to prevent leak on server crash.
-
-- [ ] **Task 2.1.5 — Origin URL Validation & Dashboard Revocation UI (SEC-07, SEC-08)**
-  - **Target Files:** `backend/schemas.py`, `backend/routers/api_keys.py`, `src/app/pages/dashboard/ChatbotWidgetPage.tsx`
-  - **Details:** Validate `allowed_origins` as valid URLs (`http://` or `https://` with no trailing semicolon) to prevent CSP header injection. Add a "Revoke Key" button and confirmation dialog on `ChatbotWidgetPage.tsx` wired to `PUT /api/keys/widget/{id}/revoke`.
-
----
 
 ### Phase 3: Dynamic AI Insights & Recommendation Engine
 **Priority: P1 (Core BI Value) | Estimated Effort: 3 sessions**  
@@ -159,6 +134,10 @@ Every AI agent working on this repository **MUST** adhere to this 4-step workflo
 ---
 
 ## 📦 Archived / Completed Tasks
+
+- [x] **Phase 2.1: Chatbot Widget Hardening & Extended Testing (Post-QA Backlog)**
+  - *Completed:* 2026-10-13 | Antigravity AI Orchestrator
+  - *Summary:* Hardened chatbot widget security addressing findings SEC-01 through SEC-08: enforced exact table matching in SQL engine validator blocking schema qualification bypasses; implemented AST fail-closed parsing rejecting parse failures without regex fallback; added trusted proxy IP verification for rate-limiting extraction (`TRUSTED_PROXIES`); enforced key-scoped monthly quota filtering `QueryLog.widget_key_id == widget_key.id`; added opportunistic in-memory rate-limiter bucket pruning (600s TTL, 5k max) and Redis stream counter TTL (300s); added strict origin URL validation (`http/https`, rejecting semicolons/commas); built Revoke Key modal with Radix `AlertDialog` and revoked state banner in `ChatbotWidgetPage.tsx`; authored regression suite with 7 dedicated tests in `test_phase2_1_hardening_regression.py` and 100% full test suite passing (369 passed, 0 failures).
 
 - [x] **Phase 2: Embeddable Standalone Chatbot Widget (Tasks 2.1, 2.2, 2.3 & Live E2E QA Verification)**
   - *Completed:* 2026-10-13 | Antigravity AI Engineer & QA Lead

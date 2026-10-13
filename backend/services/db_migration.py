@@ -51,6 +51,8 @@ MIGRATION_COLUMNS = [
     ("query_logs", "source", "VARCHAR DEFAULT 'web'", "VARCHAR(50) DEFAULT 'web'"),
     # Widget key table allowlist column
     ("widget_keys", "allowed_tables", "JSON", "JSONB"),
+    # Widget key reference for query logs (SEC-04)
+    ("query_logs", "widget_key_id", "INTEGER", "INTEGER"),
 ]
 
 

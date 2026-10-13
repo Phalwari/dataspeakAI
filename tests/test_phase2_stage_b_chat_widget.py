@@ -339,6 +339,7 @@ def test_widget_monthly_cap_exceeded(stage_b_setup):
     for i in range(2):
         q = models.QueryLog(
             tenant_id=1,
+            widget_key_id=wk_rag.id,
             source="widget",
             natural_query=f"Past query {i}",
             created_at=datetime.now(timezone.utc)
@@ -584,10 +585,19 @@ def test_sql_hardening_injection_vectors():
     assert is_valid is False
     assert "secret_payroll" in msg
 
-    # 5g. Schema-qualified allowed table succeeds
-    is_valid, _ = validate_widget_sql(
+    # 5g. Schema-qualified table matching (SEC-01 exact matching requirement)
+    # When allowed_tables only contains unqualified "products", cross-schema or schema-qualified "public.products" is rejected
+    is_valid, msg = validate_widget_sql(
         "SELECT * FROM public.products;",
         allowed_tables=["products"]
+    )
+    assert is_valid is False
+    assert "public.products" in msg
+
+    # When exact qualified table is listed in allowed_tables, query succeeds
+    is_valid, _ = validate_widget_sql(
+        "SELECT * FROM public.products;",
+        allowed_tables=["public.products"]
     )
     assert is_valid is True
 

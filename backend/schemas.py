@@ -1,6 +1,7 @@
 from pydantic import BaseModel, EmailStr, model_validator, field_validator, Field
 from typing import Optional, List, Any, Dict
 from datetime import datetime
+from urllib.parse import urlparse
 
 class TenantBase(BaseModel):
     name: str
@@ -162,6 +163,31 @@ class ApiKeyResponse(BaseModel):
     class Config:
         from_attributes = True
 
+def _sanitize_and_validate_origin(origin_val: str) -> str:
+    origin_str = str(origin_val).strip()
+    if origin_str == "*":
+        raise ValueError("Wildcard origins ('*') are strictly disallowed for widget security")
+    if not (origin_str.startswith("http://") or origin_str.startswith("https://")):
+        raise ValueError(f"Origin '{origin_str}' must start with http:// or https://")
+
+    # Strictly disallow characters that could inject into CSP or HTTP headers (SEC-07)
+    for forbidden_char in [";", ",", "\n", "\r", '"', "'", " "]:
+        if forbidden_char in origin_str:
+            raise ValueError(f"Origin '{origin_str}' contains forbidden character '{forbidden_char}' (preventing header injection)")
+
+    parsed = urlparse(origin_str)
+    if not parsed.scheme or parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Origin '{origin_str}' must have a valid scheme (http or https)")
+    if not parsed.netloc:
+        raise ValueError(f"Origin '{origin_str}' has invalid hostname structure")
+    if parsed.path and parsed.path != "/":
+        raise ValueError(f"Origin '{origin_str}' must not include path segments ('{parsed.path}'). Specify only scheme, host, and optional port.")
+    if parsed.query or parsed.params or parsed.fragment:
+        raise ValueError(f"Origin '{origin_str}' must not include query parameters or fragments")
+
+    return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}"
+
+
 class WidgetKeyCreate(BaseModel):
     name: str = "Default Widget Key"
     allowed_origins: List[str]
@@ -175,15 +201,7 @@ class WidgetKeyCreate(BaseModel):
     def validate_allowed_origins(cls, v: List[str]) -> List[str]:
         if not v:
             raise ValueError("allowed_origins cannot be empty")
-        cleaned = []
-        for o in v:
-            origin_str = str(o).strip()
-            if origin_str == "*":
-                raise ValueError("Wildcard origins ('*') are strictly disallowed for widget security")
-            if not (origin_str.startswith("http://") or origin_str.startswith("https://")):
-                raise ValueError(f"Origin '{origin_str}' must start with http:// or https://")
-            cleaned.append(origin_str.rstrip("/"))
-        return cleaned
+        return [_sanitize_and_validate_origin(o) for o in v]
 
 class WidgetKeyUpdate(BaseModel):
     name: Optional[str] = None
@@ -199,15 +217,7 @@ class WidgetKeyUpdate(BaseModel):
     def validate_allowed_origins(cls, v: Optional[List[str]]) -> Optional[List[str]]:
         if v is None:
             return v
-        cleaned = []
-        for o in v:
-            origin_str = str(o).strip()
-            if origin_str == "*":
-                raise ValueError("Wildcard origins ('*') are strictly disallowed for widget security")
-            if not (origin_str.startswith("http://") or origin_str.startswith("https://")):
-                raise ValueError(f"Origin '{origin_str}' must start with http:// or https://")
-            cleaned.append(origin_str.rstrip("/"))
-        return cleaned
+        return [_sanitize_and_validate_origin(o) for o in v]
 
 class WidgetKeyResponse(BaseModel):
     id: int

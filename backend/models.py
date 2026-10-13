@@ -280,11 +280,13 @@ class QueryLog(Base):
     tokens_used = Column(Integer, default=0)
     error_message = Column(Text, nullable=True)
     source = Column(String(50), default="web")
+    widget_key_id = Column(Integer, ForeignKey("widget_keys.id"), nullable=True)
     created_at = Column(DateTime, default=utc_now)
 
     tenant = relationship("Tenant")
     user = relationship("User")
     database = relationship("DatabaseConnection")
+    widget_key = relationship("WidgetKey")
 
 class Conversation(Base):
     __tablename__ = "conversations"

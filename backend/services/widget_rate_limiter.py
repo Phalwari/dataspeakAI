@@ -10,11 +10,13 @@ class InMemoryTokenBucket:
         self.tokens = float(capacity)
         self.fill_rate = fill_rate_per_sec
         self.last_updated = time.time()
+        self.last_accessed = self.last_updated
         self.lock = threading.Lock()
 
     def consume(self, tokens: int = 1) -> Tuple[bool, int]:
         with self.lock:
             now = time.time()
+            self.last_accessed = now
             elapsed = now - self.last_updated
             self.last_updated = now
             self.tokens = min(float(self.capacity), self.tokens + elapsed * self.fill_rate)
@@ -47,6 +49,7 @@ class WidgetRateLimiter:
         self._key_buckets: Dict[str, InMemoryTokenBucket] = {}
         self._ip_buckets: Dict[str, InMemoryTokenBucket] = {}
         self._session_buckets: Dict[str, InMemoryTokenBucket] = {}
+        self._last_prune_time = time.time()
 
         # Concurrent active streams per widget key
         self._active_streams: Dict[str, int] = {}
@@ -79,6 +82,32 @@ class WidgetRateLimiter:
                 registry[identifier] = InMemoryTokenBucket(capacity, fill_rate)
             return registry[identifier]
 
+    def _prune_inactive_buckets(self, max_idle_seconds: int = 600, max_entries: int = 5000) -> None:
+        """
+        Prunes in-memory rate limit buckets that have been inactive for > max_idle_seconds (SEC-05).
+        Caps registry size at max_entries, dropping the oldest if necessary.
+        """
+        now = time.time()
+        with self._lock:
+            for registry in (self._ip_buckets, self._session_buckets):
+                # 1. Prune by idle time
+                expired_keys = [
+                    k for k, b in registry.items()
+                    if (now - getattr(b, "last_accessed", b.last_updated)) > max_idle_seconds
+                ]
+                for k in expired_keys:
+                    del registry[k]
+
+                # 2. Cap max size if still over limit
+                if len(registry) > max_entries:
+                    sorted_by_accessed = sorted(
+                        registry.items(),
+                        key=lambda item: getattr(item[1], "last_accessed", item[1].last_updated)
+                    )
+                    excess = len(registry) - max_entries
+                    for k, _ in sorted_by_accessed[:excess]:
+                        del registry[k]
+
     def _check_redis_limit(self, bucket_key: str, limit: int, window_sec: int = 60) -> Tuple[bool, int]:
         try:
             now = time.time()
@@ -109,6 +138,12 @@ class WidgetRateLimiter:
         Uses Redis if configured, otherwise in-memory token buckets.
         Returns (is_allowed, retry_after_seconds).
         """
+        # Periodic cleanup of inactive in-memory buckets (SEC-05)
+        now = time.time()
+        if now - self._last_prune_time > 60:
+            self._last_prune_time = now
+            self._prune_inactive_buckets()
+
         if self.redis_client:
             # 1. Key limit
             ok, retry = self._check_redis_limit(f"widget_rl:key:{public_key}", key_limit, 60)
@@ -158,9 +193,11 @@ class WidgetRateLimiter:
         """
         if self.redis_client:
             try:
-                cur = self.redis_client.incr(f"widget_streams:{public_key}")
+                stream_key = f"widget_streams:{public_key}"
+                cur = self.redis_client.incr(stream_key)
+                self.redis_client.expire(stream_key, 300)
                 if cur > max_concurrent:
-                    self.redis_client.decr(f"widget_streams:{public_key}")
+                    self.redis_client.decr(stream_key)
                     return False
                 return True
             except Exception:
