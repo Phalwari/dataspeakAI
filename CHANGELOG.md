@@ -15,7 +15,6 @@ To maintain seamless multi-developer and AI agent collaboration:
 
 ---
 
-<<<<<<< HEAD
 ## [Unreleased]
 
 - **Phase 4 QA Remediation Package (`backend/services/sql_engine.py`, `backend/models.py`, `backend/schemas.py`, `backend/services/db_migration.py`, `backend/routers/query.py`, `backend/routers/users.py`, `docs/database/Full_Project_Schemas.sql`, `tests/test_phase4_enterprise_schema_regression.py`)**:
