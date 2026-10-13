@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' http://localhost:8000; connect-src 'self' http://localhost:8000; style-src 'self' 'unsafe-inline';">
+  <title>Host Fixture: Strict Content Security Policy</title>
+  <style>
+    body { font-family: sans-serif; padding: 40px; }
+  </style>
+</head>
+<body>
+  <h1>Host with Strict CSP</h1>
+  <p>Verifies CSP connect-src and script-src behavior for standalone widget embed.</p>
+
+  <script src="http://localhost:8000/widget.js" data-key="pk_live_testfixturekey1234567890123" async></script>
+</body>
+</html>

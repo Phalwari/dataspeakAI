@@ -93,6 +93,26 @@ class ApiKey(Base):
     
     tenant = relationship("Tenant")
 
+class WidgetKey(Base):
+    __tablename__ = "widget_keys"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    public_key = Column(String(64), unique=True, index=True, nullable=False)
+    name = Column(String(100), default="Default Widget")
+    allowed_origins = Column(JSON, nullable=False, default=list) # e.g. ["https://example.com"]
+    enabled = Column(Boolean, default=True)
+    monthly_message_cap = Column(Integer, default=1000)
+    allow_sql = Column(Boolean, default=False)
+    allowed_database_ids = Column(JSON, nullable=True, default=list)
+    allowed_tables = Column(JSON, nullable=True, default=list)
+    previous_key = Column(String(64), nullable=True)
+    previous_key_expires_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    tenant = relationship("Tenant")
+
 class ChatbotConfig(Base):
     __tablename__ = "chatbot_configs"
 
@@ -259,6 +279,7 @@ class QueryLog(Base):
     rows_returned = Column(Integer, default=0)
     tokens_used = Column(Integer, default=0)
     error_message = Column(Text, nullable=True)
+    source = Column(String(50), default="web")
     created_at = Column(DateTime, default=utc_now)
 
     tenant = relationship("Tenant")
@@ -314,3 +335,4 @@ class Dataset(Base):
 
     tenant = relationship("Tenant")
     owner = relationship("User")
+

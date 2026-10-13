@@ -6,17 +6,27 @@ backend_dir = os.path.dirname(os.path.abspath(__file__))
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Depends
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
 import models
-from database import engine
+from database import engine, get_db
 from routers import (
     users, tenants, databases, api_keys, chatbot_config, documents,
-    query, chat, analytics, connections, insights, files, file_insights
+    query, chat, analytics, connections, insights, files, file_insights,
+    widget
 )
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Production security assertion
+if os.getenv("ENVIRONMENT", "").lower() == "production":
+    if not os.getenv("WIDGET_HMAC_SECRET"):
+        raise RuntimeError(
+            "CRITICAL SECURITY CONFIGURATION ERROR: WIDGET_HMAC_SECRET must be explicitly set when ENVIRONMENT=production. Application startup aborted."
+        )
 
 # Check secret key
 SECRET_KEY = os.getenv("SECRET_KEY", "dataspeakai-default-encryption-secret-key-32b")
@@ -65,8 +75,46 @@ app.include_router(connections.router)
 app.include_router(insights.router)
 app.include_router(files.router)
 app.include_router(file_insights.router)
+app.include_router(widget.router)
 
 
 @app.get("/")
 def read_root():
     return {"message": "Welcome to DataSpeakAI Platform API"}
+
+
+@app.get("/widget.js")
+def get_widget_script():
+    """
+    Serves the compiled standalone widget bundle with strict caching and security headers.
+    """
+    candidates = [
+        os.path.join(backend_dir, "..", "dist", "widget.js"),
+        os.path.join(backend_dir, "..", "public", "widget.js"),
+        os.path.join(backend_dir, "static", "widget.js"),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return FileResponse(
+                path,
+                media_type="application/javascript",
+                headers={
+                    "Content-Type": "application/javascript",
+                    "X-Content-Type-Options": "nosniff",
+                    "Cache-Control": "public, max-age=300",
+                    "Access-Control-Allow-Origin": "*"
+                }
+            )
+    return JSONResponse(
+        status_code=404,
+        content={"detail": "Widget bundle not built yet. Run 'npm run build:widget' first."}
+    )
+
+
+@app.get("/embed/{public_key}", response_class=HTMLResponse)
+def get_widget_embed_root(public_key: str, request: Request, db: Session = Depends(get_db)):
+    """
+    Direct root fallback iframe embed page.
+    """
+    return widget.get_widget_embed_page(public_key, request, db)
+

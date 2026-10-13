@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Host Fixture: Single Page Application</title>
+  <style>
+    body { font-family: sans-serif; margin: 0; padding: 0; background: #f3f4f6; }
+    #app { padding: 30px; }
+    button { padding: 8px 16px; margin: 4px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <h1>Simulated React / Vue / Next.js SPA Host</h1>
+    <p>Tests simulated client-side route transitions and re-renders.</p>
+    <button onclick="renderView('Home')">Home View</button>
+    <button onclick="renderView('Pricing')">Pricing View</button>
+    <div id="view" style="margin-top: 20px; padding: 20px; background: white; border-radius: 8px;">
+      Currently on: Home View
+    </div>
+  </div>
+
+  <script>
+    function renderView(viewName) {
+      document.getElementById('view').innerHTML = 'Currently on: ' + viewName + ' View';
+    }
+  </script>
+
+  <script src="http://localhost:8000/widget.js" data-key="pk_live_testfixturekey1234567890123" async></script>
+</body>
+</html>

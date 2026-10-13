@@ -14,10 +14,14 @@ Automated regression tests verifying the 8-issue remediation package:
 
 import os
 import sys
+from typing import Any, cast, List, Dict
 from unittest.mock import patch, MagicMock
 
-# Ensure backend is in path
-backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backend"))
+# Ensure backend and root are in path
+root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+backend_dir = os.path.join(root_dir, "backend")
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
@@ -107,14 +111,16 @@ def test_database_connection_description_persistence_and_routes(memory_db):
     assert added.name == "Sales DB"
 
     # 4. list_connections router output includes description
-    listing = list_connections(current_user=user, db=db)
+    listing: Any = list_connections(current_user=user, db=db)
     assert listing["total"] == 2
-    descriptions = [c.get("description") for c in listing["connections"]]
+    raw_conns: List[Dict[str, Any]] = listing["connections"]
+    descriptions = [c.get("description") for c in raw_conns]
     assert "Core analytics data warehouse" in descriptions
     assert "Regional sales records" in descriptions
 
     # 5. get_connection router output includes description
-    single = get_connection(connection_id=conn.id, current_user=user, db=db)
+    conn_id = int(cast(int, conn.id))
+    single = get_connection(connection_id=conn_id, current_user=user, db=db)
     assert single["description"] == "Core analytics data warehouse"
 
 
@@ -172,7 +178,7 @@ def test_gemini_model_prioritization_and_deduplication():
 
 def test_run_audit_mongo_business_error_handling():
     """Verify run_mongo_audit returns False on missing dataset."""
-    from scripts.run_audit_mongo_business import run_mongo_audit
+    from scripts.run_audit_mongo_business import run_mongo_audit  # type: ignore[import-not-found,import-untyped]
 
     test_args = ["run_audit_mongo_business.py", "--data-path", "non_existent_dataset_12345.json"]
     with patch.object(sys, "argv", test_args):
@@ -212,7 +218,7 @@ def test_fixture_csv_relocated():
 def test_nobranding_contamination_in_codebase():
     """Verify zero occurrences of 'nexabi' case-insensitively across all project source code."""
     root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    ignored_dirs = {".git", "node_modules", "dist", ".agents", "__pycache__", ".vscode", "graft", ".cache"}
+    ignored_dirs = {".git", "node_modules", "dist", ".agents", "__pycache__", ".vscode", "graft", ".cache", "scratch", "venv", ".venv"}
     checked_exts = {".py", ".ts", ".tsx", ".html", ".css", ".json"}
 
     violations = []

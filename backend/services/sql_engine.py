@@ -3,7 +3,7 @@ import re
 import sys
 import time
 import requests
-from typing import Tuple, Dict, Any, List
+from typing import Tuple, Dict, Any, List, Optional
 
 # Ensure backend directory is in sys.path for models/crypto imports
 backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -120,13 +120,14 @@ def validate_read_only_sql(sql_query: str) -> Tuple[bool, str]:
     1. Rejects DDL / DML write keywords (INSERT, UPDATE, DELETE, DROP, ALTER, etc.).
     2. Rejects statement chaining via semicolons to prevent stacked query injection.
     3. Requires statement to start with SELECT or WITH (for CTEs leading to SELECT).
+    4. Rejects file writes (INTO OUTFILE/DUMPFILE), administrative calls, and copy commands.
     """
     if not sql_query or not sql_query.strip():
         return False, "Query cannot be empty."
 
-    # Strip inline comments
-    clean_sql = re.sub(r'--.*$', '', sql_query, flags=re.MULTILINE)
-    clean_sql = re.sub(r'/\*.*?\*/', '', clean_sql, flags=re.DOTALL).strip()
+    # Strip inline comments (replacing with a space to prevent token-stitching tricks)
+    clean_sql = re.sub(r'--.*$', ' ', sql_query, flags=re.MULTILINE)
+    clean_sql = re.sub(r'/\*.*?\*/', ' ', clean_sql, flags=re.DOTALL).strip()
 
     # Check for trailing semicolon and internal semicolons
     semicolon_count = clean_sql.count(';')
@@ -140,11 +141,123 @@ def validate_read_only_sql(sql_query: str) -> Tuple[bool, str]:
     if not (upper_sql.startswith("SELECT") or upper_sql.startswith("WITH")):
         return False, "Only read-only SELECT or WITH (CTE) queries are permitted."
 
-    # Forbidden DDL / DML / Admin operations
-    forbidden_pattern = r'\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|RENAME|GRANT|REVOKE|REPLACE|EXEC|EXECUTE|SHUTDOWN|MERGE|UPSERT|ATTACH|DETACH)\b'
+    # Forbidden DDL / DML / Admin operations (including inside CTEs and subqueries)
+    forbidden_pattern = (
+        r'\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|RENAME|GRANT|REVOKE|'
+        r'REPLACE|EXEC|EXECUTE|SHUTDOWN|MERGE|UPSERT|ATTACH|DETACH|INTO|CALL|'
+        r'DECLARE|COPY|LOAD|OUTFILE|DUMPFILE|PRAGMA)\b'
+    )
     match = re.search(forbidden_pattern, upper_sql)
     if match:
         return False, f"Forbidden keyword detected: '{match.group(1)}'. Read-only SELECT operations only."
+
+    return True, ""
+
+
+def extract_sql_referenced_tables(clean_sql: str) -> List[str]:
+    """
+    Extracts all physical table identifiers referenced in a SQL query using sqlglot AST parsing.
+    Correctly handles:
+    - Comma joins: SELECT * FROM t1, t2
+    - Quoted/backticked identifiers: SELECT * FROM `users`, "orders"
+    - Schema-qualified names: SELECT * FROM public.users
+    - Subqueries: SELECT * FROM (SELECT * FROM sub_tbl) s
+    - UNION / INTERSECT / EXCEPT
+    - CTEs: WITH cte AS (SELECT * FROM base_tbl) SELECT * FROM cte -> correctly returns ['base_tbl'], ignoring cte alias
+    Falls back to regex if AST parsing fails.
+    """
+    try:
+        import sqlglot
+        from sqlglot import exp
+
+        parsed = None
+        for d in [None, "mysql", "postgres", "sqlite"]:
+            try:
+                parsed = sqlglot.parse_one(clean_sql, read=d)
+                break
+            except Exception:
+                continue
+
+        if parsed:
+            ctes = set()
+            for cte in parsed.find_all(exp.CTE):
+                if cte.alias_or_name:
+                    ctes.add(cte.alias_or_name.lower().strip())
+
+            tables = set()
+            for t in parsed.find_all(exp.Table):
+                name = t.name.lower().strip()
+                if name and name not in ctes and not name.startswith("safe_limit_wrapper"):
+                    tables.add(name)
+                    if t.db:
+                        tables.add(f"{t.db.lower().strip()}.{name}")
+            return sorted(list(tables))
+    except Exception:
+        pass
+
+    # Regex fallback
+    cte_names = set()
+    cte_matches = re.findall(r'\b(?:WITH|,)\s+([a-zA-Z0-9_]+)\s+AS\s*\(', clean_sql, re.IGNORECASE)
+    for cte in cte_matches:
+        cte_names.add(cte.lower().strip())
+
+    table_pattern = r'\b(?:FROM|JOIN|TABLE)\s+[`"\[]?(?:([a-zA-Z0-9_]+)[`"\]]?\.)?[`"\[]?([a-zA-Z0-9_]+)[`"\]]?'
+    matches = re.findall(table_pattern, clean_sql, re.IGNORECASE)
+
+    extracted = set()
+    for schema_part, tbl_part in matches:
+        tbl = tbl_part.lower().strip()
+        if tbl and tbl not in cte_names and not tbl.startswith("safe_limit_wrapper"):
+            extracted.add(tbl)
+            if schema_part:
+                extracted.add(f"{schema_part.lower().strip()}.{tbl}")
+
+    return sorted(list(extracted))
+
+
+def validate_widget_sql(sql_query: str, allowed_tables: Optional[List[str]] = None) -> Tuple[bool, str]:
+    """
+    Strict deterministic SQL validation for embeddable chatbot widget:
+    1. Runs full validate_read_only_sql checks (read-only, no DDL/DML, single statement).
+    2. Enforces table allowlist (if specified and non-empty).
+    3. Blocks access to system catalog tables (pg_*, sqlite_*, information_schema, sys, etc.).
+    4. Detects CTE trickery, UNION to disallowed tables, and stacked injection attempts.
+    """
+    is_valid, reason = validate_read_only_sql(sql_query)
+    if not is_valid:
+        return False, reason
+
+    clean_sql = re.sub(r'--.*$', ' ', sql_query, flags=re.MULTILINE)
+    clean_sql = re.sub(r'/\*.*?\*/', ' ', clean_sql, flags=re.DOTALL).strip()
+    upper_sql = clean_sql.upper()
+
+    # System table protections
+    system_table_patterns = [
+        r'\bPG_\w+',
+        r'\bPG_CATALOG\b',
+        r'\bINFORMATION_SCHEMA\b',
+        r'\bSQLITE_MASTER\b',
+        r'\bSQLITE_SCHEMA\b',
+        r'\bSQLITE_TEMP_MASTER\b',
+        r'\bSQLITE_SEQUENCE\b',
+        r'\bMYSQL\.\w+',
+        r'\bPERFORMANCE_SCHEMA\b',
+        r'\bSYS\.\w+',
+        r'\bSYSOBJECTS\b',
+        r'\bSYSCOLUMNS\b'
+    ]
+    for pattern in system_table_patterns:
+        if re.search(pattern, upper_sql, re.IGNORECASE):
+            return False, "Access to system catalog tables is prohibited."
+
+    # If allowed_tables is provided and non-empty, verify all referenced tables
+    if allowed_tables:
+        allowed_set = {t.lower().strip() for t in allowed_tables}
+        referenced_tables = extract_sql_referenced_tables(clean_sql)
+        for tbl in referenced_tables:
+            base_tbl = tbl.split('.')[-1]
+            if tbl not in allowed_set and base_tbl not in allowed_set:
+                return False, f"Access to table '{tbl}' is not permitted for this widget key."
 
     return True, ""
 
@@ -242,6 +355,56 @@ def generate_sql_from_nl(db_conn: models.DatabaseConnection, user_question: str,
     }
 
 
+PII_COLUMN_PATTERNS = [
+    r'password', r'passwd', r'secret', r'token', r'ssn', r'credit_card',
+    r'card_number', r'cvv', r'api_key', r'auth_token', r'private_key'
+]
+
+
+def mask_pii_rows(columns: Any, rows: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+    """
+    Masks values in columns containing sensitive PII keywords with '[REDACTED]'.
+    Can be called either as mask_pii_rows(rows) or mask_pii_rows(columns, rows).
+    """
+    if rows is None:
+        row_list = columns if isinstance(columns, list) else []
+        if not row_list:
+            return []
+        col_list = set()
+        for r in row_list:
+            if isinstance(r, dict):
+                col_list.update(r.keys())
+    else:
+        row_list = rows
+        if columns:
+            col_list = set(columns)
+        else:
+            col_list = set()
+            for r in row_list:
+                if isinstance(r, dict):
+                    col_list.update(r.keys())
+
+    pii_cols = set()
+    for col in col_list:
+        col_lower = str(col).lower()
+        if any(re.search(pat, col_lower) for pat in PII_COLUMN_PATTERNS):
+            pii_cols.add(col)
+
+    if not pii_cols:
+        return row_list
+
+    masked_rows = []
+    for r in row_list:
+        masked_r = {}
+        for k, v in r.items():
+            if k in pii_cols:
+                masked_r[k] = "[REDACTED]"
+            else:
+                masked_r[k] = v
+        masked_rows.append(masked_r)
+    return masked_rows
+
+
 def _make_json_serializable(val: Any) -> Any:
     """Helper to ensure all SQL result values are standard JSON serializable."""
     if val is None:
@@ -254,7 +417,8 @@ def _make_json_serializable(val: Any) -> Any:
 def execute_safe_sql(db_conn: models.DatabaseConnection, sql_query: str, max_rows: int = 100) -> Dict[str, Any]:
     """
     Validates, caps with LIMIT max_rows, and safely executes a read-only SQL query
-    against the target database. Returns structured columns, rows, count, and execution time.
+    against the target database. Enforces statement timeout, read-only mode, and PII masking.
+    Returns structured columns, rows, count, and execution time.
     """
     is_valid, reason = validate_read_only_sql(sql_query)
     if not is_valid:
@@ -278,18 +442,46 @@ def execute_safe_sql(db_conn: models.DatabaseConnection, sql_query: str, max_row
     start_time = time.time()
 
     if connection_url:
+        connect_args = {}
+        db_type = (db_conn.db_type or "").lower()
+        if "sqlite" in db_type:
+            connect_args = {"timeout": 10}
+        elif "postgres" in db_type:
+            connect_args = {"options": "-c statement_timeout=10000"}
+        elif "mysql" in db_type or "mariadb" in db_type:
+            connect_args = {"connect_timeout": 10}
+
+        def _apply_dialect_guardrails(conn_handle):
+            try:
+                if "sqlite" in db_type:
+                    conn_handle.execute(text("PRAGMA query_only = ON;"))
+                elif "postgres" in db_type:
+                    conn_handle.execute(text("SET statement_timeout = 10000;"))
+                    conn_handle.execute(text("SET TRANSACTION READ ONLY;"))
+                elif "mysql" in db_type or "mariadb" in db_type:
+                    try:
+                        conn_handle.execute(text("SET SESSION max_execution_time = 10000;"))
+                    except Exception:
+                        pass
+                    conn_handle.execute(text("SET TRANSACTION READ ONLY;"))
+            except Exception:
+                pass
+
         try:
-            engine = create_engine(connection_url, poolclass=NullPool)
+            engine = create_engine(connection_url, poolclass=NullPool, connect_args=connect_args)
             with engine.connect() as conn:
+                _apply_dialect_guardrails(conn)
+
                 result = conn.execute(text(capped_sql))
                 columns = list(result.keys())
                 raw_rows = result.fetchall()
-                
+
                 rows = [
                     {col: _make_json_serializable(val) for col, val in zip(columns, row)}
                     for row in raw_rows
                 ]
-                
+                rows = mask_pii_rows(columns, rows)
+
             engine.dispose()
             exec_time_ms = round((time.time() - start_time) * 1000, 2)
             return {
@@ -301,8 +493,9 @@ def execute_safe_sql(db_conn: models.DatabaseConnection, sql_query: str, max_row
         except SQLAlchemyError as sqle:
             # If subquery wrapper fails on specific DB syntax, try direct LIMIT append
             try:
-                engine = create_engine(connection_url, poolclass=NullPool)
+                engine = create_engine(connection_url, poolclass=NullPool, connect_args=connect_args)
                 with engine.connect() as conn:
+                    _apply_dialect_guardrails(conn)
                     fallback_capped = f"{clean_sql} LIMIT {max_rows}"
                     result = conn.execute(text(fallback_capped))
                     columns = list(result.keys())
@@ -311,6 +504,7 @@ def execute_safe_sql(db_conn: models.DatabaseConnection, sql_query: str, max_row
                         {col: _make_json_serializable(val) for col, val in zip(columns, row)}
                         for row in raw_rows
                     ]
+                    rows = mask_pii_rows(columns, rows)
                 engine.dispose()
                 exec_time_ms = round((time.time() - start_time) * 1000, 2)
                 return {
@@ -327,7 +521,7 @@ def execute_safe_sql(db_conn: models.DatabaseConnection, sql_query: str, max_row
     # Fallback simulated data execution for non-relational or simulated DBs
     time.sleep(0.05)  # Simulate brief processing delay
     exec_time_ms = round((time.time() - start_time) * 1000, 2)
-    
+
     mock_columns = ["id", "name", "email", "role", "created_at"]
     mock_rows = [
         {"id": 101, "name": "Alice Smith", "email": "alice@example.com", "role": "Admin", "created_at": "2026-01-15 10:30:00"},
@@ -337,7 +531,7 @@ def execute_safe_sql(db_conn: models.DatabaseConnection, sql_query: str, max_row
     ]
     return {
         "columns": mock_columns,
-        "rows": mock_rows,
+        "rows": mask_pii_rows(mock_columns, mock_rows),
         "row_count": len(mock_rows),
         "execution_time_ms": exec_time_ms
     }

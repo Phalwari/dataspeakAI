@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Host Fixture: 62.5% Root Font & div:empty hidden</title>
+  <style>
+    /* 1. Host scales 1rem to 10px */
+    html {
+      font-size: 62.5% !important;
+    }
+    body {
+      font-size: 1.6rem;
+      padding: 40px;
+    }
+    /* 2. Host theme attempts to collapse any empty div (host shadow host appears empty to external DOM) */
+    div:empty {
+      display: none !important;
+      visibility: hidden !important;
+    }
+  </style>
+</head>
+<body>
+  <h1>Host with 62.5% Font Root & div:empty { display: none }</h1>
+  <p>The widget must remain visible and correctly scaled (in px) despite this aggressive host rule.</p>
+
+  <script src="http://localhost:8000/widget.js" data-key="pk_live_testfixturekey1234567890123" async></script>
+</body>
+</html>

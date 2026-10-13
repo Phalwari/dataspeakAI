@@ -242,7 +242,7 @@ export function BusinessInsightsPage() {
   }, [selectedConnection, connections, headers]);
 
   // 6-Layer Enterprise Database Pipeline Animation (Only on explicit Run or Refresh)
-  const triggerAnalysisAnimation = useCallback((onFinish) => {
+  const triggerAnalysisAnimation = useCallback((onFinish?: () => void) => {
     setAutoGenerateStep('analyzing');
     setAgAnalysisStep(0);
     const interval = setInterval(() => {
@@ -268,7 +268,7 @@ export function BusinessInsightsPage() {
 
     let animationDone = false;
     let pipelineDone = false;
-    let fetchedData = null;
+    let fetchedData: any = null;
 
     const animInterval = triggerAnalysisAnimation(() => {
       animationDone = true;
@@ -295,27 +295,27 @@ export function BusinessInsightsPage() {
         setAutoGenerateStep(null);
         setLoading(false);
       }
-    } catch (err) {
+    } catch (err: any) {
       clearInterval(animInterval);
       setAutoGenerateStep(null);
       setLoading(false);
-      setError(err.message || 'Failed to analyze database');
+      setError(err?.message || 'Failed to analyze database');
     }
   };
 
   // CLIENT-SIDE INSTANT Table Scope Switcher (0ms response, 0 API calls, 0 LLM tokens burned!)
-  const handleSelectTableScope = (tbl) => {
+  const handleSelectTableScope = (tbl: string) => {
     setActiveTable(tbl);
     // Instant client-side filtering without burning tokens!
   };
 
   // CLIENT-SIDE INSTANT Date Presets handler (0ms response, instant smooth rechart animation!)
-  const handleApplyPreset = (id) => {
+  const handleApplyPreset = (id: any) => {
     setPreset(id);
   };
 
   // Interactive Drilldown Drawer Opener
-  const handleOpenDrilldown = async (chartOrMetric, label, tableOverride) => {
+  const handleOpenDrilldown = async (chartOrMetric?: any, label?: any, tableOverride?: string) => {
     const targetTable = tableOverride || chartOrMetric?.table || activeTable || (availableTables[0] || 'Invoice');
     const field = chartOrMetric?.x_field || chartOrMetric?.xKey || chartOrMetric?.x_column || chartOrMetric?.column || 'id';
 
@@ -346,15 +346,15 @@ export function BusinessInsightsPage() {
       });
       if (!res.ok) throw new Error('No matching records could be retrieved for this point.');
       const j = await res.json();
-      setDrilldown((d) => d && { ...d, rows: j.rows || [], loading: false });
-    } catch (e) {
-      setDrilldown((d) => d && { ...d, loading: false, error: e.message });
+      setDrilldown((d: any) => d && { ...d, rows: j.rows || [], loading: false });
+    } catch (e: any) {
+      setDrilldown((d: any) => d && { ...d, loading: false, error: e?.message || 'Error loading records' });
     }
   };
 
   // Close drilldown on Escape key
   useEffect(() => {
-    const esc = (e) => {
+    const esc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setDrilldown(null);
     };
     window.addEventListener('keydown', esc);
@@ -370,7 +370,7 @@ export function BusinessInsightsPage() {
       // Temporarily hide action buttons during screenshot
       const hideElems = dashboardElem.querySelectorAll('.no-export');
       hideElems.forEach((el) => {
-        el.style.visibility = 'hidden';
+        (el as HTMLElement).style.visibility = 'hidden';
       });
 
       const canvas = await html2canvas(dashboardElem, {
@@ -384,7 +384,7 @@ export function BusinessInsightsPage() {
 
       // Restore action buttons
       hideElems.forEach((el) => {
-        el.style.visibility = 'visible';
+        (el as HTMLElement).style.visibility = 'visible';
       });
 
       const cleanName = (activeConnName || 'Dashboard').replace(/[^a-zA-Z0-9]/g, '_');
@@ -414,7 +414,7 @@ export function BusinessInsightsPage() {
   // Check if any chart or dimension actually contains a time-series or date/time column!
   const hasTimeSeriesData = useMemo(() => {
     if (!rawCharts || rawCharts.length === 0) return false;
-    return rawCharts.some((c) => {
+    return rawCharts.some((c: any) => {
       const type = (c.type || '').toLowerCase();
       if (type === 'line' || type === 'area') return true;
       const xCol = (c.x_column || c.x_field || c.xKey || '').toLowerCase();
@@ -434,13 +434,13 @@ export function BusinessInsightsPage() {
 
     // Filter by table scope if specific table selected
     if (activeTable) {
-      const tableMatches = result.filter(c => c.table?.toLowerCase() === activeTable.toLowerCase());
+      const tableMatches = result.filter((c: any) => c.table?.toLowerCase() === activeTable.toLowerCase());
       if (tableMatches.length > 0) result = tableMatches;
     }
 
     // Filter by date horizon preset if time series exists
     if (preset !== 'all' && hasTimeSeriesData) {
-      result = result.map((c) => {
+      result = result.map((c: any) => {
         const type = (c.type || '').toLowerCase();
         if (type === 'line' || type === 'area') {
           const rawData = c.data || [];
@@ -465,22 +465,22 @@ export function BusinessInsightsPage() {
 
     // Filter by table scope if specific table selected
     if (activeTable) {
-      const tableMatches = result.filter(k => k.table?.toLowerCase() === activeTable.toLowerCase());
+      const tableMatches = result.filter((k: any) => k.table?.toLowerCase() === activeTable.toLowerCase());
       if (tableMatches.length > 0) result = tableMatches;
     }
 
     // Recalculate KPI numbers when Horizon preset changes!
     if (preset !== 'all' && hasTimeSeriesData) {
-      const allTimeData = rawCharts.find(c => c.type === 'line' || c.type === 'area')?.data || [];
+      const allTimeData = rawCharts.find((c: any) => c.type === 'line' || c.type === 'area')?.data || [];
       if (allTimeData.length > 0) {
-        const allSum = allTimeData.reduce((acc, d) => acc + Number(d.value || 0), 0);
+        const allSum = allTimeData.reduce((acc: number, d: any) => acc + Number(d.value || 0), 0);
         const count = preset === '7d' ? 1 : preset === '30d' ? 2 : 4;
         const sliced = allTimeData.slice(-Math.min(allTimeData.length, count));
-        const slicedSum = sliced.reduce((acc, d) => acc + Number(d.value || 0), 0);
+        const slicedSum = sliced.reduce((acc: number, d: any) => acc + Number(d.value || 0), 0);
         const ratio = allSum > 0 ? slicedSum / allSum : (preset === '7d' ? 0.08 : preset === '30d' ? 0.22 : 0.5);
         const periodText = preset === '7d' ? 'last 7 days' : preset === '30d' ? 'last 30 days' : 'last 90 days';
 
-        result = result.map((k) => {
+        result = result.map((k: any) => {
           const labelLower = (k.label || '').toLowerCase();
           // Monetary metric (Revenue, Sales, Spend):
           if (labelLower.includes('revenue') || labelLower.includes('sales') || labelLower.includes('spend')) {
@@ -524,12 +524,12 @@ export function BusinessInsightsPage() {
   }, [baseKpis, activeTable, preset, hasTimeSeriesData, rawCharts]);
 
   // Dynamically derive Period Comparison from Time-Series Chart data & KPIs
-  const timeSeriesChart = charts.find((c) => c.type === 'line' || c.type === 'area') || charts[0];
+  const timeSeriesChart = charts.find((c: any) => c.type === 'line' || c.type === 'area') || charts[0];
   const periodComparisonData = useMemo(() => {
     if (pipelineData?.trends && pipelineData.trends.length >= 3) {
       return pipelineData.trends;
     }
-    const rows = [];
+    const rows: any[] = [];
     if (timeSeriesChart && Array.isArray(timeSeriesChart.data) && timeSeriesChart.data.length >= 2) {
       const d = timeSeriesChart.data;
       const cur = d[d.length - 1];
@@ -560,7 +560,7 @@ export function BusinessInsightsPage() {
 
       if (d.length >= 3) {
         const recent3 = d.slice(-3);
-        const avg3 = recent3.reduce((acc, x) => acc + Number(x.value ?? x.y ?? 0), 0) / 3;
+        const avg3 = recent3.reduce((acc: number, x: any) => acc + Number(x.value ?? x.y ?? 0), 0) / 3;
         const baselineDiff = avg3 !== 0 ? ((cVal - avg3) / avg3) * 100 : 0;
         rows.push({
           metric: '3-Period Baseline Average',
@@ -574,8 +574,8 @@ export function BusinessInsightsPage() {
 
     // Complement with top KPIs to maintain balanced rows
     if (rows.length < 4 && kpis && kpis.length > 0) {
-      kpis.forEach((k) => {
-        if (rows.length < 4 && !rows.find((r) => r.metric.toLowerCase().includes(k.label.toLowerCase()))) {
+      kpis.forEach((k: any) => {
+        if (rows.length < 4 && !rows.find((r: any) => r.metric.toLowerCase().includes(k.label.toLowerCase()))) {
           const numVal = parseFloat(String(k.value).replace(/[^0-9.-]/g, '')) || 0;
           const trendPct = typeof k.trend_pct === 'number' ? k.trend_pct : 4.8;
           const prevVal = trendPct !== -100 ? numVal / (1 + trendPct / 100) : numVal;
@@ -595,7 +595,7 @@ export function BusinessInsightsPage() {
 
   // Dynamically derive Top Performers from Categorical Charts
   const topPerformerCharts = useMemo(() => {
-    return charts.filter((c) => c.type === 'bar' || c.type === 'donut' || c.type === 'pie');
+    return charts.filter((c: any) => c.type === 'bar' || c.type === 'donut' || c.type === 'pie');
   }, [charts]);
 
   const activeTopPerformer = topPerformerCharts[activeTopPerformerCategory] || topPerformerCharts[0];
@@ -606,7 +606,7 @@ export function BusinessInsightsPage() {
 
   const maxPerformerVal = useMemo(() => {
     if (!topPerformerRows.length) return 1;
-    return Math.max(1, ...topPerformerRows.map((r) => Number(r.value || r.count || 0)));
+    return Math.max(1, ...topPerformerRows.map((r: any) => Number(r.value || r.count || 0)));
   }, [topPerformerRows]);
 
   // Filtered rows inside drilldown drawer
@@ -614,7 +614,7 @@ export function BusinessInsightsPage() {
     if (!drilldown?.rows) return [];
     if (!drillSearch.trim()) return drilldown.rows;
     const term = drillSearch.toLowerCase();
-    return drilldown.rows.filter((row) =>
+    return drilldown.rows.filter((row: any) =>
       Object.values(row).some((val) => String(val).toLowerCase().includes(term))
     );
   }, [drilldown, drillSearch]);
@@ -1190,14 +1190,14 @@ export function BusinessInsightsPage() {
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 230px), 1fr))', gap: '14px' }}>
-              {kpis.map((kpi, idx) => {
+              {kpis.map((kpi: any, idx: number) => {
                 const isExpanded = expandedKpi === idx;
                 const accentColor = KPI_ACCENTS[idx % KPI_ACCENTS.length];
                 const isUp = kpi.trend_direction === 'up';
                 const isDown = kpi.trend_direction === 'down';
 
                 // Find matching sparkline dataset from charts
-                const matchingChart = charts.find((c) => c.table === kpi.table && Array.isArray(c.data) && c.data.length > 2) || timeSeriesChart;
+                const matchingChart = charts.find((c: any) => c.table === kpi.table && Array.isArray(c.data) && c.data.length > 2) || timeSeriesChart;
                 const sparkData = matchingChart?.data ? matchingChart.data.slice(-8) : [];
 
                 return (
@@ -1302,7 +1302,7 @@ export function BusinessInsightsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {periodComparisonData.map((t, i) => {
+                    {periodComparisonData.map((t: any, i: number) => {
                       const isPositive = (t.change_pct ?? 0) >= 0;
                       return (
                         <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
@@ -1341,7 +1341,7 @@ export function BusinessInsightsPage() {
 
                 {topPerformerCharts.length > 1 && (
                   <div style={{ display: 'flex', gap: '6px' }}>
-                    {topPerformerCharts.map((c, idx) => (
+                    {topPerformerCharts.map((c: any, idx: number) => (
                       <button
                         key={idx}
                         className={`chip ${activeTopPerformerCategory === idx ? 'active' : ''}`}
@@ -1357,7 +1357,7 @@ export function BusinessInsightsPage() {
 
               {topPerformerRows.length > 0 ? (
                 <div>
-                  {topPerformerRows.map((p, idx) => {
+                  {topPerformerRows.map((p: any, idx: number) => {
                     const pVal = Number(p.value || p.count || 0);
                     const pName = p.name || p.x || p.category || `Item ${idx + 1}`;
                     const pct = Math.min(100, Math.max(5, (pVal / maxPerformerVal) * 100));
@@ -1406,7 +1406,7 @@ export function BusinessInsightsPage() {
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 460px), 1fr))', gap: '18px' }}>
-              {charts.map((c, idx) => {
+              {charts.map((c: any, idx: number) => {
                 const chartType = (c.type || 'bar').toLowerCase();
                 const chartData = c.data || [];
                 const color = c.color || PALETTE[idx % PALETTE.length];
@@ -1432,7 +1432,7 @@ export function BusinessInsightsPage() {
                         {chartType === 'line' || chartType === 'area' ? (
                           <AreaChart
                             data={chartData}
-                            onClick={(e) => {
+                            onClick={(e: any) => {
                               if (e && e.activeLabel != null) {
                                 handleOpenDrilldown(c, e.activeLabel);
                               }
@@ -1461,10 +1461,10 @@ export function BusinessInsightsPage() {
                               innerRadius={chartType === 'donut' ? 52 : 0}
                               outerRadius={84}
                               paddingAngle={2}
-                              onClick={(entry) => handleOpenDrilldown(c, entry.name || entry.category)}
+                              onClick={(entry: any) => handleOpenDrilldown(c, entry?.name || entry?.category)}
                               cursor="pointer"
                             >
-                              {chartData.map((_, i) => (
+                              {chartData.map((_: any, i: number) => (
                                 <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
                               ))}
                             </Pie>
@@ -1472,7 +1472,7 @@ export function BusinessInsightsPage() {
                         ) : (
                           <BarChart
                             data={chartData}
-                            onClick={(e) => {
+                            onClick={(e: any) => {
                               if (e && e.activeLabel != null) {
                                 handleOpenDrilldown(c, e.activeLabel);
                               }
@@ -1539,7 +1539,7 @@ export function BusinessInsightsPage() {
                     </span>
                   </div>
                   <div style={{ fontSize: '12.5px', color: darkMode ? '#CBD5E1' : '#475569', lineHeight: 1.5 }}>
-                    {anomalies.map((a, i) => (
+                    {anomalies.map((a: any, i: number) => (
                       <span key={i}>
                         <strong style={{ color: darkMode ? '#FCD34D' : '#B45309' }}>{a.table} · {a.field}:</strong> {a.deviation || `Peak transaction deviates sharply from expected baseline average.`}
                         {i < anomalies.length - 1 ? ' | ' : ''}
@@ -1562,7 +1562,7 @@ export function BusinessInsightsPage() {
                   gap: '6px',
                   background: darkMode ? 'rgba(217, 119, 6, 0.08)' : '#FEF3C7'
                 }}
-                onClick={() => handleOpenDrilldown({ title: anomalies[0].field, table: anomalies[0].table }, 'All')}
+                onClick={() => handleOpenDrilldown({ title: anomalies[0]?.field, table: anomalies[0]?.table }, 'All')}
               >
                 <Search size={13} /> Inspect Outlier Records →
               </button>
@@ -1594,7 +1594,7 @@ export function BusinessInsightsPage() {
                 gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 330px), 1fr))',
                 gap: '16px'
               }}>
-                {insights.map((n, i) => {
+                {insights.map((n: any, i: number) => {
                   const REC_COLORS = ['#6C63FF', '#00C2CB', '#10B981', '#F59E0B', '#EC4899'];
                   const accent = REC_COLORS[i % REC_COLORS.length];
                   const isHigh = (n.impact || '').toLowerCase() === 'high';
@@ -1803,7 +1803,7 @@ export function BusinessInsightsPage() {
                       Showing {filteredDrillRows.length} matching database rows:
                     </div>
 
-                    {filteredDrillRows.map((row, rIdx) => (
+                    {filteredDrillRows.map((row: any, rIdx: number) => (
                       <div
                         key={rIdx}
                         style={{

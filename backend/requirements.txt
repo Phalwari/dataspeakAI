@@ -37,3 +37,4 @@ flower
 groq
 langchain-groq
 pymongo
+sqlglot

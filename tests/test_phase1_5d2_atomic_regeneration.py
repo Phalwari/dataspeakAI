@@ -455,9 +455,9 @@ def test_10_no_join_is_generated(atomic_db):
     kpi = persisted[0]
     req = MetricRequest(
         connection_id=conn1.id,
-        target_ref=kpi.target_column,
-        aggregation=kpi.aggregation_function,
-        dimension_ref=kpi.dimension_column,
+        target_ref=str(kpi.target_column or ""),
+        aggregation=str(kpi.aggregation_function or "SUM"),
+        dimension_ref=str(kpi.dimension_column) if kpi.dimension_column else None,
         tenant_id=1,
     )
 

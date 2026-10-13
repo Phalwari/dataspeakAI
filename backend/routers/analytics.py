@@ -722,7 +722,7 @@ def execute_unified_source_query(
     if source_type == "database":
         return execute_dashboard_query(
             connection_id=source_id,
-            query_req=query_req,
+            req=query_req,
             current_user=current_user,
             db=db,
         )
@@ -754,7 +754,7 @@ def execute_unified_source_query(
 
         target = query_req.target_column
         dim = query_req.dimension_column
-        agg = query_req.aggregation.upper()
+        agg = (query_req.aggregation or "SUM").upper()
 
         if rows and target:
             grouped: dict[str, list[float]] = {}

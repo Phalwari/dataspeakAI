@@ -174,9 +174,11 @@ backend/
     ├── users.py                       # /api/auth (Register, Login, OAuth, OTP, Password Reset)
     ├── tenants.py                     # /api/tenant (Profile, Members, Invites)
     ├── databases.py                   # /api/databases (CRUD, Introspection, 100-row preview)
-    ├── api_keys.py                    # /api/keys (Key Creation, Listing, Revocation, Deletion)
+    ├── api_keys.py                    # /api/keys (Key Creation, Listing, Revocation, Deletion, Widget Keys)
     ├── chatbot_config.py              # /api/chatbot-config (Get & Update Widget Settings)
-    └── documents.py                   # /api/documents (Upload, FAISS Vector Search, Delete)
+    ├── documents.py                   # /api/documents (Upload, FAISS Vector Search, Delete)
+    ├── chat.py                        # /api/chat (Conversations, Messages, Widget Chat)
+    └── widget.py                      # /api/widget (Session, Config, Chat SSE, Embed Page)
 ```
 
 ---
@@ -247,6 +249,14 @@ backend/
 > 1. **Disable Auto-Seeding on Startup:** In [`backend/main.py`](file:///d:/dataspeak/backend/main.py), remove or comment out the `seed_superadmin()` block (or gate it behind `ENVIRONMENT != "production"`).
 > 2. **Remove Quick-Fill Button on UI:** In [`src/app/pages/LoginPage.tsx`](file:///d:/dataspeak/src/app/pages/LoginPage.tsx), remove the `<div className="mb-4 p-3 bg-blue-50/80...">` Default Admin auto-fill card.
 > 3. **Delete/Update Default DB Credentials:** In the production database, either delete the user `admin@dataspeak.ai` or change its password to a cryptographically secure value via your secrets manager.
+
+### 4.6 Standalone Chatbot Widget Security & Authentication Standard
+
+* **Publishable Key Standard (`pk_live_...`):** Standalone widget scripts embedded on host websites must use a publishable key (`pk_live_...`), never an internal secret API key.
+* **Origin-Checked HMAC Handshake:** Browser visitors initiate conversation via `POST /api/widget/session`. The server strictly validates `Origin` (falling back to `Referer`) against the key's `allowed_origins` list before signing an HMAC session token (valid 60 minutes).
+* **Strict Tenant Extraction:** In all widget chat routes (`POST /api/widget/chat`, `POST /api/chat/widget`), `tenant_id` is extracted strictly from cryptographically verified HMAC session claims, never from client request bodies or LLM prompts.
+* **Rate Limiting & Streaming Caps:** All widget endpoints enforce token bucket rate limits (per key, per IP, per session) returning `429 Too Many Requests` with `Retry-After`. SSE streaming enforces a concurrent stream limit per key to protect ASGI server connection pools.
+* **Data-Access Guardrails:** Widget queries default to safe RAG retrieval (`allow_sql = False`). If SQL is explicitly enabled, queries are bounded to `allowed_database_ids`, validated deterministically (SELECT-only, no multi-statement, no catalog access), row capped at 100 preview rows, executed with query timeouts, and columns masked for sensitive PII. Visitors receive summarized natural language answers, never raw database connection credentials or schema dumps.
 
 ---
 

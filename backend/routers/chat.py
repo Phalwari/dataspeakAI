@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 import os
@@ -576,3 +576,14 @@ def chat_endpoint(
         sql_data=sql_response_obj,
         created_at=assistant_msg.created_at
     )
+
+
+@router.post("/chat/widget", response_model=schemas.WidgetChatResponse)
+def widget_chat_endpoint(
+    req: schemas.WidgetChatRequest,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    from routers.widget import process_widget_chat
+    return process_widget_chat(req, request, db)
+

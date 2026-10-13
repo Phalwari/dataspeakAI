@@ -47,7 +47,12 @@ MIGRATION_COLUMNS = [
     ("database_connections", "description", "VARCHAR", "VARCHAR(500)"),
     # Tenant subscription plan column
     ("tenants", "plan", "VARCHAR DEFAULT 'Starter'", "VARCHAR(50) DEFAULT 'Starter'"),
+    # Query log source column
+    ("query_logs", "source", "VARCHAR DEFAULT 'web'", "VARCHAR(50) DEFAULT 'web'"),
+    # Widget key table allowlist column
+    ("widget_keys", "allowed_tables", "JSON", "JSONB"),
 ]
+
 
 
 def run_schema_migrations(engine: Engine) -> None:

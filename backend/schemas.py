@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, model_validator, Field
+from pydantic import BaseModel, EmailStr, model_validator, field_validator, Field
 from typing import Optional, List, Any, Dict
 from datetime import datetime
 
@@ -161,6 +161,89 @@ class ApiKeyResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class WidgetKeyCreate(BaseModel):
+    name: str = "Default Widget Key"
+    allowed_origins: List[str]
+    monthly_message_cap: Optional[int] = 1000
+    allow_sql: Optional[bool] = False
+    allowed_database_ids: Optional[List[int]] = []
+    allowed_tables: Optional[List[str]] = []
+
+    @field_validator("allowed_origins")
+    @classmethod
+    def validate_allowed_origins(cls, v: List[str]) -> List[str]:
+        if not v:
+            raise ValueError("allowed_origins cannot be empty")
+        cleaned = []
+        for o in v:
+            origin_str = str(o).strip()
+            if origin_str == "*":
+                raise ValueError("Wildcard origins ('*') are strictly disallowed for widget security")
+            if not (origin_str.startswith("http://") or origin_str.startswith("https://")):
+                raise ValueError(f"Origin '{origin_str}' must start with http:// or https://")
+            cleaned.append(origin_str.rstrip("/"))
+        return cleaned
+
+class WidgetKeyUpdate(BaseModel):
+    name: Optional[str] = None
+    allowed_origins: Optional[List[str]] = None
+    enabled: Optional[bool] = None
+    monthly_message_cap: Optional[int] = None
+    allow_sql: Optional[bool] = None
+    allowed_database_ids: Optional[List[int]] = None
+    allowed_tables: Optional[List[str]] = None
+
+    @field_validator("allowed_origins")
+    @classmethod
+    def validate_allowed_origins(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        if v is None:
+            return v
+        cleaned = []
+        for o in v:
+            origin_str = str(o).strip()
+            if origin_str == "*":
+                raise ValueError("Wildcard origins ('*') are strictly disallowed for widget security")
+            if not (origin_str.startswith("http://") or origin_str.startswith("https://")):
+                raise ValueError(f"Origin '{origin_str}' must start with http:// or https://")
+            cleaned.append(origin_str.rstrip("/"))
+        return cleaned
+
+class WidgetKeyResponse(BaseModel):
+    id: int
+    tenant_id: int
+    public_key: str
+    name: str
+    allowed_origins: List[str]
+    enabled: bool
+    monthly_message_cap: int
+    allow_sql: bool
+    allowed_database_ids: Optional[List[int]] = None
+    allowed_tables: Optional[List[str]] = None
+    previous_key: Optional[str] = None
+    previous_key_expires_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+class WidgetKeyRotateResponse(BaseModel):
+    id: int
+    new_key: str
+    previous_key: Optional[str] = None
+    previous_key_expires_at: Optional[datetime] = None
+    message: str
+
+class WidgetSessionRequest(BaseModel):
+    public_key: str
+    conversation_id: Optional[int] = None
+
+class WidgetSessionResponse(BaseModel):
+    session_token: str
+    expires_in: int
+    tenant_id: int
+    conversation_id: int
 
 class ChatbotConfigBase(BaseModel):
     theme_color: str
@@ -398,8 +481,31 @@ class ChatResponse(BaseModel):
     answer: str
     query_type: str
     sources: List[SourceCitation] = []
-    sql_data: Optional[NLQueryResponse] = None
     created_at: datetime
+
+class WidgetChatRequest(BaseModel):
+    query: str
+    session_token: Optional[str] = None
+    conversation_id: Optional[int] = None
+    stream: Optional[bool] = False
+
+class WidgetChatResponse(BaseModel):
+    conversation_id: int
+    message_id: int
+    query: str
+    answer: str
+    query_type: str
+    sources: List[SourceCitation] = []
+    created_at: datetime
+
+class WidgetConfigResponse(BaseModel):
+    theme_color: str = "#3b82f6"
+    widget_title: str = "AI Assistant"
+    greeting_message: str = "Hello! How can I help you today?"
+    position: str = "bottom-right"
+    welcome_delay: int = 1
+    sound_enabled: bool = False
+
 
 
 # ---------------------------------------------------------------------------

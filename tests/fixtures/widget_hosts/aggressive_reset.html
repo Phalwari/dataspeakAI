@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Host Fixture: Aggressive CSS Reset</title>
+  <style>
+    /* Extreme universal selector reset */
+    *, *::before, *::after {
+      margin: 0 !important;
+      padding: 0 !important;
+      color: red !important;
+      font-size: 10px !important;
+      line-height: 1 !important;
+      letter-spacing: -2px !important;
+      border: 2px dashed red !important;
+      box-shadow: none !important;
+    }
+    body {
+      background: #111;
+      padding: 30px !important;
+    }
+  </style>
+</head>
+<body>
+  <h1>Host with Aggressive Reset</h1>
+  <p>Inside the Shadow DOM, the widget styles must stay isolated and immune to these universal overrides.</p>
+
+  <script src="http://localhost:8000/widget.js" data-key="pk_live_testfixturekey1234567890123" async></script>
+</body>
+</html>
