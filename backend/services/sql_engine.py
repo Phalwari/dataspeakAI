@@ -300,24 +300,24 @@ def extract_sql_referenced_tables(clean_sql: str) -> List[str]:
     - Subqueries: SELECT * FROM (SELECT * FROM sub_tbl) s
     - UNION / INTERSECT / EXCEPT
     - CTEs: WITH cte AS (SELECT * FROM base_tbl) SELECT * FROM cte -> correctly returns ['base_tbl'], ignoring cte alias
-    Fails closed by raising ValueError if AST parsing fails (SEC-02).
+    Fails closed: raises ValueError if AST parsing fails (SEC-02).
     """
+    import sqlglot
+    from sqlglot import exp
+
+    parsed = None
+    for d in [None, "mysql", "postgres", "sqlite"]:
+        try:
+            parsed = sqlglot.parse_one(clean_sql, read=d)
+            if parsed is not None:
+                break
+        except Exception:
+            continue
+
+    if parsed is None:
+        raise ValueError("SQL parsing failed: Unable to parse query AST deterministically.")
+
     try:
-        import sqlglot
-        from sqlglot import exp
-
-        parsed = None
-        for d in [None, "mysql", "postgres", "sqlite"]:
-            try:
-                parsed = sqlglot.parse_one(clean_sql, read=d)
-                if parsed:
-                    break
-            except Exception:
-                continue
-
-        if not parsed:
-            raise ValueError("SQL parsing failed: Unable to parse query AST deterministically.")
-
         ctes = set()
         for cte in parsed.find_all(exp.CTE):
             if cte.alias_or_name:
@@ -339,8 +339,6 @@ def extract_sql_referenced_tables(clean_sql: str) -> List[str]:
                 else:
                     tables.add(name)
         return sorted(list(tables))
-    except ValueError:
-        raise
     except Exception as exc:
         raise ValueError(f"SQL parsing failed: {exc}")
 
@@ -351,8 +349,8 @@ def validate_widget_sql(sql_query: str, allowed_tables: Optional[List[str]] = No
     1. Runs full validate_read_only_sql checks (read-only, no DDL/DML, single statement).
     2. Enforces fail-closed AST parsing via sqlglot (SEC-02).
     3. Blocks access to system catalog tables (pg_*, sqlite_*, information_schema, sys, etc.).
-    4. Enforces strict exact table allowlist matching (SEC-01).
-    5. Detects CTE trickery, UNION to disallowed tables, and stacked injection attempts.
+    4. Enforces strict exact table allowlist matching (SEC-01, no tbl.split('.')[-1] bypass).
+    5. Detects CTE trickery, UNION to disallowed tables, comma joins, and stacked injection attempts.
     """
     is_valid, reason = validate_read_only_sql(sql_query)
     if not is_valid:
@@ -386,8 +384,8 @@ def validate_widget_sql(sql_query: str, allowed_tables: Optional[List[str]] = No
         referenced_tables = extract_sql_referenced_tables(clean_sql)
     except ValueError as parse_err:
         return False, str(parse_err)
-    except Exception:
-        return False, "SQL parsing failed: Unable to parse query AST deterministically."
+    except Exception as exc:
+        return False, f"SQL parsing failed: {str(exc)}"
 
     # If allowed_tables is provided and non-empty, verify all referenced tables with strict exact matching (SEC-01)
     if allowed_tables:
@@ -584,7 +582,7 @@ def execute_safe_sql(db_conn: models.DatabaseConnection, sql_query: str, max_row
         if "sqlite" in db_type:
             connect_args = {"timeout": 10}
         elif "postgres" in db_type:
-            connect_args = {"options": "-c statement_timeout=10000"}
+            connect_args = {"options": "-c default_transaction_read_only=on -c statement_timeout=10000"}
         elif "mysql" in db_type or "mariadb" in db_type:
             connect_args = {"connect_timeout": 10}
 
@@ -596,13 +594,11 @@ def execute_safe_sql(db_conn: models.DatabaseConnection, sql_query: str, max_row
                     conn_handle.execute(text("SET statement_timeout = 10000;"))
                     conn_handle.execute(text("SET TRANSACTION READ ONLY;"))
                 elif "mysql" in db_type or "mariadb" in db_type:
-                    try:
-                        conn_handle.execute(text("SET SESSION max_execution_time = 10000;"))
-                    except Exception:
-                        pass
-                    conn_handle.execute(text("SET TRANSACTION READ ONLY;"))
-            except Exception:
-                pass
+                    conn_handle.execute(text("SET SESSION TRANSACTION READ ONLY;"))
+                    conn_handle.execute(text("SET SESSION max_execution_time = 10000;"))
+            except Exception as err:
+                print(f"[SECURITY GUARDRAIL ERROR] Dialect guardrail failure ({db_type}): {err}")
+                raise RuntimeError(f"Database security guardrail application failed: {str(err)}")
 
         try:
             engine = create_engine(connection_url, poolclass=NullPool, connect_args=connect_args)

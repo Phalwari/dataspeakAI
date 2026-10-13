@@ -23,10 +23,13 @@ backend/app.db
 scratch/
 *.zip
 
-# IDEs
+# IDEs & Local Agent Configs
 .vscode/
 .idea/
 .DS_Store
+.claude/
+.cursor/
+qa_app.db
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/

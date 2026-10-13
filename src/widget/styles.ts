@@ -407,5 +407,20 @@ export function getWidgetStyles(themeColor: string = "#3b82f6", position: string
   margin-left: 18px;
   margin-bottom: 6px;
 }
+
+.dataspeak-error-banner {
+  background-color: #fee2e2;
+  color: #991b1b;
+  font-size: 12px;
+  padding: 6px 12px;
+  border-top: 1px solid #fecaca;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dataspeak-countdown {
+  font-weight: 600;
+}
 `;
 }

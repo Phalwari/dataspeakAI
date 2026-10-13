@@ -110,14 +110,21 @@ Content-Security-Policy:
 * The token binds the `tenant_id`, `origin`, and `conversation_id`.
 * The `tenant_id` for chat processing is **strictly derived from the verified token claims**, never from request body parameters or prompt text.
 
-### 4.4 Rate Limiting & Concurrency Controls
-* **Token Bucket Algorithm:**
-  * 30 requests/minute per widget key.
-  * 15 requests/minute per client IP.
-  * 10 requests/minute per session token.
+### 4.4 Rate Limiting & Concurrency Controls (SEC-10)
+Rate limit values are unified across server code, documentation, and endpoint enforcement, and are configurable via environment variables with documented defaults:
+* **Token Bucket Enforcement (Configurable Defaults):**
+  * **Per Widget Key:** 60 requests/minute (Env: `WIDGET_RATE_LIMIT_KEY_PER_MIN=60`).
+  * **Per Client IP:** 30 requests/minute (Env: `WIDGET_RATE_LIMIT_IP_PER_MIN=30`).
+  * **Per Session Token:** 20 requests/minute (Env: `WIDGET_RATE_LIMIT_SESSION_PER_MIN=20`).
   * HTTP 429 response includes standard `Retry-After: <seconds>` header.
-* **Concurrent Stream Cap:** Maximum 5 simultaneous SSE streams per widget key to prevent server connection pool exhaustion.
-* **Monthly Message Cap:** Enforces tenant billing tier message limits.
+* **Concurrent Stream Cap:** Maximum 5 simultaneous SSE streams per widget key (Env: `WIDGET_MAX_CONCURRENT_STREAMS=5`) to prevent ASGI connection pool exhaustion.
+* **Key-Scoped Monthly Message Cap (SEC-04):** Enforces message quotas per `widget_key_id`. Only admitted and successfully processed requests are recorded in `QueryLog` and counted toward the monthly quota; blocked requests (rate limited, origin rejected, or guardrail blocked) do **not** consume billable quota.
+
+### 4.5 Reverse Proxy Security & IP Extraction (SEC-03)
+To prevent IP rate limit bypass via spoofed `X-Forwarded-For` headers:
+* When `TRUSTED_PROXIES` is unset or empty, the backend relies strictly on `request.client.host`. Any `X-Forwarded-For` headers supplied by direct clients are ignored.
+* When `TRUSTED_PROXIES` is configured (comma-separated list of IPs or CIDRs, e.g. `127.0.0.1, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16`), the server verifies that the direct client is a trusted reverse proxy before parsing `X-Forwarded-For`.
+* In a multi-proxy chain, the server scans backwards from right to left, selecting the right-most untrusted IP address as the client identifier.
 * **Storage Backends & Multi-Worker Caveat:**
   * **In-Memory Default:** The rate limiter defaults to an in-process sliding token bucket.
   * **Multi-Worker Caveat:** When running in multi-worker or containerized production environments (e.g. Docker, Kubernetes, Uvicorn/Gunicorn with multiple workers), in-memory limits are isolated per process, potentially multiplying limits by worker count.

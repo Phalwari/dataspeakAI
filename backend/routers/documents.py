@@ -17,6 +17,13 @@ os.makedirs("vector_store", exist_ok=True)
 # We use a global variable to load embeddings once
 embeddings_model = None
 
+def _load_hf_embeddings(model_name="all-MiniLM-L6-v2"):
+    try:
+        from langchain_huggingface import HuggingFaceEmbeddings
+    except ImportError:
+        from langchain_community.embeddings import HuggingFaceEmbeddings
+    return HuggingFaceEmbeddings(model_name=model_name)
+
 def table_to_markdown(table):
     if not table or not table[0]:
         return ""
@@ -131,8 +138,7 @@ def process_document(document_id: int, file_path: str, tenant_id: int, chunk_siz
         # 3. Create/Load FAISS
         global embeddings_model
         if embeddings_model is None:
-            from langchain_huggingface import HuggingFaceEmbeddings
-            embeddings_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+            embeddings_model = _load_hf_embeddings("all-MiniLM-L6-v2")
 
         index_path = f"vector_store/tenant_{tenant_id}"
         from langchain_community.vectorstores import FAISS
@@ -224,8 +230,7 @@ def reembed_stored_chunks(document_id: int, tenant_id: int, db: Session = None):
         global embeddings_model
         model_name = doc.embedding_model or "all-MiniLM-L6-v2"
         if embeddings_model is None or getattr(embeddings_model, "model_name", None) != model_name:
-            from langchain_huggingface import HuggingFaceEmbeddings
-            embeddings_model = HuggingFaceEmbeddings(model_name=model_name)
+            embeddings_model = _load_hf_embeddings(model_name)
 
         index_path = f"vector_store/tenant_{tenant_id}"
         if os.path.exists(index_path):
@@ -388,8 +393,7 @@ def delete_document(
     try:
         global embeddings_model
         if embeddings_model is None:
-            from langchain_huggingface import HuggingFaceEmbeddings
-            embeddings_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+            embeddings_model = _load_hf_embeddings("all-MiniLM-L6-v2")
         
         index_path = f"vector_store/tenant_{current_user.tenant_id}"
         if os.path.exists(index_path):
@@ -476,8 +480,7 @@ def search_documents(
     try:
         global embeddings_model
         if embeddings_model is None:
-            from langchain_huggingface import HuggingFaceEmbeddings
-            embeddings_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+            embeddings_model = _load_hf_embeddings("all-MiniLM-L6-v2")
             
         index_path = f"vector_store/tenant_{current_user.tenant_id}"
         if not os.path.exists(index_path):

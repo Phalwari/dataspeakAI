@@ -27,7 +27,10 @@ embeddings_model = None
 def get_embeddings():
     global embeddings_model
     if embeddings_model is None:
-        from langchain_huggingface import HuggingFaceEmbeddings
+        try:
+            from langchain_huggingface import HuggingFaceEmbeddings
+        except ImportError:
+            from langchain_community.embeddings import HuggingFaceEmbeddings
         embeddings_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
     return embeddings_model
 

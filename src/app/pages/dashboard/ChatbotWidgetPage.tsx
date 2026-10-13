@@ -16,10 +16,7 @@ import {
   Code2,
   Sliders,
   CheckCircle2,
-  Lock,
-  Ban,
-  Power,
-  XCircle
+  Lock
 } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../../components/ui/card";
@@ -30,17 +27,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/ta
 import { Switch } from "../../components/ui/switch";
 import { Badge } from "../../components/ui/badge";
 import { Checkbox } from "../../components/ui/checkbox";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger
-} from "../../components/ui/alert-dialog";
 import { toast } from "sonner";
 
 interface WidgetKeyData {
@@ -92,8 +78,8 @@ export function ChatbotWidgetPage() {
   const [isSavingSecurity, setIsSavingSecurity] = useState(false);
   const [isRotating, setIsRotating] = useState(false);
   const [isRevoking, setIsRevoking] = useState(false);
-  const [isReenabling, setIsReenabling] = useState(false);
-  const [isRevokeDialogOpen, setIsRevokeDialogOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isCreatingKey, setIsCreatingKey] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [copiedSnippet, setCopiedSnippet] = useState(false);
   const [copiedIframe, setCopiedIframe] = useState(false);
@@ -272,13 +258,10 @@ export function ChatbotWidgetPage() {
     );
     if (!confirmRotate) return;
 
-    const token = localStorage.getItem("token");
-    if (!token) {
-      toast.error("Authentication required");
-      return;
-    }
-
     setIsRotating(true);
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
     try {
       const res = await fetch(`${API_BASE_URL}/api/keys/widget/${widgetKey.id}/rotate`, {
         method: "POST",
@@ -294,8 +277,7 @@ export function ChatbotWidgetPage() {
               ...prev,
               public_key: rotData.new_key,
               previous_key: rotData.previous_key,
-              previous_key_expires_at: rotData.previous_key_expires_at,
-              enabled: true
+              previous_key_expires_at: rotData.previous_key_expires_at
             }
           : null
       );
@@ -309,68 +291,132 @@ export function ChatbotWidgetPage() {
     }
   };
 
-  // Revoke Key (SEC-08)
-  const handleRevokeKey = async () => {
+  // Revoke / Disable or Re-enable Key
+  const handleToggleKey = async () => {
     if (!widgetKey) return;
-    const token = localStorage.getItem("token");
-    if (!token) {
-      toast.error("Authentication required");
-      return;
-    }
+    const isCurrentlyEnabled = widgetKey.enabled;
+    const actionLabel = isCurrentlyEnabled ? "Revoke / Disable" : "Re-enable";
+    const confirmAction = window.confirm(
+      isCurrentlyEnabled
+        ? "Revoke and disable this widget key? All websites using this key will immediately be blocked with HTTP 403."
+        : "Re-enable this widget key?"
+    );
+    if (!confirmAction) return;
 
     setIsRevoking(true);
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/keys/widget/${widgetKey.id}/revoke`, {
-        method: "PUT",
-        headers: { Authorization: `Bearer ${token}` }
-      });
-
-      if (!res.ok) throw new Error("Failed to revoke key");
-
-      const updated = await res.json();
-      setWidgetKey(updated);
-      toast.success("Widget key has been revoked. All active sessions are terminated.");
-      setPreviewReloadKey((k) => k + 1);
-    } catch (err: any) {
-      console.error("Revoke key error:", err);
-      toast.error(err.message || "Failed to revoke key");
-    } finally {
-      setIsRevoking(false);
-      setIsRevokeDialogOpen(false);
-    }
-  };
-
-  // Re-enable Key
-  const handleReenableKey = async () => {
-    if (!widgetKey) return;
     const token = localStorage.getItem("token");
-    if (!token) {
-      toast.error("Authentication required");
-      return;
-    }
+    if (!token) return;
 
-    setIsReenabling(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/keys/widget/${widgetKey.id}`, {
-        method: "PUT",
+      const url = isCurrentlyEnabled
+        ? `${API_BASE_URL}/api/keys/widget/${widgetKey.id}/revoke`
+        : `${API_BASE_URL}/api/keys/widget/${widgetKey.id}`;
+      const method = "PUT";
+      const body = isCurrentlyEnabled ? undefined : JSON.stringify({ enabled: true });
+
+      const res = await fetch(url, {
+        method,
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ enabled: true })
+        body
       });
 
-      if (!res.ok) throw new Error("Failed to re-enable key");
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.detail || `Failed to ${actionLabel.toLowerCase()} key`);
+      }
 
       const updated = await res.json();
       setWidgetKey(updated);
-      toast.success("Widget key re-enabled successfully!");
+      toast.success(isCurrentlyEnabled ? "Widget key revoked and disabled." : "Widget key re-enabled successfully.");
       setPreviewReloadKey((k) => k + 1);
     } catch (err: any) {
-      console.error("Re-enable key error:", err);
-      toast.error(err.message || "Failed to re-enable key");
+      console.error("Key toggle error:", err);
+      toast.error(err.message || `Failed to ${actionLabel.toLowerCase()} key`);
     } finally {
-      setIsReenabling(false);
+      setIsRevoking(false);
+    }
+  };
+
+  // Delete Key permanently
+  const handleDeleteKey = async () => {
+    if (!widgetKey) return;
+    const confirmDelete = window.confirm(
+      "Are you sure you want to PERMANENTLY DELETE this widget key?\n\nThis cannot be undone. All websites embedding this key will cease to function."
+    );
+    if (!confirmDelete) return;
+
+    setIsDeleting(true);
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/keys/widget/${widgetKey.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Failed to delete key");
+      }
+
+      setWidgetKey(null);
+      setOriginsList([]);
+      setAllowSql(false);
+      setAllowedDbIds([]);
+      toast.success("Widget key deleted successfully.");
+      setPreviewReloadKey((k) => k + 1);
+    } catch (err: any) {
+      console.error("Key deletion error:", err);
+      toast.error(err.message || "Failed to delete key");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  // Create New Key
+  const handleCreateNewKey = async () => {
+    setIsCreatingKey(true);
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    try {
+      const currentOrigin = window.location.origin;
+      const res = await fetch(`${API_BASE_URL}/api/keys/widget`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          name: "Website Widget",
+          allowed_origins: [currentOrigin],
+          monthly_message_cap: 2500,
+          allow_sql: false,
+          allowed_database_ids: []
+        })
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Failed to create new widget key");
+      }
+
+      const createdKey = await res.json();
+      setWidgetKey(createdKey);
+      setOriginsList(createdKey.allowed_origins || []);
+      setAllowSql(createdKey.allow_sql || false);
+      setAllowedDbIds(createdKey.allowed_database_ids || []);
+      toast.success("New publishable widget key generated!");
+      setPreviewReloadKey((k) => k + 1);
+    } catch (err: any) {
+      console.error("Key create error:", err);
+      toast.error(err.message || "Failed to create widget key");
+    } finally {
+      setIsCreatingKey(false);
     }
   };
 
@@ -551,114 +597,84 @@ export function ChatbotWidgetPage() {
         </div>
 
         {/* Public Key Display & Actions */}
-        {widgetKey && (
-          <div className="flex items-center gap-2 bg-gray-50 border rounded-xl p-2.5 shadow-sm">
-            <div className="flex flex-col text-right">
-              <div className="flex items-center gap-1.5 justify-end">
+        {widgetKey ? (
+          <div className="flex flex-wrap items-center gap-2 bg-gray-50 border rounded-xl p-2.5 shadow-sm">
+            <div className="flex items-center gap-2 mr-1">
+              <Badge
+                variant="outline"
+                className={widgetKey.enabled
+                  ? "bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px]"
+                  : "bg-rose-50 text-rose-700 border-rose-200 text-[10px]"
+                }
+              >
+                {widgetKey.enabled ? "Active" : "Disabled"}
+              </Badge>
+              <div className="flex flex-col text-right">
                 <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Publishable Key</span>
-                {widgetKey.enabled ? (
-                  <span className="inline-flex items-center px-1.5 py-0.2 rounded-full text-[9px] font-semibold bg-emerald-100 text-emerald-800">
-                    Active
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center px-1.5 py-0.2 rounded-full text-[9px] font-semibold bg-rose-100 text-rose-800">
-                    Revoked
-                  </span>
-                )}
+                <span className="font-mono text-xs font-semibold text-gray-700">
+                  {widgetKey.public_key.substring(0, 14)}...{widgetKey.public_key.slice(-6)}
+                </span>
               </div>
-              <span className="font-mono text-xs font-semibold text-gray-700">
-                {widgetKey.public_key.substring(0, 14)}...{widgetKey.public_key.slice(-6)}
-              </span>
             </div>
-            <Button size="sm" variant="ghost" className="h-8 px-2" onClick={copyPublicKey}>
+
+            <Button size="sm" variant="ghost" className="h-8 px-2" onClick={copyPublicKey} title="Copy Key">
               {copiedKey ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5 text-gray-600" />}
             </Button>
+
             <Button
               size="sm"
               variant="outline"
               className="h-8 gap-1.5 text-xs font-medium text-amber-700 border-amber-300 hover:bg-amber-50"
               onClick={handleRotateKey}
-              disabled={isRotating}
+              disabled={isRotating || isRevoking || isDeleting}
+              title="Rotate Key with 24h grace window"
             >
               <RefreshCw className={`w-3 h-3 ${isRotating ? "animate-spin" : ""}`} />
               Rotate
             </Button>
-            {widgetKey.enabled ? (
-              <AlertDialog open={isRevokeDialogOpen} onOpenChange={setIsRevokeDialogOpen}>
-                <AlertDialogTrigger asChild>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-8 gap-1.5 text-xs font-medium text-rose-700 border-rose-300 hover:bg-rose-50"
-                    disabled={isRevoking}
-                  >
-                    <Ban className="w-3 h-3" />
-                    Revoke
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle className="text-red-600 flex items-center gap-2">
-                      <AlertTriangle className="w-5 h-5" /> Revoke Publishable Widget Key?
-                    </AlertDialogTitle>
-                    <AlertDialogDescription className="space-y-2 text-sm text-slate-600">
-                      <p>
-                        Revoking this key immediately disables the chatbot widget on all external websites.
-                      </p>
-                      <p className="font-medium text-slate-800">
-                        All active sessions and visitor connections will be blocked immediately.
-                      </p>
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction
-                      onClick={handleRevokeKey}
-                      className="bg-red-600 hover:bg-red-700 text-white"
-                    >
-                      {isRevoking ? "Revoking..." : "Yes, Revoke Key"}
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            ) : (
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-8 gap-1.5 text-xs font-medium text-emerald-700 border-emerald-300 hover:bg-emerald-50"
-                onClick={handleReenableKey}
-                disabled={isReenabling}
-              >
-                <Power className="w-3 h-3" />
-                {isReenabling ? "Enabling..." : "Re-enable"}
-              </Button>
-            )}
+
+            <Button
+              size="sm"
+              variant="outline"
+              className={`h-8 gap-1.5 text-xs font-medium ${
+                widgetKey.enabled
+                  ? "text-orange-700 border-orange-300 hover:bg-orange-50"
+                  : "text-emerald-700 border-emerald-300 hover:bg-emerald-50"
+              }`}
+              onClick={handleToggleKey}
+              disabled={isRotating || isRevoking || isDeleting}
+              title={widgetKey.enabled ? "Revoke & disable key" : "Re-enable key"}
+            >
+              <ShieldAlert className="w-3 h-3" />
+              {widgetKey.enabled ? "Revoke / Disable" : "Re-enable"}
+            </Button>
+
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 gap-1.5 text-xs font-medium text-rose-700 border-rose-300 hover:bg-rose-50"
+              onClick={handleDeleteKey}
+              disabled={isRotating || isRevoking || isDeleting}
+              title="Delete key permanently"
+            >
+              <Trash2 className="w-3 h-3" />
+              Delete
+            </Button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              className="h-9 gap-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
+              onClick={handleCreateNewKey}
+              disabled={isCreatingKey}
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Generate Publishable Key
+            </Button>
           </div>
         )}
       </div>
-
-      {/* Revoked / Inactive Key Banner (SEC-08) */}
-      {widgetKey && !widgetKey.enabled && (
-        <div className="p-4 bg-rose-50 border border-rose-300 rounded-xl flex items-start justify-between gap-3 text-rose-900 animate-in fade-in">
-          <div className="flex items-start gap-3">
-            <XCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-            <div className="space-y-1 text-sm">
-              <span className="font-bold">Widget Key is Revoked & Inactive! </span>
-              <p className="text-xs text-rose-800/90 leading-relaxed">
-                Anonymous visitors on external websites cannot initialize chat sessions or execute queries. Re-enable this key or rotate to generate a new active publishable key.
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <Button size="sm" variant="outline" className="bg-white text-xs h-8 border-rose-300 text-rose-700 hover:bg-rose-100" onClick={handleReenableKey} disabled={isReenabling}>
-              <Power className="w-3.5 h-3.5 mr-1" /> Re-enable Key
-            </Button>
-            <Button size="sm" className="bg-rose-600 hover:bg-rose-700 text-white text-xs h-8" onClick={handleRotateKey} disabled={isRotating}>
-              <RefreshCw className="w-3.5 h-3.5 mr-1" /> Rotate to New Key
-            </Button>
-          </div>
-        </div>
-      )}
 
       {/* Warning Banner: Allowlist is Empty */}
       {originsList.length === 0 && (

@@ -15,24 +15,50 @@ export interface WidgetHostInstance {
 export function createWidgetHost(themeColor: string = '#3b82f6', position: string = 'bottom-right'): WidgetHostInstance {
   const host = document.createElement('div');
   host.id = 'dataspeak-chatbot-widget-root';
-  // Critical inline styles to bypass host CSS resets and div:empty rules
-  host.setAttribute('style', 'display: block !important; visibility: visible !important; position: fixed !important; z-index: 2147483647 !important; border: none !important; margin: 0 !important; padding: 0 !important; width: 0 !important; height: 0 !important; overflow: visible !important;');
+
+  // CSSOM setProperty bypasses host CSS resets without style-attribute parsing (strict CSP compliant)
+  host.style.setProperty('display', 'block', 'important');
+  host.style.setProperty('visibility', 'visible', 'important');
+  host.style.setProperty('position', 'fixed', 'important');
+  host.style.setProperty('z-index', '2147483647', 'important');
+  host.style.setProperty('border', 'none', 'important');
+  host.style.setProperty('margin', '0', 'important');
+  host.style.setProperty('padding', '0', 'important');
+  host.style.setProperty('width', '0', 'important');
+  host.style.setProperty('height', '0', 'important');
+  host.style.setProperty('overflow', 'visible', 'important');
 
   const shadowRoot = host.attachShadow({ mode: 'open' });
 
-  const styleEl = document.createElement('style');
-  styleEl.textContent = getWidgetStyles(themeColor, position);
-  shadowRoot.appendChild(styleEl);
+  let updateStyles: (newTheme: string, newPos: string) => void;
+
+  // Use adoptedStyleSheets with CSSStyleSheet.replaceSync (valid under CSP without style-src 'unsafe-inline')
+  if (
+    'adoptedStyleSheets' in shadowRoot &&
+    typeof CSSStyleSheet !== 'undefined' &&
+    'replaceSync' in CSSStyleSheet.prototype
+  ) {
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(getWidgetStyles(themeColor, position));
+    shadowRoot.adoptedStyleSheets = [sheet];
+    updateStyles = (newTheme: string, newPos: string) => {
+      sheet.replaceSync(getWidgetStyles(newTheme, newPos));
+    };
+  } else {
+    // Fallback only if adoptedStyleSheets is unsupported in legacy environments
+    const styleEl = document.createElement('style');
+    styleEl.textContent = getWidgetStyles(themeColor, position);
+    shadowRoot.appendChild(styleEl);
+    updateStyles = (newTheme: string, newPos: string) => {
+      styleEl.textContent = getWidgetStyles(newTheme, newPos);
+    };
+  }
 
   const mountContainer = document.createElement('div');
   mountContainer.id = 'dataspeak-widget-app';
   shadowRoot.appendChild(mountContainer);
 
   document.body.appendChild(host);
-
-  const updateStyles = (newTheme: string, newPos: string) => {
-    styleEl.textContent = getWidgetStyles(newTheme, newPos);
-  };
 
   return {
     host,
