@@ -32,30 +32,16 @@ except ImportError:
 
 # ── Multi-Key Harvesting ──────────────────────────────────────────────────────
 
+from services.llm_generation_service import _get_all_gemini_keys, _get_all_groq_keys
+
 def get_groq_keys() -> List[str]:
-    """Harvest all configured Groq keys from environment (GROQ_API_KEY_1..9, GROQ_API_KEY)."""
-    keys = []
-    for i in range(1, 10):
-        k = os.getenv(f"GROQ_API_KEY_{i}")
-        if k and k.strip() and k not in keys:
-            keys.append(k.strip())
-    k = os.getenv("GROQ_API_KEY")
-    if k and k.strip() and k not in keys:
-        keys.append(k.strip())
-    return keys
+    """Harvest all configured Groq keys from environment via canonical harvesting."""
+    return _get_all_groq_keys()
 
 
 def get_gemini_keys() -> List[str]:
-    """Harvest all configured Gemini/Google keys from environment (GEMINI_API_KEY_1..9, GOOGLE_API_KEY_1..9, etc.)."""
-    keys = []
-    for i in range(1, 10):
-        k = os.getenv(f"GEMINI_API_KEY_{i}") or os.getenv(f"GOOGLE_API_KEY_{i}")
-        if k and k.strip() and k not in keys:
-            keys.append(k.strip())
-    k = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if k and k.strip() and k not in keys:
-        keys.append(k.strip())
-    return keys
+    """Harvest all configured Gemini/Google keys from environment via canonical harvesting."""
+    return _get_all_gemini_keys()
 
 
 def get_deepseek_keys() -> List[str]:

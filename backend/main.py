@@ -119,3 +119,13 @@ def get_widget_embed_root(public_key: str, request: Request, db: Session = Depen
     """
     return widget.get_widget_embed_page(public_key, request, db)
 
+
+@app.get("/api/system/llm-metrics")
+def get_system_llm_metrics():
+    """
+    Returns aggregated LLM gateway telemetry and key health metrics.
+    """
+    from services.llm_metrics import llm_metrics
+    return llm_metrics.get_summary()
+
+

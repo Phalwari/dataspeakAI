@@ -3,6 +3,7 @@ import re
 import sys
 import time
 import requests
+import concurrent.futures
 from typing import Tuple, Dict, Any, List, Optional
 
 # Ensure backend directory is in sys.path for models/crypto imports
@@ -12,6 +13,7 @@ if backend_dir not in sys.path:
 
 import models
 from crypto import decrypt_password
+from services.llm_generation_service import llm_gateway
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.pool import NullPool
 from sqlalchemy.exc import SQLAlchemyError
@@ -397,79 +399,71 @@ def validate_widget_sql(sql_query: str, allowed_tables: Optional[List[str]] = No
     return True, ""
 
 
-def generate_sql_from_nl(db_conn: models.DatabaseConnection, user_question: str, db_session=None) -> Dict[str, Any]:
+def generate_sql_from_nl(db_conn: models.DatabaseConnection, user_question: str, db_session=None, tenant_id: Optional[int] = None) -> Dict[str, Any]:
     """
-    Uses Google Gemini 2.5 Flash API to generate a read-only SQL query and explanation
-    from natural language and schema context. Includes graceful fallback if GEMINI_API_KEY is unset.
+    Uses unified LLMGateway (multi-key Gemini with automatic Groq failover) to generate
+    a read-only SQL query and explanation from natural language and schema context.
     """
     schema_ctx = get_db_schema_context(db_conn, db_session)
-    api_key = os.getenv("GEMINI_API_KEY")
 
-    if api_key:
-        try:
-            gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
-            gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={api_key}"
-            prompt = (
-                f"You are a Senior SQL & Database Engineer. Given the following database schema context and user question, "
-                f"generate a valid, read-only SQL query ({db_conn.db_type} dialect) and a short explanation.\n\n"
-                "CRITICAL SECURITY RULES:\n"
-                "1. Output ONLY a single read-only SELECT or WITH statement.\n"
-                "2. NEVER use DDL/DML keywords (INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, etc.).\n"
-                "3. Do NOT include multiple statements or semicolons.\n"
-                "4. Format your output EXACTLY with the following structure:\n"
-                "```sql\n<your SQL query here>\n```\n"
-                "Explanation: <1-2 sentence explanation of how the query works>\n\n"
-                f"DATABASE SCHEMA:\n{schema_ctx}\n\n"
-                f"USER QUESTION: {user_question}"
-            )
+    prompt = (
+        f"You are a Senior SQL & Database Engineer. Given the following database schema context and user question, "
+        f"generate a valid, read-only SQL query ({db_conn.db_type} dialect) and a short explanation.\n\n"
+        "CRITICAL SECURITY RULES:\n"
+        "1. Output ONLY a single read-only SELECT or WITH statement.\n"
+        "2. NEVER use DDL/DML keywords (INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, etc.).\n"
+        "3. Do NOT include multiple statements or semicolons.\n"
+        "4. Format your output EXACTLY with the following structure:\n"
+        "```sql\n<your SQL query here>\n```\n"
+        "Explanation: <1-2 sentence explanation of how the query works>\n\n"
+        f"DATABASE SCHEMA:\n{schema_ctx}\n\n"
+        f"USER QUESTION: {user_question}"
+    )
 
-            payload = {
-                "contents": [{"parts": [{"text": prompt}]}]
-            }
-            headers = {"Content-Type": "application/json"}
-            res = requests.post(gemini_url, json=payload, headers=headers, timeout=25)
+    try:
+        t_id = tenant_id or getattr(db_conn, "tenant_id", None)
+        raw_text = llm_gateway.generate_sync(
+            prompt=prompt,
+            tenant_id=t_id,
+            purpose="nl_to_sql",
+            temperature=0.1
+        )
 
-            if res.status_code == 200:
-                res_data = res.json()
-                raw_text = res_data["candidates"][0]["content"]["parts"][0]["text"].strip()
-                
-                # Extract SQL block
-                sql_match = re.search(r'```sql\s*(.*?)\s*```', raw_text, re.DOTALL | re.IGNORECASE)
-                if sql_match:
-                    generated_sql = sql_match.group(1).strip()
-                else:
-                    # Fallback extraction if LLM didn't format code blocks
-                    generated_sql = raw_text.split('\n')[0].strip()
-
-                # Extract Explanation
-                explanation_match = re.search(r'Explanation:\s*(.*)', raw_text, re.IGNORECASE | re.DOTALL)
-                if explanation_match:
-                    explanation = explanation_match.group(1).strip()
-                else:
-                    explanation = f"Generated {db_conn.db_type} query to answer: '{user_question}'."
-
-                # Validate generated SQL against security guardrails
-                is_valid, reason = validate_read_only_sql(generated_sql)
-                if not is_valid:
-                    return {
-                        "sql": "",
-                        "explanation": f"Security Guardrail Triggered: {reason}",
-                        "schema_context": schema_ctx,
-                        "error": reason
-                    }
-
-                return {
-                    "sql": generated_sql,
-                    "explanation": explanation,
-                    "schema_context": schema_ctx,
-                    "error": None
-                }
+        if raw_text and not raw_text.startswith("Sorry, all AI providers"):
+            # Extract SQL block
+            sql_match = re.search(r'```sql\s*(.*?)\s*```', raw_text, re.DOTALL | re.IGNORECASE)
+            if sql_match:
+                generated_sql = sql_match.group(1).strip()
             else:
-                print(f"Gemini API call failed with status {res.status_code}: {res.text}")
-        except Exception as e:
-            print(f"Error calling Gemini API for NL-to-SQL: {e}")
+                generated_sql = raw_text.split('\n')[0].strip()
 
-    # Fallback if GEMINI_API_KEY is unconfigured or request failed
+            # Extract Explanation
+            explanation_match = re.search(r'Explanation:\s*(.*)', raw_text, re.IGNORECASE | re.DOTALL)
+            if explanation_match:
+                explanation = explanation_match.group(1).strip()
+            else:
+                explanation = f"Generated {db_conn.db_type} query to answer: '{user_question}'."
+
+            # Validate generated SQL against security guardrails
+            is_valid, reason = validate_read_only_sql(generated_sql)
+            if not is_valid:
+                return {
+                    "sql": "",
+                    "explanation": f"Security Guardrail Triggered: {reason}",
+                    "schema_context": schema_ctx,
+                    "error": reason
+                }
+
+            return {
+                "sql": generated_sql,
+                "explanation": explanation,
+                "schema_context": schema_ctx,
+                "error": None
+            }
+    except Exception as e:
+        print(f"Error calling LLM Gateway for NL-to-SQL: {e}")
+
+    # Fallback if LLM was unconfigured or request failed
     fallback_table = "users"
     if "Table: " in schema_ctx:
         tables = re.findall(r'Table:\s*(\w+)', schema_ctx)
@@ -478,7 +472,7 @@ def generate_sql_from_nl(db_conn: models.DatabaseConnection, user_question: str,
 
     fallback_sql = f"SELECT * FROM {fallback_table} LIMIT 10;"
     fallback_exp = (
-        "Note: GEMINI_API_KEY is not configured or LLM endpoint was unreachable. "
+        "Note: AI generation was unreachable. "
         f"Generated safe fallback preview query on table '{fallback_table}'."
     )
 
@@ -580,16 +574,20 @@ def execute_safe_sql(db_conn: models.DatabaseConnection, sql_query: str, max_row
         connect_args = {}
         db_type = (db_conn.db_type or "").lower()
         if "sqlite" in db_type:
-            connect_args = {"timeout": 10}
+            connect_args = {"timeout": 10.0}
         elif "postgres" in db_type:
             connect_args = {"options": "-c default_transaction_read_only=on -c statement_timeout=10000"}
         elif "mysql" in db_type or "mariadb" in db_type:
-            connect_args = {"connect_timeout": 10}
+            connect_args = {
+                "connect_timeout": 10,
+                "init_command": "SET SESSION max_execution_time=10000"
+            }
 
         def _apply_dialect_guardrails(conn_handle):
             try:
                 if "sqlite" in db_type:
                     conn_handle.execute(text("PRAGMA query_only = ON;"))
+                    conn_handle.execute(text("PRAGMA busy_timeout = 10000;"))
                 elif "postgres" in db_type:
                     conn_handle.execute(text("SET statement_timeout = 10000;"))
                     conn_handle.execute(text("SET TRANSACTION READ ONLY;"))
@@ -600,44 +598,22 @@ def execute_safe_sql(db_conn: models.DatabaseConnection, sql_query: str, max_row
                 print(f"[SECURITY GUARDRAIL ERROR] Dialect guardrail failure ({db_type}): {err}")
                 raise RuntimeError(f"Database security guardrail application failed: {str(err)}")
 
-        try:
-            engine = create_engine(connection_url, poolclass=NullPool, connect_args=connect_args)
-            with engine.connect() as conn:
-                _apply_dialect_guardrails(conn)
-
-                result = conn.execute(text(capped_sql))
-                columns = list(result.keys())
-                raw_rows = result.fetchall()
-
-                rows = [
-                    {col: _make_json_serializable(val) for col, val in zip(columns, row)}
-                    for row in raw_rows
-                ]
-                rows = mask_pii_rows(columns, rows)
-
-            engine.dispose()
-            exec_time_ms = round((time.time() - start_time) * 1000, 2)
-            return {
-                "columns": columns,
-                "rows": rows,
-                "row_count": len(rows),
-                "execution_time_ms": exec_time_ms
-            }
-        except SQLAlchemyError as sqle:
-            # If subquery wrapper fails on specific DB syntax, try direct LIMIT append
+        def _run_query_internal():
             try:
                 engine = create_engine(connection_url, poolclass=NullPool, connect_args=connect_args)
                 with engine.connect() as conn:
                     _apply_dialect_guardrails(conn)
-                    fallback_capped = f"{clean_sql} LIMIT {max_rows}"
-                    result = conn.execute(text(fallback_capped))
+
+                    result = conn.execute(text(capped_sql))
                     columns = list(result.keys())
                     raw_rows = result.fetchall()
+
                     rows = [
                         {col: _make_json_serializable(val) for col, val in zip(columns, row)}
                         for row in raw_rows
                     ]
                     rows = mask_pii_rows(columns, rows)
+
                 engine.dispose()
                 exec_time_ms = round((time.time() - start_time) * 1000, 2)
                 return {
@@ -646,10 +622,43 @@ def execute_safe_sql(db_conn: models.DatabaseConnection, sql_query: str, max_row
                     "row_count": len(rows),
                     "execution_time_ms": exec_time_ms
                 }
+            except SQLAlchemyError as sqle:
+                # If subquery wrapper fails on specific DB syntax, try direct LIMIT append
+                try:
+                    engine = create_engine(connection_url, poolclass=NullPool, connect_args=connect_args)
+                    with engine.connect() as conn:
+                        _apply_dialect_guardrails(conn)
+                        fallback_capped = f"{clean_sql} LIMIT {max_rows}"
+                        result = conn.execute(text(fallback_capped))
+                        columns = list(result.keys())
+                        raw_rows = result.fetchall()
+                        rows = [
+                            {col: _make_json_serializable(val) for col, val in zip(columns, row)}
+                            for row in raw_rows
+                        ]
+                        rows = mask_pii_rows(columns, rows)
+                    engine.dispose()
+                    exec_time_ms = round((time.time() - start_time) * 1000, 2)
+                    return {
+                        "columns": columns,
+                        "rows": rows,
+                        "row_count": len(rows),
+                        "execution_time_ms": exec_time_ms
+                    }
+                except Exception as e:
+                    raise RuntimeError(f"Database execution error: {str(sqle)}")
             except Exception as e:
-                raise RuntimeError(f"Database execution error: {str(sqle)}")
-        except Exception as e:
-            raise RuntimeError(f"Execution error: {str(e)}")
+                raise RuntimeError(f"Execution error: {str(e)}")
+
+        # Execute query within strict 12.0s fail-safe execution watchdog
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_run_query_internal)
+            try:
+                return future.result(timeout=12.0)
+            except concurrent.futures.TimeoutError:
+                raise RuntimeError(
+                    f"Database execution timeout exceeded (10s dialect statement limit / 12s watchdog for {db_type})"
+                )
 
     # Fallback simulated data execution for non-relational or simulated DBs
     time.sleep(0.05)  # Simulate brief processing delay

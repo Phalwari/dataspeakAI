@@ -1,20 +1,28 @@
 """
-Universal LLM direct generation service supporting text-only and multimodal (vision) generation.
+Universal LLM direct generation service supporting text-only and multimodal (vision) generation,
+unified under the non-blocking async LLMGateway.
+
 Features:
-- Multi-key harvesting: comma-separated GEMINI_API_KEY(s), GEMINI_API_KEY_1..9, GROQ_API_KEY(s)
+- Multi-key harvesting: comma-separated GEMINI_API_KEY(s), GEMINI_API_KEY_1..15, GROQ_API_KEY(s)
 - Automatic rate-limit (429/403) token exhaustion detection & instant failover to next key
 - Proactive key cooldown tracker to bypass exhausted keys on subsequent calls
-- Direct Google Gemini REST API -> Groq API failover chain (DeepSeek removed per user preference)
+- Non-blocking async generate() and native SSE generate_stream() via httpx.AsyncClient
+- Observability datastore integration via LLMMetrics
+- Direct Google Gemini REST API -> Groq API failover chain
 - Thread-safe Round-Robin key rotation across requests to distribute quota
 """
 import os
+import json
 import httpx
 import time
 import random
+import asyncio
 import threading
 import logging
-from typing import List, Optional, Any, Dict
+from typing import List, Optional, Any, Dict, AsyncGenerator
 from dotenv import load_dotenv
+
+from services.llm_metrics import llm_metrics
 
 # Ensure .env is always loaded from backend or root directory
 _backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -51,7 +59,7 @@ def _get_all_gemini_keys() -> List[str]:
             if k not in keys:
                 keys.append(k)
     # Check indexed variables (GEMINI_API_KEY_1..15)
-    for i in range(1, 15):
+    for i in range(1, 16):
         for var in [f"GEMINI_API_KEY_{i}", f"GOOGLE_API_KEY_{i}"]:
             for k in _extract_keys(os.getenv(var)):
                 if k not in keys:
@@ -65,7 +73,7 @@ def _get_all_groq_keys() -> List[str]:
         for k in _extract_keys(os.getenv(var)):
             if k not in keys:
                 keys.append(k)
-    for i in range(1, 15):
+    for i in range(1, 16):
         for k in _extract_keys(os.getenv(f"GROQ_API_KEY_{i}")):
             if k not in keys:
                 keys.append(k)
@@ -84,7 +92,7 @@ _key_cooldowns: Dict[str, float] = {}
 def _rotate_keys(keys: List[str], provider_type: str) -> List[str]:
     """Rotate keys list so that subsequent requests start from the next key (Round-Robin)."""
     global _gemini_counter, _groq_counter
-    if len(keys) <= 1:
+    if len(keys) <= 1 or provider_type == "explicit":
         return keys
     with _counter_lock:
         if provider_type == "gemini":
@@ -110,25 +118,543 @@ def _get_active_ordered_keys(keys: List[str], provider_type: str) -> List[str]:
     return rotated_active + cooling
 
 
+def _mask_key(key: str) -> str:
+    return f"...{key[-4:]}" if len(key) >= 4 else "key"
+
+
 # ── Active Model Configurations ──────────────────────────────────────────────
 
 GEMINI_MODELS = [
+    "gemini-2.5-flash",
     "gemini-flash-lite-latest",
-    "gemma-4-26b-a4b-it",
     "gemini-3.8-flash",
     "gemini-flash-latest",
 ]
 
 GROQ_MODELS = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
     "qwen/qwen3.8-27b",
     "openai/gpt-oss-120b",
-    "openai/gpt-oss-20b",
 ]
 
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
-# ── Provider Implementations ──────────────────────────────────────────────────
+# ── Unified Non-Blocking Async LLMGateway ────────────────────────────────────
+
+class LLMGateway:
+    """
+    Unified Non-Blocking Async LLM Gateway with Multi-Key Harvesting,
+    Round-Robin Quota Rotation, Instant 429/403 Failover, and Native SSE Streaming.
+    """
+
+    def __init__(self, request_timeout: float = 45.0):
+        self.request_timeout = request_timeout
+
+    def _get_gemini_candidates(
+        self,
+        model: Optional[str] = None,
+        api_key: Optional[str] = None,
+        user: Optional[Any] = None
+    ) -> tuple[List[str], List[str]]:
+        explicit_keys = []
+        if api_key:
+            explicit_keys.extend(_extract_keys(api_key))
+        if user and getattr(user, "gemini_api_key", None):
+            explicit_keys.extend(_extract_keys(user.gemini_api_key))
+
+        if explicit_keys:
+            ordered_keys = _get_active_ordered_keys(list(dict.fromkeys(explicit_keys)), "explicit")
+        else:
+            harvested = list(dict.fromkeys(_get_all_gemini_keys()))
+            ordered_keys = _get_active_ordered_keys(harvested, "gemini")
+
+        env_model = os.getenv("GEMINI_MODEL")
+        base_models = list(GEMINI_MODELS)
+        if env_model and env_model not in base_models:
+            base_models = [env_model] + base_models
+        elif env_model:
+            base_models = [env_model] + [m for m in base_models if m != env_model]
+
+        models_to_try = [model] + [m for m in base_models if m != model] if model else base_models
+        return ordered_keys, models_to_try
+
+    def _get_groq_candidates(
+        self,
+        model: Optional[str] = None,
+        api_key: Optional[str] = None,
+        user: Optional[Any] = None
+    ) -> tuple[List[str], List[str]]:
+        explicit_keys = []
+        if api_key:
+            explicit_keys.extend(_extract_keys(api_key))
+        if user and getattr(user, "groq_api_key", None):
+            explicit_keys.extend(_extract_keys(user.groq_api_key))
+
+        if explicit_keys:
+            ordered_keys = _get_active_ordered_keys(list(dict.fromkeys(explicit_keys)), "explicit")
+        else:
+            harvested = list(dict.fromkeys(_get_all_groq_keys()))
+            ordered_keys = _get_active_ordered_keys(harvested, "groq")
+
+        env_model = os.getenv("GROQ_MODEL")
+        base_models = list(GROQ_MODELS)
+        if env_model and env_model not in base_models:
+            base_models = [env_model] + base_models
+        elif env_model:
+            base_models = [env_model] + [m for m in base_models if m != env_model]
+
+        models_to_try = [model] + [m for m in base_models if m != model] if model else base_models
+        return ordered_keys, models_to_try
+
+    async def generate(
+        self,
+        prompt: str,
+        provider: str = "auto",
+        model: Optional[str] = None,
+        temperature: float = 0.2,
+        api_key: Optional[str] = None,
+        user: Optional[Any] = None,
+        tenant_id: Optional[int] = None,
+        purpose: str = "general"
+    ) -> str:
+        """
+        Non-blocking async text generation with multi-key rotation and Groq failover.
+        """
+        start_time = time.time()
+        prompt_tokens_est = max(1, len(prompt) // 4)
+        last_err: Optional[Exception] = None
+
+        prov = (provider or "auto").lower()
+        try_gemini_first = prov in ("gemini", "auto")
+
+        # ── Step 1: Attempt Gemini Candidates ─────────────────────────────────
+        if try_gemini_first:
+            gemini_keys, gemini_models = self._get_gemini_candidates(model, api_key, user)
+            async with httpx.AsyncClient(timeout=self.request_timeout) as client:
+                for key in gemini_keys:
+                    masked = _mask_key(key)
+                    now = time.time()
+                    if _key_cooldowns.get(key, 0) > now and len(gemini_keys) > 1:
+                        continue
+
+                    for m in gemini_models:
+                        url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={key}"
+                        payload = {
+                            "contents": [{"parts": [{"text": prompt}]}],
+                            "generationConfig": {"temperature": temperature},
+                        }
+                        try:
+                            resp = await client.post(url, json=payload)
+                            latency_ms = (time.time() - start_time) * 1000
+
+                            if resp.status_code == 200:
+                                _key_cooldowns.pop(key, None)
+                                data = resp.json()
+                                candidates = data.get("candidates", [])
+                                text_out = ""
+                                if candidates and "content" in candidates[0]:
+                                    parts = candidates[0]["content"].get("parts", [])
+                                    if parts:
+                                        text_out = parts[0].get("text", "")
+
+                                comp_tokens_est = max(1, len(text_out) // 4)
+                                llm_metrics.record_request(
+                                    provider="gemini",
+                                    model=m,
+                                    tenant_id=tenant_id,
+                                    purpose=purpose,
+                                    prompt_tokens=prompt_tokens_est,
+                                    completion_tokens=comp_tokens_est,
+                                    latency_ms=latency_ms,
+                                    status_code=200,
+                                    masked_key=masked
+                                )
+                                return text_out
+
+                            elif resp.status_code in {429, 403}:
+                                _key_cooldowns[key] = time.time() + 60.0
+                                llm_metrics.record_key_cooldown(masked, "gemini", 60.0)
+                                llm_metrics.record_request(
+                                    provider="gemini",
+                                    model=m,
+                                    tenant_id=tenant_id,
+                                    purpose=purpose,
+                                    status_code=resp.status_code,
+                                    error="Quota / Rate limit exhausted",
+                                    masked_key=masked
+                                )
+                                logger.warning(f"[Gemini Rate Limit] Key {masked} exhausted (HTTP {resp.status_code}). Switching to next key...")
+                                last_err = RuntimeError(f"Gemini key {masked} throttled ({resp.status_code})")
+                                break  # Break model loop to switch key immediately
+
+                            elif resp.status_code in RETRYABLE_STATUS_CODES or resp.status_code == 404:
+                                llm_metrics.record_request(
+                                    provider="gemini",
+                                    model=m,
+                                    tenant_id=tenant_id,
+                                    purpose=purpose,
+                                    status_code=resp.status_code,
+                                    error=f"Server status {resp.status_code}",
+                                    masked_key=masked
+                                )
+                                logger.warning(f"[Gemini] {m} (key {masked}) returned {resp.status_code}, trying next model...")
+                                last_err = RuntimeError(f"Gemini {m} returned {resp.status_code}")
+                                continue
+
+                            else:
+                                last_err = RuntimeError(f"Gemini error {resp.status_code}: {resp.text[:200]}")
+                                break
+
+                        except Exception as ex:
+                            last_err = ex
+                            logger.warning(f"[Gemini Exception] {m} key {masked}: {ex}")
+                            continue
+
+        # ── Step 2: Attempt Groq Candidates (Failover) ────────────────────────
+        groq_keys, groq_models = self._get_groq_candidates(model, api_key, user)
+        if groq_keys:
+            async with httpx.AsyncClient(timeout=self.request_timeout) as client:
+                for key in groq_keys:
+                    masked = _mask_key(key)
+                    now = time.time()
+                    if _key_cooldowns.get(key, 0) > now and len(groq_keys) > 1:
+                        continue
+
+                    for m in groq_models:
+                        url = "https://api.groq.com/openai/v1/chat/completions"
+                        payload = {
+                            "model": m,
+                            "messages": [{"role": "user", "content": prompt}],
+                            "temperature": temperature,
+                        }
+                        headers = {
+                            "Authorization": f"Bearer {key}",
+                            "Content-Type": "application/json",
+                        }
+                        try:
+                            resp = await client.post(url, json=payload, headers=headers)
+                            latency_ms = (time.time() - start_time) * 1000
+
+                            if resp.status_code == 200:
+                                _key_cooldowns.pop(key, None)
+                                data = resp.json()
+                                choices = data.get("choices", [])
+                                text_out = ""
+                                if choices and "message" in choices[0]:
+                                    text_out = choices[0]["message"].get("content", "")
+
+                                comp_tokens_est = max(1, len(text_out) // 4)
+                                llm_metrics.record_request(
+                                    provider="groq",
+                                    model=m,
+                                    tenant_id=tenant_id,
+                                    purpose=purpose,
+                                    prompt_tokens=prompt_tokens_est,
+                                    completion_tokens=comp_tokens_est,
+                                    latency_ms=latency_ms,
+                                    status_code=200,
+                                    masked_key=masked
+                                )
+                                return text_out
+
+                            elif resp.status_code in {429, 403}:
+                                _key_cooldowns[key] = time.time() + 60.0
+                                llm_metrics.record_key_cooldown(masked, "groq", 60.0)
+                                llm_metrics.record_request(
+                                    provider="groq",
+                                    model=m,
+                                    tenant_id=tenant_id,
+                                    purpose=purpose,
+                                    status_code=resp.status_code,
+                                    error="Groq Rate limit exhausted",
+                                    masked_key=masked
+                                )
+                                logger.warning(f"[Groq Rate Limit] Key {masked} throttled (HTTP {resp.status_code}). Switching to next key...")
+                                last_err = RuntimeError(f"Groq key {masked} throttled ({resp.status_code})")
+                                break
+
+                            elif resp.status_code in RETRYABLE_STATUS_CODES:
+                                last_err = RuntimeError(f"Groq {m} returned {resp.status_code}")
+                                continue
+
+                            else:
+                                last_err = RuntimeError(f"Groq error {resp.status_code}: {resp.text[:200]}")
+                                break
+
+                        except Exception as ex:
+                            last_err = ex
+                            logger.warning(f"[Groq Exception] {m} key {masked}: {ex}")
+                            continue
+
+        # ── Step 3: Ollama Local Fallback (if running) ─────────────────────────
+        try:
+            return generate_with_ollama(prompt, model or os.getenv("OLLAMA_MODEL", "llama3"), temperature)
+        except Exception:
+            pass
+
+        logger.error(f"[LLM Gateway] All provider keys and models exhausted. Last error: {last_err}")
+        raise last_err or RuntimeError("All LLM providers and keys exhausted")
+
+    async def generate_stream(
+        self,
+        prompt: str,
+        provider: str = "auto",
+        model: Optional[str] = None,
+        temperature: float = 0.2,
+        api_key: Optional[str] = None,
+        user: Optional[Any] = None,
+        tenant_id: Optional[int] = None,
+        purpose: str = "chat"
+    ) -> AsyncGenerator[str, None]:
+        """
+        True token-level Server-Sent Events (SSE) streaming generator.
+        Consumes provider HTTP streaming lines and yields text token chunks in real-time.
+        """
+        start_time = time.time()
+        ttft_recorded = False
+        prompt_tokens_est = max(1, len(prompt) // 4)
+        total_text_yielded = []
+        last_err: Optional[Exception] = None
+
+        prov = (provider or "auto").lower()
+        try_gemini_first = prov in ("gemini", "auto")
+
+        # ── Step 1: Gemini SSE Streaming ──────────────────────────────────────
+        if try_gemini_first:
+            gemini_keys, gemini_models = self._get_gemini_candidates(model, api_key, user)
+            async with httpx.AsyncClient(timeout=self.request_timeout) as client:
+                for key in gemini_keys:
+                    masked = _mask_key(key)
+                    now = time.time()
+                    if _key_cooldowns.get(key, 0) > now and len(gemini_keys) > 1:
+                        continue
+
+                    for m in gemini_models:
+                        url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:streamGenerateContent?alt=sse&key={key}"
+                        payload = {
+                            "contents": [{"parts": [{"text": prompt}]}],
+                            "generationConfig": {"temperature": temperature},
+                        }
+                        try:
+                            async with client.stream("POST", url, json=payload) as resp:
+                                if resp.status_code == 200:
+                                    _key_cooldowns.pop(key, None)
+                                    async for line in resp.aiter_lines():
+                                        if not line or not line.startswith("data:"):
+                                            continue
+                                        raw_json = line[len("data:"):].strip()
+                                        if not raw_json or raw_json == "[DONE]":
+                                            continue
+
+                                        try:
+                                            chunk_data = json.loads(raw_json)
+                                            cands = chunk_data.get("candidates", [])
+                                            if cands and "content" in cands[0]:
+                                                parts = cands[0]["content"].get("parts", [])
+                                                if parts and "text" in parts[0]:
+                                                    token = parts[0]["text"]
+                                                    if token:
+                                                        if not ttft_recorded:
+                                                            ttft_ms = (time.time() - start_time) * 1000
+                                                            llm_metrics.record_request(
+                                                                provider="gemini",
+                                                                model=m,
+                                                                tenant_id=tenant_id,
+                                                                purpose=purpose,
+                                                                prompt_tokens=prompt_tokens_est,
+                                                                latency_ms=ttft_ms,
+                                                                ttft_ms=ttft_ms,
+                                                                masked_key=masked
+                                                            )
+                                                            ttft_recorded = True
+                                                        total_text_yielded.append(token)
+                                                        yield token
+                                        except json.JSONDecodeError:
+                                            continue
+
+                                    # Stream completed successfully
+                                    total_latency = (time.time() - start_time) * 1000
+                                    full_text = "".join(total_text_yielded)
+                                    llm_metrics.record_request(
+                                        provider="gemini",
+                                        model=m,
+                                        tenant_id=tenant_id,
+                                        purpose=purpose,
+                                        prompt_tokens=prompt_tokens_est,
+                                        completion_tokens=max(1, len(full_text) // 4),
+                                        latency_ms=total_latency,
+                                        status_code=200,
+                                        masked_key=masked
+                                    )
+                                    return
+
+                                elif resp.status_code in {429, 403}:
+                                    _key_cooldowns[key] = time.time() + 60.0
+                                    llm_metrics.record_key_cooldown(masked, "gemini", 60.0)
+                                    logger.warning(f"[Gemini Stream Quota] Key {masked} throttled ({resp.status_code}). Switching to next key...")
+                                    last_err = RuntimeError(f"Gemini key {masked} throttled ({resp.status_code})")
+                                    break
+
+                                else:
+                                    last_err = RuntimeError(f"Gemini stream returned {resp.status_code}")
+                                    continue
+
+                        except Exception as ex:
+                            last_err = ex
+                            logger.warning(f"[Gemini Stream Exception] {m} key {masked}: {ex}")
+                            continue
+
+        # ── Step 2: Groq SSE Streaming (Failover) ──────────────────────────────
+        groq_keys, groq_models = self._get_groq_candidates(model, api_key, user)
+        if groq_keys:
+            async with httpx.AsyncClient(timeout=self.request_timeout) as client:
+                for key in groq_keys:
+                    masked = _mask_key(key)
+                    now = time.time()
+                    if _key_cooldowns.get(key, 0) > now and len(groq_keys) > 1:
+                        continue
+
+                    for m in groq_models:
+                        url = "https://api.groq.com/openai/v1/chat/completions"
+                        payload = {
+                            "model": m,
+                            "messages": [{"role": "user", "content": prompt}],
+                            "temperature": temperature,
+                            "stream": True,
+                        }
+                        headers = {
+                            "Authorization": f"Bearer {key}",
+                            "Content-Type": "application/json",
+                        }
+                        try:
+                            async with client.stream("POST", url, json=payload, headers=headers) as resp:
+                                if resp.status_code == 200:
+                                    _key_cooldowns.pop(key, None)
+                                    async for line in resp.aiter_lines():
+                                        if not line or not line.startswith("data:"):
+                                            continue
+                                        raw_json = line[len("data:"):].strip()
+                                        if not raw_json or raw_json == "[DONE]":
+                                            continue
+
+                                        try:
+                                            chunk_data = json.loads(raw_json)
+                                            choices = chunk_data.get("choices", [])
+                                            if choices and "delta" in choices[0]:
+                                                token = choices[0]["delta"].get("content", "")
+                                                if token:
+                                                    if not ttft_recorded:
+                                                        ttft_ms = (time.time() - start_time) * 1000
+                                                        llm_metrics.record_request(
+                                                            provider="groq",
+                                                            model=m,
+                                                            tenant_id=tenant_id,
+                                                            purpose=purpose,
+                                                            prompt_tokens=prompt_tokens_est,
+                                                            latency_ms=ttft_ms,
+                                                            ttft_ms=ttft_ms,
+                                                            masked_key=masked
+                                                        )
+                                                        ttft_recorded = True
+                                                    total_text_yielded.append(token)
+                                                    yield token
+                                        except json.JSONDecodeError:
+                                            continue
+
+                                    # Stream completed successfully
+                                    total_latency = (time.time() - start_time) * 1000
+                                    full_text = "".join(total_text_yielded)
+                                    llm_metrics.record_request(
+                                        provider="groq",
+                                        model=m,
+                                        tenant_id=tenant_id,
+                                        purpose=purpose,
+                                        prompt_tokens=prompt_tokens_est,
+                                        completion_tokens=max(1, len(full_text) // 4),
+                                        latency_ms=total_latency,
+                                        status_code=200,
+                                        masked_key=masked
+                                    )
+                                    return
+
+                                elif resp.status_code in {429, 403}:
+                                    _key_cooldowns[key] = time.time() + 60.0
+                                    llm_metrics.record_key_cooldown(masked, "groq", 60.0)
+                                    logger.warning(f"[Groq Stream Quota] Key {masked} throttled ({resp.status_code}). Switching to next key...")
+                                    last_err = RuntimeError(f"Groq key {masked} throttled ({resp.status_code})")
+                                    break
+
+                                else:
+                                    last_err = RuntimeError(f"Groq stream returned {resp.status_code}")
+                                    continue
+
+                        except Exception as ex:
+                            last_err = ex
+                            logger.warning(f"[Groq Stream Exception] {m} key {masked}: {ex}")
+                            continue
+
+        logger.error(f"[LLM Gateway] All streaming providers exhausted. Last error: {last_err}")
+        raise last_err or RuntimeError("All LLM streaming providers exhausted")
+
+    def generate_sync(
+        self,
+        prompt: str,
+        provider: str = "auto",
+        model: Optional[str] = None,
+        temperature: float = 0.2,
+        api_key: Optional[str] = None,
+        user: Optional[Any] = None,
+        tenant_id: Optional[int] = None,
+        purpose: str = "general"
+    ) -> str:
+        """
+        Synchronous bridge for existing synchronous services.
+        Uses a separate background thread event loop if a loop is already running.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(
+                    asyncio.run,
+                    self.generate(
+                        prompt=prompt,
+                        provider=provider,
+                        model=model,
+                        temperature=temperature,
+                        api_key=api_key,
+                        user=user,
+                        tenant_id=tenant_id,
+                        purpose=purpose
+                    )
+                )
+                return future.result()
+        else:
+            return asyncio.run(
+                self.generate(
+                    prompt=prompt,
+                    provider=provider,
+                    model=model,
+                    temperature=temperature,
+                    api_key=api_key,
+                    user=user,
+                    tenant_id=tenant_id,
+                    purpose=purpose
+                )
+            )
+
+
+# Singleton LLMGateway instance
+llm_gateway = LLMGateway()
+
+
+# ── Backward Compatibility Bridge Exports ────────────────────────────────────
 
 def generate_with_gemini(
     prompt: str,
@@ -137,96 +663,15 @@ def generate_with_gemini(
     api_key: Optional[str] = None,
     user: Optional[Any] = None,
 ) -> str:
-    """
-    Generate using Google Gemini API.
-    If a key hits token limit or quota (429/403), instantly shifts to the next key.
-    """
-    keys = []
-    if api_key:
-        keys.extend(_extract_keys(api_key))
-    if user and getattr(user, "gemini_api_key", None):
-        keys.extend(_extract_keys(user.gemini_api_key))
-    keys.extend(_get_all_gemini_keys())
-    keys = list(dict.fromkeys(k for k in keys if k))
-
-    if not keys:
-        raise RuntimeError("No Gemini API keys available")
-
-    # Order keys so fresh keys are tried first, then rotated
-    ordered_keys = _get_active_ordered_keys(keys, "gemini")
-    env_model = os.getenv("GEMINI_MODEL")
-    base_models = list(GEMINI_MODELS)
-    if env_model:
-        base_models = [env_model] + [m for m in base_models if m != env_model]
-    if model:
-        models_to_try = [model] + [m for m in base_models if m != model]
-    else:
-        models_to_try = base_models
-
-    last_err = None
-    for key in ordered_keys:
-        masked_key = f"...{key[-4:]}" if len(key) >= 4 else "key"
-        
-        # Check if key was previously exhausted and we still have healthy keys left
-        now = time.time()
-        if _key_cooldowns.get(key, 0) > now and len(ordered_keys) > 1:
-            continue
-
-        for m in models_to_try:
-            url = (
-                f"https://generativelanguage.googleapis.com/v1beta/models/"
-                f"{m}:generateContent?key={key}"
-            )
-            payload = {
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"temperature": temperature},
-            }
-            try:
-                resp = httpx.post(url, json=payload, timeout=60.0)
-                if resp.status_code == 200:
-                    # Clear cooldown on successful response
-                    _key_cooldowns.pop(key, None)
-                    data = resp.json()
-                    candidates = data.get("candidates", [])
-                    if candidates and "content" in candidates[0]:
-                        parts = candidates[0]["content"].get("parts", [])
-                        if parts:
-                            return parts[0].get("text", "")
-                    return ""
-                
-                # Quota or Token Exhaustion (429 / 403) -> IMMEDIATELY SHIFT TO NEXT KEY
-                elif resp.status_code in {429, 403}:
-                    _key_cooldowns[key] = time.time() + 60.0  # Cooldown this key for 60s
-                    logger.warning(
-                        f"[Gemini Quota] Key {masked_key} quota/tokens exhausted (status {resp.status_code}). "
-                        f"Instantly shifting to next available key..."
-                    )
-                    last_err = RuntimeError(f"Gemini key {masked_key} rate-limited/depleted ({resp.status_code})")
-                    break  # Break out of models loop to immediately switch to the next key!
-
-                # Temporary Server Issues (503 / 500 / 502) -> Try next model or next key
-                elif resp.status_code in RETRYABLE_STATUS_CODES:
-                    logger.warning(f"[Gemini] {m} (key {masked_key}) status {resp.status_code}, trying next model...")
-                    last_err = RuntimeError(f"Gemini {m} returned {resp.status_code}")
-                    continue
-
-                # Model Not Found (404) -> Try next model
-                elif resp.status_code == 404:
-                    logger.warning(f"[Gemini] {m} (key {masked_key}) returned 404, trying next model...")
-                    last_err = RuntimeError(f"Gemini {m} returned 404")
-                    continue
-
-                else:
-                    logger.warning(f"[Gemini] {m} (key {masked_key}) non-retryable error {resp.status_code}")
-                    last_err = RuntimeError(f"Gemini {m} returned {resp.status_code}")
-                    break
-
-            except Exception as e:
-                last_err = e
-                logger.warning(f"[Gemini Exception] {m} with key {masked_key}: {e}")
-                continue
-
-    raise last_err or RuntimeError("All Gemini keys and models exhausted")
+    """Synchronous Gemini generation bridge through LLMGateway."""
+    return llm_gateway.generate_sync(
+        prompt=prompt,
+        provider="gemini",
+        model=model,
+        temperature=temperature,
+        api_key=api_key,
+        user=user
+    )
 
 
 def generate_with_groq(
@@ -236,78 +681,15 @@ def generate_with_groq(
     api_key: Optional[str] = None,
     user: Optional[Any] = None,
 ) -> str:
-    """
-    Generate using Groq Cloud API.
-    If a key hits token limit or quota (429), instantly shifts to the next key.
-    """
-    keys = []
-    if api_key:
-        keys.extend(_extract_keys(api_key))
-    if user and getattr(user, "groq_api_key", None):
-        keys.extend(_extract_keys(user.groq_api_key))
-    keys.extend(_get_all_groq_keys())
-    keys = list(dict.fromkeys(k for k in keys if k))
-
-    if not keys:
-        raise RuntimeError("No Groq API keys available")
-
-    ordered_keys = _get_active_ordered_keys(keys, "groq")
-    models_to_try = [model] + GROQ_MODELS if model else GROQ_MODELS
-    url = "https://api.groq.com/openai/v1/chat/completions"
-
-    last_err = None
-    for key in ordered_keys:
-        masked_key = f"...{key[-4:]}" if len(key) >= 4 else "key"
-
-        now = time.time()
-        if _key_cooldowns.get(key, 0) > now and len(ordered_keys) > 1:
-            continue
-
-        for m in models_to_try:
-            try:
-                headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-                payload = {
-                    "model": m,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": temperature,
-                    "max_tokens": 4096,
-                }
-                resp = httpx.post(url, headers=headers, json=payload, timeout=60.0)
-                if resp.status_code == 200:
-                    _key_cooldowns.pop(key, None)
-                    return resp.json()["choices"][0]["message"]["content"]
-
-                # Quota / Token limit reached (429) -> IMMEDIATELY SHIFT TO NEXT KEY
-                elif resp.status_code == 429:
-                    _key_cooldowns[key] = time.time() + 60.0
-                    logger.warning(
-                        f"[Groq Quota] Key {masked_key} rate-limited/tokens exhausted (429). "
-                        f"Instantly shifting to next available key..."
-                    )
-                    last_err = RuntimeError(f"Groq key {masked_key} rate-limited (429)")
-                    break  # Break out of models loop to immediately try next key!
-
-                elif resp.status_code in RETRYABLE_STATUS_CODES:
-                    logger.warning(f"[Groq] {m} (key {masked_key}) status {resp.status_code}, trying next model...")
-                    last_err = RuntimeError(f"Groq {m} returned {resp.status_code}")
-                    continue
-
-                elif resp.status_code == 404:
-                    logger.warning(f"[Groq] {m} (key {masked_key}) model not found (404), trying next model...")
-                    last_err = RuntimeError(f"Groq {m} returned 404")
-                    continue
-
-                else:
-                    logger.warning(f"[Groq] {m} (key {masked_key}) non-retryable error {resp.status_code}")
-                    last_err = RuntimeError(f"Groq {m} returned {resp.status_code}")
-                    break
-
-            except Exception as e:
-                last_err = e
-                logger.warning(f"[Groq Exception] {m} with key {masked_key}: {e}")
-                continue
-
-    raise last_err or RuntimeError("All Groq keys and models exhausted")
+    """Synchronous Groq generation bridge through LLMGateway."""
+    return llm_gateway.generate_sync(
+        prompt=prompt,
+        provider="groq",
+        model=model,
+        temperature=temperature,
+        api_key=api_key,
+        user=user
+    )
 
 
 def generate_with_ollama(
@@ -315,7 +697,7 @@ def generate_with_ollama(
     model: str = "llama3",
     temperature: float = 0.2,
 ) -> str:
-    """Local Ollama endpoint fallback (active only if local Ollama daemon is running)."""
+    """Local Ollama endpoint fallback."""
     ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
     url = f"{ollama_host}/api/generate"
     payload = {
@@ -324,12 +706,10 @@ def generate_with_ollama(
         "stream": False,
         "options": {"temperature": temperature},
     }
-    response = httpx.post(url, json=payload, timeout=120.0)
+    response = httpx.post(url, json=payload, timeout=60.0)
     response.raise_for_status()
     return response.json().get("response", "")
 
-
-# ── Multimodal Generation (Text + Vision) ────────────────────────────────────
 
 def generate_multimodal_with_gemini(
     prompt: str,
@@ -340,7 +720,7 @@ def generate_multimodal_with_gemini(
     user: Optional[Any] = None,
 ) -> str:
     """Send text + Base64 PNG images to Gemini with multi-key failover."""
-    active_model = model or os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
+    active_model = model or os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
     keys = []
     if api_key:
         keys.extend(_extract_keys(api_key))
@@ -401,11 +781,9 @@ def generate_multimodal_with_gemini(
     raise last_err or RuntimeError("All Gemini keys failed for multimodal")
 
 
-# ── Unified generate() Entry Point ───────────────────────────────────────────
-
 def generate(
     prompt: str,
-    provider: str = "gemini",
+    provider: str = "auto",
     model: Optional[str] = None,
     temperature: float = 0.2,
     image_b64_list: Optional[List[str]] = None,
@@ -413,16 +791,9 @@ def generate(
     user: Optional[Any] = None,
 ) -> str:
     """
-    Generate a response with automatic provider failover.
-    Default fallback sequence:
-      Gemini (all keys + models) → Groq (all keys + models) → graceful text fallback
-      (DeepSeek is excluded per user configuration).
+    Main synchronous generation facade.
+    Dispatches multimodal requests or text requests through LLMGateway.
     """
-    provider = (provider or "gemini").lower()
-    if provider == "auto":
-        provider = "gemini"
-
-    # Multimodal route
     if image_b64_list:
         try:
             return generate_multimodal_with_gemini(
@@ -436,30 +807,15 @@ def generate(
         except Exception as e:
             logger.warning(f"[Multimodal Gemini failed] Falling back to text-only: {e}")
 
-    # Build ordered provider chain (Gemini -> Groq)
-    provider_order = _build_provider_order(provider)
-
-    last_err = None
-    for p in provider_order:
-        try:
-            if p == "gemini":
-                return generate_with_gemini(prompt, model, temperature, api_key=api_key, user=user)
-            elif p == "groq":
-                return generate_with_groq(prompt, model, temperature, api_key=api_key, user=user)
-            elif p == "ollama":
-                return generate_with_ollama(prompt, model or os.getenv("OLLAMA_MODEL", "llama3"), temperature)
-        except Exception as e:
-            last_err = e
-            logger.warning(f"[LLM Failover] Provider '{p}' exhausted ({e}) — shifting to next provider...")
-            continue
-
-    logger.error(f"[LLM] All providers failed. Last error: {last_err}")
-    return "Sorry, all AI providers are currently unavailable. Please try again in a moment."
-
-
-def _build_provider_order(requested: str) -> list:
-    """Return provider list with requested provider first, followed by safe fallbacks. DeepSeek excluded."""
-    all_providers = ["gemini", "groq"]
-    if requested in all_providers:
-        return [requested] + [p for p in all_providers if p != requested]
-    return all_providers
+    try:
+        return llm_gateway.generate_sync(
+            prompt=prompt,
+            provider=provider,
+            model=model,
+            temperature=temperature,
+            api_key=api_key,
+            user=user
+        )
+    except Exception as e:
+        logger.error(f"[LLM] All providers failed: {e}")
+        return "Sorry, all AI providers are currently unavailable. Please try again in a moment."
