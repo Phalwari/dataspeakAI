@@ -15,7 +15,7 @@ Automated regression tests verifying the 8-issue remediation package:
 import os
 import sys
 from typing import Any, cast, List, Dict
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 # Ensure backend and root are in path
 root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -131,37 +131,46 @@ def test_gemini_model_prioritization_and_deduplication():
     # Test 1: GEMINI_MODEL set to existing model in GEMINI_MODELS
     with patch.dict(os.environ, {"GEMINI_MODEL": "gemini-3.8-flash"}):
         with patch("services.llm_generation_service._get_all_gemini_keys", return_value=["test-key-1234"]):
-            with patch("httpx.post") as mock_post:
-                mock_post.return_value = MagicMock(status_code=200, json=lambda: {"candidates": [{"content": {"parts": [{"text": "OK"}]}}]})
+            with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_async_post, patch("httpx.post") as mock_sync_post:
+                mock_resp = MagicMock(status_code=200, json=lambda: {"candidates": [{"content": {"parts": [{"text": "OK"}]}}]})
+                mock_async_post.return_value = mock_resp
+                mock_sync_post.return_value = mock_resp
                 generate_with_gemini(prompt="ping")
                 
                 # Check URL called in first attempt
-                first_url = mock_post.call_args_list[0][0][0]
+                calls = mock_async_post.call_args_list or mock_sync_post.call_args_list
+                first_url = calls[0][0][0]
                 assert "gemini-3.8-flash:generateContent" in first_url
 
     # Test 2: GEMINI_MODEL set to a new/custom model
     with patch.dict(os.environ, {"GEMINI_MODEL": "gemini-3.5-flash-lite"}):
         with patch("services.llm_generation_service._get_all_gemini_keys", return_value=["test-key-1234"]):
-            with patch("httpx.post") as mock_post:
-                mock_post.return_value = MagicMock(status_code=200, json=lambda: {"candidates": [{"content": {"parts": [{"text": "OK"}]}}]})
+            with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_async_post, patch("httpx.post") as mock_sync_post:
+                mock_resp = MagicMock(status_code=200, json=lambda: {"candidates": [{"content": {"parts": [{"text": "OK"}]}}]})
+                mock_async_post.return_value = mock_resp
+                mock_sync_post.return_value = mock_resp
                 generate_with_gemini(prompt="ping")
                 
-                first_url = mock_post.call_args_list[0][0][0]
+                calls = mock_async_post.call_args_list or mock_sync_post.call_args_list
+                first_url = calls[0][0][0]
                 assert "gemini-3.5-flash-lite:generateContent" in first_url
 
     # Test 3: Explicit model passed prioritizes explicit model without duplication
     with patch.dict(os.environ, {"GEMINI_MODEL": "gemini-3.8-flash"}):
         with patch("services.llm_generation_service._get_all_gemini_keys", return_value=["test-key-1234"]):
-            with patch("httpx.post") as mock_post:
+            with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_async_post, patch("httpx.post") as mock_sync_post:
                 # First attempt fails with 500, second succeeds
-                mock_post.side_effect = [
+                side_effects = [
                     MagicMock(status_code=500),
                     MagicMock(status_code=200, json=lambda: {"candidates": [{"content": {"parts": [{"text": "OK"}]}}]}),
                 ]
+                mock_async_post.side_effect = side_effects
+                mock_sync_post.side_effect = side_effects
                 generate_with_gemini(prompt="ping", model="custom-override-model")
                 
-                first_url = mock_post.call_args_list[0][0][0]
-                second_url = mock_post.call_args_list[1][0][0]
+                calls = mock_async_post.call_args_list or mock_sync_post.call_args_list
+                first_url = calls[0][0][0]
+                second_url = calls[1][0][0]
                 assert "custom-override-model:generateContent" in first_url
                 assert "gemini-3.8-flash:generateContent" in second_url
 

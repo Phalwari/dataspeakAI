@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 import models
 from database import engine, get_db
+from dependencies import get_current_admin_user
 from routers import (
     users, tenants, databases, api_keys, chatbot_config, documents,
     query, chat, analytics, connections, insights, files, file_insights,
@@ -121,9 +122,9 @@ def get_widget_embed_root(public_key: str, request: Request, db: Session = Depen
 
 
 @app.get("/api/system/llm-metrics")
-def get_system_llm_metrics():
+def get_system_llm_metrics(current_user: models.User = Depends(get_current_admin_user)):
     """
-    Returns aggregated LLM gateway telemetry and key health metrics.
+    Returns aggregated LLM gateway telemetry and key health metrics (Admin only).
     """
     from services.llm_metrics import llm_metrics
     return llm_metrics.get_summary()

@@ -543,7 +543,7 @@ def _make_json_serializable(val: Any) -> Any:
     return str(val)
 
 
-def execute_safe_sql(db_conn: models.DatabaseConnection, sql_query: str, max_rows: int = 100) -> Dict[str, Any]:
+def execute_safe_sql(db_conn: models.DatabaseConnection, sql_query: str, max_rows: int = 100, timeout_ceiling: float = 12.0) -> Dict[str, Any]:
     """
     Validates, caps with LIMIT max_rows, and safely executes a read-only SQL query
     against the target database. Enforces statement timeout, read-only mode, and PII masking.
@@ -650,15 +650,18 @@ def execute_safe_sql(db_conn: models.DatabaseConnection, sql_query: str, max_row
             except Exception as e:
                 raise RuntimeError(f"Execution error: {str(e)}")
 
-        # Execute query within strict 12.0s fail-safe execution watchdog
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        # Execute query within strict fail-safe execution watchdog
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        try:
             future = executor.submit(_run_query_internal)
-            try:
-                return future.result(timeout=12.0)
-            except concurrent.futures.TimeoutError:
-                raise RuntimeError(
-                    f"Database execution timeout exceeded (10s dialect statement limit / 12s watchdog for {db_type})"
-                )
+            return future.result(timeout=timeout_ceiling)
+        except concurrent.futures.TimeoutError:
+            executor.shutdown(wait=False, cancel_futures=True)
+            raise RuntimeError(
+                f"Database execution timeout exceeded (10s dialect statement limit / {int(timeout_ceiling)}s watchdog for {db_type})"
+            )
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
     # Fallback simulated data execution for non-relational or simulated DBs
     time.sleep(0.05)  # Simulate brief processing delay

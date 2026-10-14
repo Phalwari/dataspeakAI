@@ -232,11 +232,12 @@ class LLMGateway:
         # ── Step 1: Attempt Gemini Candidates ─────────────────────────────────
         if try_gemini_first:
             gemini_keys, gemini_models = self._get_gemini_candidates(model, api_key, user)
+            has_active_gemini = any(_key_cooldowns.get(k, 0) <= time.time() for k in gemini_keys)
             async with httpx.AsyncClient(timeout=self.request_timeout) as client:
                 for key in gemini_keys:
                     masked = _mask_key(key)
                     now = time.time()
-                    if _key_cooldowns.get(key, 0) > now and len(gemini_keys) > 1:
+                    if has_active_gemini and _key_cooldowns.get(key, 0) > now:
                         continue
 
                     for m in gemini_models:
@@ -315,11 +316,12 @@ class LLMGateway:
         # ── Step 2: Attempt Groq Candidates (Failover) ────────────────────────
         groq_keys, groq_models = self._get_groq_candidates(model, api_key, user)
         if groq_keys:
+            has_active_groq = any(_key_cooldowns.get(k, 0) <= time.time() for k in groq_keys)
             async with httpx.AsyncClient(timeout=self.request_timeout) as client:
                 for key in groq_keys:
                     masked = _mask_key(key)
                     now = time.time()
-                    if _key_cooldowns.get(key, 0) > now and len(groq_keys) > 1:
+                    if has_active_groq and _key_cooldowns.get(key, 0) > now:
                         continue
 
                     for m in groq_models:
@@ -424,11 +426,12 @@ class LLMGateway:
         # ── Step 1: Gemini SSE Streaming ──────────────────────────────────────
         if try_gemini_first:
             gemini_keys, gemini_models = self._get_gemini_candidates(model, api_key, user)
+            has_active_gemini = any(_key_cooldowns.get(k, 0) <= time.time() for k in gemini_keys)
             async with httpx.AsyncClient(timeout=self.request_timeout) as client:
                 for key in gemini_keys:
                     masked = _mask_key(key)
                     now = time.time()
-                    if _key_cooldowns.get(key, 0) > now and len(gemini_keys) > 1:
+                    if has_active_gemini and _key_cooldowns.get(key, 0) > now:
                         continue
 
                     for m in gemini_models:
@@ -509,11 +512,12 @@ class LLMGateway:
         # ── Step 2: Groq SSE Streaming (Failover) ──────────────────────────────
         groq_keys, groq_models = self._get_groq_candidates(model, api_key, user)
         if groq_keys:
+            has_active_groq = any(_key_cooldowns.get(k, 0) <= time.time() for k in groq_keys)
             async with httpx.AsyncClient(timeout=self.request_timeout) as client:
                 for key in groq_keys:
                     masked = _mask_key(key)
                     now = time.time()
-                    if _key_cooldowns.get(key, 0) > now and len(groq_keys) > 1:
+                    if has_active_groq and _key_cooldowns.get(key, 0) > now:
                         continue
 
                     for m in groq_models:

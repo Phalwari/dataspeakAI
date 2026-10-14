@@ -337,20 +337,20 @@ def test_execute_safe_sql_watchdog_timeout():
 
     # Patch connection creation to simulate a hanging driver exceeding timeout
     def hanging_connect(*args, **kwargs):
-        time.sleep(13.0)
+        time.sleep(0.2)
         return MagicMock()
 
     with patch("services.sql_engine.create_engine") as mock_engine:
         mock_engine.side_effect = hanging_connect
         with pytest.raises(RuntimeError, match="Database execution timeout exceeded"):
-            execute_safe_sql(mock_db_conn, "SELECT 1")
+            execute_safe_sql(mock_db_conn, "SELECT 1", timeout_ceiling=0.05)
 
 
 # ==============================================================================
 # 5. System Diagnostics Endpoint Tests
 # ==============================================================================
 
-def test_system_llm_metrics_endpoint():
+def test_system_llm_metrics_endpoint_security_and_data():
     # Pre-populate metrics
     llm_metrics.record_request(
         provider="gemini",
@@ -363,14 +363,35 @@ def test_system_llm_metrics_endpoint():
         status_code=200
     )
 
-    client = TestClient(app)
-    response = client.get("/api/system/llm-metrics")
-    assert response.status_code == 200
+    from dependencies import get_current_admin_user, get_current_user
 
-    data = response.json()
-    assert "total_requests" in data
-    assert data["total_requests"] >= 1
-    assert "total_tokens" in data
-    assert "latency_ms" in data
-    assert "keys" in data
-    assert "requests_by_provider" in data
+    client = TestClient(app)
+
+    # 1. Unauthenticated request must receive 401
+    res_unauth = client.get("/api/system/llm-metrics")
+    assert res_unauth.status_code == 401
+
+    # 2. Non-admin authenticated user must receive 403 Forbidden
+    regular_user = models.User(id=2, email="user@test.com", role="Member", tenant_id=1)
+    app.dependency_overrides[get_current_user] = lambda: regular_user
+    try:
+        res_forbidden = client.get("/api/system/llm-metrics")
+        assert res_forbidden.status_code == 403
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+    # 3. Admin authenticated user must receive 200 OK with metrics
+    admin_user = models.User(id=1, email="admin@test.com", role="Admin", tenant_id=1)
+    app.dependency_overrides[get_current_admin_user] = lambda: admin_user
+    try:
+        res_admin = client.get("/api/system/llm-metrics")
+        assert res_admin.status_code == 200
+        data = res_admin.json()
+        assert "total_requests" in data
+        assert data["total_requests"] >= 1
+        assert "total_tokens" in data
+        assert "latency_ms" in data
+        assert "keys" in data
+        assert "requests_by_provider" in data
+    finally:
+        app.dependency_overrides.pop(get_current_admin_user, None)

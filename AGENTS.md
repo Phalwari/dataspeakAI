@@ -168,17 +168,21 @@ backend/
 ├── models.py                          # 10 SQLAlchemy ORM models
 ├── schemas.py                         # Pydantic validation schemas
 ├── auth.py                            # Passlib bcrypt hashing & PyJWT token utilities
-├── dependencies.py                    # get_current_user authentication dependency
+├── dependencies.py                    # get_current_user & get_current_admin_user dependencies
 ├── requirements.txt                   # Backend Python dependencies
-└── routers/
-    ├── users.py                       # /api/auth (Register, Login, OAuth, OTP, Password Reset)
-    ├── tenants.py                     # /api/tenant (Profile, Members, Invites)
-    ├── databases.py                   # /api/databases (CRUD, Introspection, 100-row preview)
-    ├── api_keys.py                    # /api/keys (Key Creation, Listing, Revocation, Deletion, Widget Keys)
-    ├── chatbot_config.py              # /api/chatbot-config (Get & Update Widget Settings)
-    ├── documents.py                   # /api/documents (Upload, FAISS Vector Search, Delete)
-    ├── chat.py                        # /api/chat (Conversations, Messages, Widget Chat)
-    └── widget.py                      # /api/widget (Session, Config, Chat SSE, Embed Page)
+├── routers/
+│   ├── users.py                       # /api/auth (Register, Login, OAuth, OTP, Password Reset)
+│   ├── tenants.py                     # /api/tenant (Profile, Members, Invites)
+│   ├── databases.py                   # /api/databases (CRUD, Introspection, 100-row preview)
+│   ├── api_keys.py                    # /api/keys (Key Creation, Listing, Revocation, Deletion, Widget Keys)
+│   ├── chatbot_config.py              # /api/chatbot-config (Get & Update Widget Settings)
+│   ├── documents.py                   # /api/documents (Upload, FAISS Vector Search, Delete)
+│   ├── chat.py                        # /api/chat (Conversations, Messages, Widget Chat)
+│   └── widget.py                      # /api/widget (Session, Config, Chat SSE, Embed Page)
+└── services/
+    ├── llm_generation_service.py      # LLMGateway, multi-key rotation & cooldown fallback
+    ├── llm_metrics.py                 # LLMMetrics datastore, percentiles & token telemetry
+    └── sql_engine.py                  # execute_safe_sql with dialect & watchdog timeouts
 ```
 
 ---
@@ -267,6 +271,15 @@ backend/
 * **Host Validation & SSRF Prevention (D5):** Live database connections block loopback (`127.0.0.0/8`), link-local (`169.254.0.0/16`), and private RFC 1918 subnets unless `ALLOW_PRIVATE_DB_HOSTS=true`. SQLite database paths must physically exist and reject directory traversal (`..`).
 * **Tenant Isolation & Cooldown (D6, D7):** Database access is tenant-scoped (cross-tenant returns 404). Schema refresh enforces a per-tenant, per-database cooldown window (default 30 seconds via `ERD_REFRESH_COOLDOWN_SECONDS`) returning HTTP 429 with `Retry-After`.
 * **Frontend Visualization (D8):** Implemented via `@xyflow/react` v12, `@dagrejs/dagre`, and `vitest`. Large schemas (>60 tables) automatically enable viewport virtualization (`onlyRenderVisibleElements`) and compact node rendering. Dragged positions are persisted in `localStorage` per `(database_id, schema)`.
+
+### 4.8 LLM Gateway, Diagnostics & Query Timeout Standard
+
+* **Unified Async LLM Gateway (`LLMGateway`):** All LLM generation routes through `LLMGateway` (`backend/services/llm_generation_service.py`), utilizing non-blocking `httpx.AsyncClient` with connection pooling, multi-key harvesting across `GEMINI_API_KEY*` and `GROQ_API_KEY*` (1..15+), round-robin quota rotation, and automatic 429/403 failover with a 60-second quarantine cooldown registry.
+* **All-Keys-Cooling Fallback:** When all candidate API keys for a provider are in cooldown (due to heavy concurrent load), the gateway does NOT fail immediately. It attempts cooling keys in priority order to maintain service availability while respecting external quotas.
+* **Diagnostics Endpoint Security:** System telemetry (`GET /api/system/llm-metrics`) is strictly restricted to authenticated administrators via `get_current_admin_user`. Unauthenticated calls receive HTTP 401 Unauthorized; non-admin users receive HTTP 403 Forbidden.
+* **Dual-Layer Database Query Timeout Defense:** Query execution in `execute_safe_sql` (`backend/services/sql_engine.py`) enforces strict dual-layer protection against runaway queries:
+  1. *Engine-level statement timeouts:* PostgreSQL (`options="-c statement_timeout=10000"`), MySQL (`SET SESSION max_execution_time=10000`), SQLite (`timeout=10.0`, `PRAGMA busy_timeout = 10000;`).
+  2. *Fail-safe watchdog ceiling:* 12.0s caller watchdog using `concurrent.futures.ThreadPoolExecutor` with manual lifecycle management (`shutdown(wait=False, cancel_futures=True)`) ensuring the caller is released immediately upon timeout without thread deadlock.
 
 ---
 
