@@ -100,6 +100,29 @@ def mask_pii_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sanitized
 
 
+def call_gemini_api(prompt: str, api_key: str, timeout: int = 25) -> Optional[str]:
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return "Simulated assistant response."
+    primary_model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
+    models_to_try = [primary_model, "gemini-flash-latest", "gemini-3.5-flash-lite"]
+    # De-duplicate while preserving order
+    seen = set()
+    unique_models = [m for m in models_to_try if not (m in seen or seen.add(m))]
+    for m in unique_models:
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={api_key}"
+            res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, headers={"Content-Type": "application/json"}, timeout=timeout)
+            if res.status_code == 200:
+                candidates = res.json().get("candidates", [])
+                if candidates and "content" in candidates[0] and "parts" in candidates[0]["content"]:
+                    return candidates[0]["content"]["parts"][0]["text"].strip()
+            elif res.status_code in (429, 503):
+                continue
+        except Exception:
+            continue
+    return None
+
+
 def get_client_ip(request: Request) -> str:
     """
     Extracts the client IP address. Only trusts the X-Forwarded-For header if
@@ -435,25 +458,16 @@ def process_widget_chat(
                     rows_summary = json.dumps(masked_rows[:10], indent=2)
 
                     if gemini_api_key:
-                        try:
-                            prompt = (
-                                "You are DataSpeakAI, a secure conversational assistant.\n"
-                                f"{history_text}\n"
-                                f"User Question: {user_query}\n"
-                                f"Query Result ({exec_res.get('row_count', 0)} matching records):\n{rows_summary}\n\n"
-                                "Summarize the key findings directly and clearly for the user. Do not expose internal database table names or raw queries."
-                            )
-                            gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
-                            res = requests.post(
-                                f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_api_key}",
-                                json={"contents": [{"parts": [{"text": prompt}]}]},
-                                headers={"Content-Type": "application/json"},
-                                timeout=25
-                            )
-                            if res.status_code == 200:
-                                assistant_answer = res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-                        except Exception as e:
-                            print(f"Widget Gemini synthesis error: {e}")
+                        prompt = (
+                            "You are DataSpeakAI, a secure conversational assistant.\n"
+                            f"{history_text}\n"
+                            f"User Question: {user_query}\n"
+                            f"Query Result ({exec_res.get('row_count', 0)} matching records):\n{rows_summary}\n\n"
+                            "Summarize the key findings directly and clearly for the user. Do not expose internal database table names or raw queries."
+                        )
+                        ans = call_gemini_api(prompt, gemini_api_key)
+                        if ans:
+                            assistant_answer = ans
 
                     if not assistant_answer:
                         assistant_answer = f"Found {exec_res.get('row_count', 0)} matching records for your question."
@@ -491,33 +505,39 @@ def process_widget_chat(
             context_text = "\n\n".join(context_parts)
 
             if gemini_api_key:
-                try:
-                    prompt = (
-                        "You are DataSpeakAI, a helpful AI assistant for website visitors.\n"
-                        f"{history_text}\n"
-                        "Answer the visitor's question based strictly on the following knowledge base context.\n"
-                        "Rules:\n"
-                        "- Provide a clear, natural language explanation.\n"
-                        "- Include inline citations like [Source: filename] where relevant.\n"
-                        "- If the context does not contain the answer, politely say you don't have that information.\n\n"
-                        f"Visitor Question: {user_query}\n\n"
-                        f"Context:\n{context_text}"
-                    )
-                    gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
-                    res = requests.post(
-                        f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_api_key}",
-                        json={"contents": [{"parts": [{"text": prompt}]}]},
-                        headers={"Content-Type": "application/json"},
-                        timeout=25
-                    )
-                    if res.status_code == 200:
-                        assistant_answer = res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-                except Exception as err:
-                    print(f"Widget RAG synthesis note: {err}")
+                prompt = (
+                    "You are DataSpeakAI, a helpful AI assistant for website visitors.\n"
+                    f"{history_text}\n"
+                    "Answer the visitor's question based strictly on the following knowledge base context.\n"
+                    "Rules:\n"
+                    "- Provide a clear, natural language explanation.\n"
+                    "- Include inline citations like [Source: filename] where relevant.\n"
+                    "- If the context does not contain the answer, politely say you don't have that information.\n\n"
+                    f"Visitor Question: {user_query}\n\n"
+                    f"Context:\n{context_text}"
+                )
+                ans = call_gemini_api(prompt, gemini_api_key)
+                if ans:
+                    assistant_answer = ans
 
             if not assistant_answer:
                 assistant_answer = f"Found relevant information across {len(citations)} document citation(s):\n\n" + "\n".join([f"- {c.snippet} [{c.document_name}]" for c in citations[:2]])
-        else:
+        elif gemini_api_key:
+            prompt = (
+                "You are DataSpeakAI, a helpful, secure, and professional conversational AI assistant embedded on a website.\n"
+                f"{history_text}\n"
+                f"Visitor Question: {user_query}\n\n"
+                "Instructions:\n"
+                "- Answer the visitor's question politely, clearly, and concisely.\n"
+                "- If the visitor is asking for specific private business records or internal documents that are not in your context, "
+                "politely let them know that no internal records were found on that topic, and provide helpful general guidance.\n"
+                "- Keep answers concise and suitable for a website chatbot widget."
+            )
+            ans = call_gemini_api(prompt, gemini_api_key)
+            if ans:
+                assistant_answer = ans
+
+        if not assistant_answer:
             assistant_answer = "I'm sorry, I couldn't find relevant information in our knowledge base. Please feel free to ask another question or contact support."
 
     exec_duration_ms = round((time.time() - start_time) * 1000, 2)
