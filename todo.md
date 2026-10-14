@@ -54,6 +54,182 @@ Every AI agent working on this repository **MUST** adhere to this 4-step workflo
 ---
 
 
+### Phase 7: Next-Generation AI Intelligence Platform (Phases 7A – 7H)
+**Priority: Multi-Tier (P0 Critical → P3 Enhancement) | Reference: `docs/architecture/ai_features_phase7_implementation_plan.md`**  
+**Goal:** Transform DataSpeakAI from an MVP into an enterprise-grade AI analytics and intelligence powerhouse across LLM resilience, real-time streaming, hierarchical RAG, self-correcting SQL agents, forecasting, data governance, and multimodal interfaces.
+
+#### Phase 7A: AI Engine Hardening & Unified Gateway
+**Priority: P0 (Critical) | Estimated Effort: 2 sessions**
+- [ ] **Task 7A.1 — Unified LLM Gateway Service & Key Telemetry**
+  - **Target Files:** `backend/services/llm_generation_service.py`, `backend/services/llm_metrics.py`, `backend/services/multi_llm.py`
+  - **Details:** Refactor fragmented LLM services (`llm_generation_service.py` REST and `multi_llm.py` LangChain) into a unified `LLMGateway` class. Implement thread-safe multi-key harvesting and round-robin quota rotation for Gemini and Groq. Create `LLMMetrics` datastore tracking tokens in/out, latency percentiles, failure rates, and per-tenant cost attribution.
+  - **Acceptance Criteria:** Single entry point `generate()` and `generate_stream()` for all backend LLM calls; zero unhandled 429/403 errors with automatic key cooldown; dashboard metrics accessible.
+
+- [ ] **Task 7A.2 — True Token-Level SSE Streaming**
+  - **Target Files:** `backend/routers/chat.py`, `backend/routers/widget.py`, `backend/services/llm_generation_service.py`
+  - **Details:** Replace post-generation chunking with Gemini's native `streamGenerateContent?alt=sse` endpoint. Deliver real-time incremental tokens to frontend clients.
+  - **Acceptance Criteria:** Time-To-First-Token (TTFT) drops from 5–15s to < 500ms; smooth typewriter rendering in chat UI and embeddable widget.
+
+- [ ] **Task 7A.3 — Conversation Memory Management (Sliding Window & Summarization)**
+  - **Target Files:** `backend/services/conversation_memory.py`, `backend/routers/chat.py`, `backend/models.py`
+  - **Details:** Implement `ConversationMemoryManager` enforcing a sliding window of recent messages (`MAX_RECENT_TURNS = 10`) combined with automatic asynchronous LLM summarization for conversations exceeding 15 turns.
+  - **Acceptance Criteria:** Extended conversations (20+ turns) do not exceed LLM context bounds; responses retain memory of earlier conversational goals without latency degradation.
+
+- [ ] **Task 7A.4 — Per-Dialect Query Execution Timeouts & Safety Guards**
+  - **Target Files:** `backend/services/sql_engine.py`
+  - **Details:** Configure per-engine query statement execution timeouts across PostgreSQL (`SET statement_timeout = '10000'`), MySQL (`SET SESSION MAX_EXECUTION_TIME = 10000`), and SQLite (`busy_timeout = 10000`).
+  - **Acceptance Criteria:** Long-running, blocking, or Cartesian product user queries automatically abort after 10 seconds without locking backend server threads.
+
+- [ ] **Task 7A.5 — NL-to-SQL Multi-Key Failover Integration**
+  - **Target Files:** `backend/services/sql_engine.py`
+  - **Details:** Update `generate_sql_from_nl` to route through the unified `LLMGateway` with multi-key rotation and Groq failover rather than reading singular `GEMINI_API_KEY`.
+  - **Acceptance Criteria:** NL-to-SQL generation continues smoothly under high concurrency or when primary API keys hit rate limits.
+
+---
+
+#### Phase 7D: Real-Time AI Streaming & Conversational Memory
+**Priority: P0 (Critical) | Estimated Effort: 2 sessions**
+- [ ] **Task 7D.1 — Bidirectional WebSocket Chat Channel**
+  - **Target Files:** `backend/routers/ws_chat.py`, `backend/main.py`
+  - **Details:** Implement WebSocket endpoint `/ws/chat/{conversation_id}` supporting bidirectional client-server frames: message transmission, token streaming, mid-stream generation cancellation, and user feedback.
+  - **Acceptance Criteria:** WebSocket connection lifecycle cleanly established; users can abort generation instantly; typing indicators delivered in real-time.
+
+- [ ] **Task 7D.2 — Intelligent Conversation Summarization & Dynamic Title Generation**
+  - **Target Files:** `backend/services/conversation_memory.py`, `backend/routers/chat.py`
+  - **Details:** Automatically generate a concise 3–6 word conversation title based on the user's initial prompt using lightweight LLM inference.
+  - **Acceptance Criteria:** Fresh conversations receive descriptive, human-readable titles instead of default "New Chat" labels.
+
+- [ ] **Task 7D.3 — User Feedback Collection & RLHF Datastore**
+  - **Target Files:** `backend/models.py`, `backend/schemas.py`, `backend/routers/chat.py`, `backend/services/db_migration.py`
+  - **Details:** Create `MessageFeedback` model storing message ratings (`thumbs_up` / `thumbs_down`), optional feedback text, user corrections, and timestamps. Expose feedback mutation endpoints.
+  - **Acceptance Criteria:** Users can submit thumbs up/down and textual feedback on AI responses; feedback is persisted with tenant and user scoping for model evaluation.
+
+---
+
+#### Phase 7B: Advanced RAG 2.0 — Next-Generation Document Intelligence
+**Priority: P1 (High) | Estimated Effort: 3 sessions**
+- [ ] **Task 7B.1 — Context-Aware Semantic Boundary Chunking Engine**
+  - **Target Files:** `backend/ingestion/semantic_chunker.py`
+  - **Details:** Replace naive fixed-size 512-token chunking with semantic boundary detection. Use sentence embedding cosine similarity drops to identify natural topic and section boundaries.
+  - **Acceptance Criteria:** Chunks maintain coherent topical focus without splitting sentences or tables in half; retrieval relevancy improves.
+
+- [ ] **Task 7B.2 — Hierarchical Parent-Child Document Structure & Node Modeling**
+  - **Target Files:** `backend/models.py`, `backend/services/db_migration.py`, `backend/schemas.py`
+  - **Details:** Implement `DocumentNode` ORM model representing documents as hierarchical trees (`document` -> `section` -> `paragraph` / `table` / `figure`) with parent/child relationships and node-level summaries.
+  - **Acceptance Criteria:** Document tree persisted upon file ingestion; parent nodes store synthesized summaries and child chunks link to specific sections.
+
+- [ ] **Task 7B.3 — Multi-Vector Retrieval with Contextual Compression**
+  - **Target Files:** `backend/search/multi_vector_retriever.py`, `backend/search/hybrid.py`
+  - **Details:** Search fine-grained child chunk embeddings for precise hits, map hits to coarse parent sections, and compress parent context relative to the user query before prompt injection.
+  - **Acceptance Criteria:** Retrieval provides rich contextual background without prompt bloat or irrelevant surrounding noise.
+
+- [ ] **Task 7B.4 — Embedding Model Upgrade Path & Dual-Index Migration**
+  - **Target Files:** `backend/routers/documents.py`, `backend/routers/chat.py`
+  - **Details:** Add support for high-accuracy embedding models (`BAAI/bge-m3` or `nomic-embed-text-v2-moe`) while maintaining dual-index compatibility with existing `all-MiniLM-L6-v2` FAISS indices.
+  - **Acceptance Criteria:** Existing vector stores continue operating seamlessly; newly created or re-indexed collections use upgraded high-dimension embeddings.
+
+- [ ] **Task 7B.5 — Citation & Source Provenance Tracking Engine**
+  - **Target Files:** `backend/services/citation_service.py`, `backend/routers/chat.py`
+  - **Details:** Extract factual assertions in AI responses, match them against retrieved chunks with confidence scoring (> 0.6), and return structured citation metadata (document ID, page number, preview snippet).
+  - **Acceptance Criteria:** AI chat responses include clickable, verifiable citations linking directly to source document excerpts.
+
+---
+
+#### Phase 7C: Agentic NL-to-SQL 2.0 — Multi-Turn Query Refinement
+**Priority: P1 (High) | Estimated Effort: 2 sessions**
+- [ ] **Task 7C.1 — Self-Correcting SQL Agent with EXPLAIN Dry-Run**
+  - **Target Files:** `backend/services/sql_agent.py`, `backend/services/sql_engine.py`
+  - **Details:** Build agentic SQL execution loop (`MAX_CORRECTION_ATTEMPTS = 3`). Validate AST safety, execute database engine `EXPLAIN` dry-runs to catch syntax/schema errors before execution, and feed error messages back into the LLM for automatic query correction.
+  - **Acceptance Criteria:** Mistyped column or table names and dialect syntax errors are auto-corrected in-flight without user intervention.
+
+- [ ] **Task 7C.2 — Contextual Schema-Aware Query Suggestion Engine**
+  - **Target Files:** `backend/services/query_suggestions.py`, `backend/routers/chat.py`
+  - **Details:** Inspect connected database schema and historical successful queries to generate dynamic starter questions (KPI totals, trends, comparisons, top-N).
+  - **Acceptance Criteria:** Connecting a database populates interactive starter query suggestions in the chat interface.
+
+- [ ] **Task 7C.3 — SQL Explanation, Visual Query Plan & Optimization Hints**
+  - **Target Files:** `backend/services/sql_explainer.py`, `backend/routers/query.py`
+  - **Details:** Translate complex generated SQL queries into plain English explanations, visual table join lineages, and execution plan optimization hints.
+  - **Acceptance Criteria:** Users can click "Explain Query" to see how SQL logic operates and why specific indexes or filters were chosen.
+
+---
+
+#### Phase 7E: Predictive Analytics & Anomaly Detection Engine
+**Priority: P2 (Medium) | Estimated Effort: 3 sessions**
+- [ ] **Task 7E.1 — Automated Time-Series Forecasting Service**
+  - **Target Files:** `backend/services/forecasting_service.py`, `backend/routers/analytics.py`
+  - **Details:** Implement automated time-series forecasting across metric columns (Exponential Smoothing, Holt-Winters, Linear Trend). Auto-select best model using lowest historical MAPE.
+  - **Acceptance Criteria:** Generates 30/60/90-day predictive intervals with confidence bands for numerical database metrics.
+
+- [ ] **Task 7E.2 — Real-Time Telemetry & Data Drift Anomaly Detector**
+  - **Target Files:** `backend/services/anomaly_detector.py`, `backend/services/insights_engine.py`
+  - **Details:** Build statistical detector checking query volume Z-scores, latency IQR spikes, error rate jumps, and schema column drift.
+  - **Acceptance Criteria:** Anomalies detected with severity rankings and surfaced proactively in AI Insights.
+
+- [ ] **Task 7E.3 — Tenant-Scoped Scheduled Intelligence Cron Sweep**
+  - **Target Files:** `backend/services/intelligence_scheduler.py`, `backend/main.py`
+  - **Details:** Background scheduler running periodic sweeps to refresh AI insights, run anomaly detection, update forecasts, and prepare executive digest notifications.
+  - **Acceptance Criteria:** Periodic automated analysis runs without requiring manual UI refresh button triggers.
+
+---
+
+#### Phase 7F: AI-Powered Data Quality & Governance Layer
+**Priority: P2 (Medium) | Estimated Effort: 2 sessions**
+- [ ] **Task 7F.1 — Automated Data Quality Profiler**
+  - **Target Files:** `backend/services/data_quality_service.py`, `backend/routers/databases.py`
+  - **Details:** Compute comprehensive data quality metrics: completeness (% non-null), uniqueness (duplicate detection), validity, consistency, and an overall 0–100 Data Quality Index (DQI).
+  - **Acceptance Criteria:** Displays data quality scorecard per database and table with highlighted risk areas.
+
+- [ ] **Task 7F.2 — Actionable AI Data Cleaning Suggestions**
+  - **Target Files:** `backend/services/ai_cleaning_service.py`
+  - **Details:** Generate safe SQL/Python cleaning scripts from quality reports with read-only previews and confidence scores.
+  - **Acceptance Criteria:** Users receive one-click previewable SQL queries to remediate null values, duplicates, and invalid formats.
+
+- [ ] **Task 7F.3 — End-to-End Column Lineage & Impact Analysis Graph**
+  - **Target Files:** `backend/services/lineage_service.py`, `backend/routers/query.py`
+  - **Details:** Trace AI answers back through SQL queries, contributing tables, foreign keys, and source document chunks in a directed lineage graph.
+  - **Acceptance Criteria:** Full auditability from natural language conclusion back to source data cells.
+
+---
+
+#### Phase 7G: Multi-Modal Analytics — Chart-to-Insight & Voice Interface
+**Priority: P3 (Enhancement) | Estimated Effort: 2 sessions**
+- [ ] **Task 7G.1 — Chart Screenshot Inspection & Gemini Vision Analysis**
+  - **Target Files:** `backend/services/visual_analytics.py`, `backend/routers/chat.py`
+  - **Details:** Analyze uploaded chart images via Gemini 2.5 Flash VLM to extract chart types, key metrics, observed trends, and follow-up recommendations.
+  - **Acceptance Criteria:** Users can upload a screenshot of an existing chart and receive instant AI analysis and underlying metric extraction.
+
+- [ ] **Task 7G.2 — Natural Language to Recharts Configuration Engine**
+  - **Target Files:** `backend/services/nl_to_chart.py`
+  - **Details:** Transform natural language chart prompts (e.g. "monthly revenue bar chart with target line") into validated Recharts configuration specifications.
+  - **Acceptance Criteria:** Natural language requests generate valid, interactive React chart visualizations.
+
+- [ ] **Task 7G.3 — Voice Query Transcription Interface (Whisper Integration)**
+  - **Target Files:** `backend/routers/voice.py`, `backend/services/whisper_service.py`
+  - **Details:** Add audio upload and speech-to-text transcription endpoint integrating OpenAI Whisper, routing transcripts directly into the conversational query engine.
+  - **Acceptance Criteria:** Voice queries transcribe accurately and trigger standard conversational answers.
+
+---
+
+#### Phase 7H: Embeddable AI Copilot SDK & Plugin Architecture
+**Priority: P3 (Enhancement) | Estimated Effort: 2 sessions**
+- [ ] **Task 7H.1 — Public REST API SDK Endpoint & Bearer Authentication**
+  - **Target Files:** `backend/routers/sdk.py`
+  - **Details:** Build developer-facing `/api/v1/query` endpoint with API key authentication (`sk_live_...`) for programmatic data exploration.
+  - **Acceptance Criteria:** Third-party applications can query DataSpeakAI programmatically via simple HTTP POST requests.
+
+- [ ] **Task 7H.2 — Real-Time Webhook & Event Dispatch System**
+  - **Target Files:** `backend/services/webhook_service.py`, `backend/models.py`, `backend/services/db_migration.py`
+  - **Details:** Event dispatch service delivering webhook payloads for `insight.generated`, `anomaly.detected`, `query.failed`, and `forecast.updated`.
+  - **Acceptance Criteria:** External webhooks trigger reliably with retry handling and HMAC signature validation.
+
+- [ ] **Task 7H.3 — Extensible AI Model Plugin Registry Architecture**
+  - **Target Files:** `backend/services/plugin_registry.py`
+  - **Details:** Create plugin registry interface allowing custom AI models, specialized embedding providers, and domain-specific analytical engines to register dynamically.
+  - **Acceptance Criteria:** Modular plugins can be enabled or disabled via configuration without modifying core backend code.
+
+---
+
 ### Phase 6: Production Hardening, Billing & DevOps
 **Priority: P3 (Production Readiness) | Estimated Effort: 2 sessions**  
 **Goal:** Prepare DataSpeakAI for commercial production deployment.
