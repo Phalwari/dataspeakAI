@@ -36,13 +36,13 @@ export const TableNode = memo(({ data, selected }: NodeProps<any>) => {
         type="target"
         position={Position.Top}
         id="top"
-        className="!w-2.5 !h-2.5 !-top-1.5 !bg-indigo-500 !border-2 !border-white dark:!border-slate-900 !opacity-0"
+        className="!w-2.5 !h-2.5 !-top-1.5 !bg-indigo-500 !border-2 !border-white dark:!border-slate-900"
       />
       <Handle
         type="source"
         position={Position.Bottom}
         id="bottom"
-        className="!w-2.5 !h-2.5 !-bottom-1.5 !bg-indigo-500 !border-2 !border-white dark:!border-slate-900 !opacity-0"
+        className="!w-2.5 !h-2.5 !-bottom-1.5 !bg-indigo-500 !border-2 !border-white dark:!border-slate-900"
       />
 
       {/* Header */}

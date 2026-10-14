@@ -198,4 +198,18 @@ describe("erdTransform & erdLayout Pure Utilities", () => {
     expect(userNode?.position.x).toBe(999);
     expect(userNode?.position.y).toBe(888);
   });
+
+  it("assigns appropriate source and target handles based on direction", () => {
+    // Horizontal (LR)
+    const lrGraph = transformErdDataToGraph(sampleResponse, { direction: "LR" });
+    const lrEdge = lrGraph.edges[0];
+    expect(lrEdge.sourceHandle).toBe("right");
+    expect(lrEdge.targetHandle).toBe("left");
+
+    // Vertical (TB)
+    const tbGraph = transformErdDataToGraph(sampleResponse, { direction: "TB" });
+    const tbEdge = tbGraph.edges[0];
+    expect(tbEdge.sourceHandle).toBe("bottom");
+    expect(tbEdge.targetHandle).toBe("top");
+  });
 });

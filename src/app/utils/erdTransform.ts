@@ -46,6 +46,7 @@ export interface TransformOptions {
   showPkFkOnly?: boolean;
   showInferred?: boolean;
   savedPositions?: Record<string, { x: number; y: number }>;
+  direction?: "LR" | "TB";
 }
 
 export interface TableNodeData {
@@ -62,7 +63,7 @@ export function transformErdDataToGraph(
   data: DatabaseErdResponse,
   options: TransformOptions = {}
 ): { nodes: Node<TableNodeData>[]; edges: Edge[] } {
-  const { showPkFkOnly = false, showInferred = false, savedPositions = {} } = options;
+  const { showPkFkOnly = false, showInferred = false, savedPositions = {}, direction = "LR" } = options;
 
   const isLargeSchema = data.tables.length > 60;
   const tableMap = new Map<string, ErdTable>();
@@ -132,10 +133,13 @@ export function transformErdDataToGraph(
       label = `[${rel.source_columns.join(", ")}]`;
     }
 
+    const isVertical = direction === "TB";
     const edge: Edge = {
       id: rel.id,
       source: rel.source_table,
       target: rel.target_table,
+      sourceHandle: isVertical ? "bottom" : "right",
+      targetHandle: isVertical ? "top" : "left",
       animated: false, // MANDATORY: NO animated edges
       markerEnd: {
         type: MarkerType.ArrowClosed,

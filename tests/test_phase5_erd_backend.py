@@ -69,6 +69,8 @@ from services.erd_service import (
     load_erd_from_catalog,
     detect_inferred_relationships,
     clear_cooldowns_for_testing,
+    build_erd_connection_url,
+    validate_db_host_security,
     ReflectedTable,
     ReflectedColumn,
     ReflectedRelationship,
@@ -844,3 +846,122 @@ def test_erd_mocked_mysql_inspector():
     assert rel.target_table == "OrdersHeader"
     assert rel.source_columns == ["OrderID"]
     assert rel.target_columns == ["OrderID"]
+
+
+def test_erd_host_security_blocks_bracketed_ipv6_loopback(test_setup):
+    """
+    Verifies that bracketed IPv6 loopback hosts like '[::1]' are rejected with HTTP 400.
+    """
+    db = test_setup["db"]
+    client = test_setup["client"]
+    token = test_setup["token1"]
+
+    pg_ipv6 = models.DatabaseConnection(
+        tenant_id=1,
+        name="IPv6 Bracketed Loopback DB",
+        db_type="postgresql",
+        host="[::1]",
+        database="testdb",
+        status="connected",
+    )
+    db.add(pg_ipv6)
+    db.commit()
+
+    res = client.get(f"/api/databases/{pg_ipv6.id}/erd", headers={"Authorization": f"Bearer {token}"})
+    assert res.status_code == 400
+    assert "localhost/loopback" in res.json()["detail"].lower() or "loopback" in res.json()["detail"].lower()
+
+
+def test_erd_build_connection_url_escapes_passwords_and_special_chars():
+    """
+    Verifies that build_erd_connection_url properly URL-encodes passwords with '@', ':', and '#'
+    and produces a valid URL that sqlalchemy.engine.make_url can parse without corruption.
+    """
+    from sqlalchemy.engine import make_url
+
+    complex_password = "P@ss:w0rd!#999/test"
+    complex_user = "admin:special@user"
+
+    conn = models.DatabaseConnection(
+        db_type="postgresql",
+        host="db.example.internal",
+        port=5432,
+        username=complex_user,
+        password=encrypt_password(complex_password),
+        database="analytics_db"
+    )
+    with patch.dict(os.environ, {"ALLOW_PRIVATE_DB_HOSTS": "true"}):
+        url_str = build_erd_connection_url(conn)
+        parsed = make_url(url_str)
+        assert parsed.password == complex_password
+        assert parsed.username == complex_user
+        assert parsed.host == "db.example.internal"
+        assert parsed.port == 5432
+        assert parsed.database == "analytics_db"
+
+
+def test_erd_inferred_relationships_hardening_against_false_positives():
+    """
+    Verifies that words ending with 'id' such as 'paid' are NOT falsely inferred as FKs,
+    and that plural table names like 'addresses' correctly match 'address_id'.
+    """
+    t_pass = ReflectedTable("pass", columns=[ReflectedColumn("id", "INTEGER", is_pk=True)])
+    t_invoices = ReflectedTable("invoices", columns=[
+        ReflectedColumn("id", "INTEGER", is_pk=True),
+        ReflectedColumn("paid", "BOOLEAN")
+    ])
+    t_addresses = ReflectedTable("addresses", columns=[ReflectedColumn("id", "INTEGER", is_pk=True)])
+    t_users = ReflectedTable("users", columns=[
+        ReflectedColumn("id", "INTEGER", is_pk=True),
+        ReflectedColumn("address_id", "INTEGER")
+    ])
+
+    inferred = detect_inferred_relationships([t_pass, t_invoices, t_addresses, t_users], [])
+
+    # paid -> pass MUST NOT exist
+    assert not any(r.source_table == "invoices" and r.target_table == "pass" for r in inferred)
+
+    # address_id -> addresses MUST exist
+    addr_match = [r for r in inferred if r.source_table == "users" and r.target_table == "addresses"]
+    assert len(addr_match) == 1
+    assert addr_match[0].source_columns == ["address_id"]
+    assert addr_match[0].target_columns == ["id"]
+
+
+def test_erd_empty_database_caching(tmp_path, test_setup):
+    """
+    Verifies that an empty database with 0 tables is cached in DatabaseSchema
+    and subsequent calls return source='catalog' instead of triggering live reflection.
+    """
+    empty_db_path = str(tmp_path / "empty_cache_test.db")
+    empty_conn = sqlite3.connect(empty_db_path)
+    empty_conn.close()
+
+    db = test_setup["db"]
+    client = test_setup["client"]
+    token = test_setup["token1"]
+
+    db_conn = models.DatabaseConnection(
+        tenant_id=1,
+        name="Empty Cache Test DB",
+        db_type="sqlite",
+        database=empty_db_path,
+        status="connected",
+    )
+    db.add(db_conn)
+    db.commit()
+
+    # Call 1: live reflection
+    res1 = client.get(f"/api/databases/{db_conn.id}/erd", headers={"Authorization": f"Bearer {token}"})
+    assert res1.status_code == 200
+    data1 = res1.json()
+    assert data1["source"] == "live"
+    assert data1["table_count"] == 0
+
+    # Call 2: cache hit
+    res2 = client.get(f"/api/databases/{db_conn.id}/erd", headers={"Authorization": f"Bearer {token}"})
+    assert res2.status_code == 200
+    data2 = res2.json()
+    assert data2["source"] == "catalog"
+    assert data2["table_count"] == 0
+

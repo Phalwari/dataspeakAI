@@ -55,25 +55,26 @@ def clear_cooldowns_for_testing() -> None:
 
 def validate_db_host_security(host: Optional[str], allow_private: bool = False) -> None:
     """
-    Rejects loopback (127.0.0.1, localhost), link-local (169.254.0.0/16), and private ranges
+    Rejects loopback (127.0.0.1, localhost, ::1), link-local (169.254.0.0/16), and private ranges
     unless allow_private is True.
     """
     if not host:
         return
     h = host.strip().lower()
+    unbracketed = h.strip("[]")
 
-    if h in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+    if h in ("localhost", "127.0.0.1", "::1", "0.0.0.0") or unbracketed in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
         if not allow_private:
             raise ValueError("Connection to localhost/loopback is not permitted for ERD")
         return
 
     # Try IP parsing directly
     try:
-        ip = ipaddress.ip_address(h)
+        ip = ipaddress.ip_address(unbracketed)
     except ValueError:
         # Try DNS resolution
         try:
-            resolved_ip_str = socket.gethostbyname(h)
+            resolved_ip_str = socket.gethostbyname(unbracketed)
             ip = ipaddress.ip_address(resolved_ip_str)
         except Exception:
             return
@@ -107,6 +108,8 @@ def build_erd_connection_url(db_conn: models.DatabaseConnection) -> str:
     Constructs dialect-specific connection URL with decrypted password.
     Performs host / path security validation beforehand.
     """
+    from urllib.parse import quote_plus
+
     db_type = (db_conn.db_type or "").lower()
     allow_private = ALLOW_PRIVATE_DB_HOSTS or os.getenv("ALLOW_PRIVATE_DB_HOSTS", "false").lower() in ("true", "1", "yes")
 
@@ -120,12 +123,22 @@ def build_erd_connection_url(db_conn: models.DatabaseConnection) -> str:
     validate_db_host_security(db_conn.host, allow_private=allow_private)
 
     raw_password = decrypt_password(db_conn.password) if db_conn.password else ""
+    safe_user = quote_plus(db_conn.username) if db_conn.username else ""
+    safe_pwd = quote_plus(raw_password) if raw_password else ""
+
+    user_pwd_part = f"{safe_user}:{safe_pwd}@" if (safe_user or safe_pwd) else ""
     port_str = f":{db_conn.port}" if db_conn.port else ""
 
+    host_str = (db_conn.host or "").strip()
+    if ":" in host_str and not host_str.startswith("["):
+        host_str = f"[{host_str}]"
+
+    db_name = db_conn.database or ""
+
     if db_type == "postgresql":
-        return f"postgresql://{db_conn.username}:{raw_password}@{db_conn.host}{port_str}/{db_conn.database}"
+        return f"postgresql://{user_pwd_part}{host_str}{port_str}/{db_name}"
     elif db_type in ("mysql", "mariadb"):
-        return f"mysql+pymysql://{db_conn.username}:{raw_password}@{db_conn.host}{port_str}/{db_conn.database}"
+        return f"mysql+pymysql://{user_pwd_part}{host_str}{port_str}/{db_name}"
     else:
         raise ValueError(f"ERD is supported only for relational databases (got: {db_type})")
 
@@ -426,7 +439,34 @@ def reflect_schema(engine: Engine, schema: Optional[str] = None, inspector_overr
 
 # ── Inferred Relationship Engine ──────────────────────────────────────────────
 
-GENERIC_COLUMN_NAMES = {"id", "code", "status", "name", "type", "created_at", "updated_at", "key", "value", "state", "description"}
+GENERIC_COLUMN_NAMES = {
+    "id", "code", "status", "name", "type", "created_at", "updated_at",
+    "key", "value", "state", "description", "paid", "valid", "solid",
+    "guid", "uuid", "active", "enabled", "deleted", "is_active"
+}
+
+
+def _get_table_name_variations(table_name: str) -> Set[str]:
+    raw = table_name.lower()
+    clean = raw.replace("_", "").replace("-", "")
+    variations = {raw, clean}
+
+    # Standard English plural suffix rules without over-stripping
+    if raw.endswith("ies") and len(raw) > 3:
+        sing = raw[:-3] + "y"
+        variations.add(sing)
+        variations.add(sing.replace("_", "").replace("-", ""))
+    elif raw.endswith(("sses", "shes", "ches", "xes", "zes")) and len(raw) > 4:
+        sing = raw[:-2]
+        variations.add(sing)
+        variations.add(sing.replace("_", "").replace("-", ""))
+    elif raw.endswith("s") and not raw.endswith(("ss", "us", "is", "as", "os")) and len(raw) > 2:
+        sing = raw[:-1]
+        variations.add(sing)
+        variations.add(sing.replace("_", "").replace("-", ""))
+
+    return variations
+
 
 def detect_inferred_relationships(
     tables: List[ReflectedTable],
@@ -438,7 +478,7 @@ def detect_inferred_relationships(
     - Target table must have a single-column primary key.
     - Column must NOT already be part of a real foreign key in source_table.
     - Match must be unambiguous (exactly 1 candidate target table).
-    - Generic names (id, code, status, name) are ignored.
+    - Generic names (id, code, status, name, paid, valid, etc.) are ignored.
     """
     inferred: List[ReflectedRelationship] = []
 
@@ -456,12 +496,7 @@ def detect_inferred_relationships(
             continue
         pk_cols = [c for c in t.columns if c.is_pk]
         if len(pk_cols) == 1:
-            raw = t.name.lower()
-            clean = raw.replace("_", "").replace("-", "")
-            singular = raw.rstrip("s")
-            clean_sing = singular.replace("_", "").replace("-", "")
-
-            for key in (raw, clean, singular, clean_sing):
+            for key in _get_table_name_variations(t.name):
                 target_candidates.setdefault(key, [])
                 if t not in target_candidates[key]:
                     target_candidates[key].append(t)
@@ -476,12 +511,12 @@ def detect_inferred_relationships(
             if col_raw in GENERIC_COLUMN_NAMES:
                 continue
 
-            # Candidate prefixes e.g. customer_id -> "customer"
+            # Candidate prefixes e.g. customer_id -> "customer", customerId -> "customer"
             candidate_keys = []
-            if col_raw.endswith("_id"):
+            if col_raw.endswith("_id") and len(col_raw) > 3:
                 candidate_keys.append(col_raw[:-3])
-            elif col_raw.endswith("id") and len(col_raw) > 2:
-                candidate_keys.append(col_raw[:-2])
+            elif col.name.endswith("Id") and len(col.name) > 2 and col.name[:-2].isidentifier():
+                candidate_keys.append(col.name[:-2].lower())
 
             matching_targets: List[ReflectedTable] = []
             for k in candidate_keys:
@@ -634,7 +669,7 @@ def load_erd_from_catalog(
         models.DatabaseSchema.schema_name == target_schema_name
     ).first()
 
-    if not db_schema or not db_schema.tables:
+    if not db_schema:
         return None
 
     tables_out: List[Dict[str, Any]] = []

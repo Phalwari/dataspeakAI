@@ -62,6 +62,7 @@ export function DatabaseErdPage() {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<TableNodeData>>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const reactFlowInstance = useRef<ReactFlowInstance<Node<TableNodeData>, Edge> | null>(null);
+  const hasInitialFitRef = useRef(false);
 
   // UI Interactive state
   const [searchQuery, setSearchQuery] = useState("");
@@ -158,6 +159,7 @@ export function DatabaseErdPage() {
   );
 
   useEffect(() => {
+    hasInitialFitRef.current = false;
     fetchErdData(false);
   }, [fetchErdData]);
 
@@ -170,6 +172,7 @@ export function DatabaseErdPage() {
       showPkFkOnly,
       showInferred,
       savedPositions,
+      direction,
     });
 
     // Compute dagre layout with saved positions prioritized
@@ -185,12 +188,15 @@ export function DatabaseErdPage() {
     setNodes(layoutedNodes);
     setEdges(layoutedEdges);
 
-    // Initial fit view
-    setTimeout(() => {
-      if (reactFlowInstance.current) {
-        reactFlowInstance.current.fitView({ padding: 0.15, duration: 400 });
-      }
-    }, 50);
+    // Initial fit view only (preserved across filter/toggle changes)
+    if (!hasInitialFitRef.current) {
+      setTimeout(() => {
+        if (reactFlowInstance.current) {
+          reactFlowInstance.current.fitView({ padding: 0.15, duration: 400 });
+        }
+      }, 50);
+      hasInitialFitRef.current = true;
+    }
   }, [erdData, showPkFkOnly, showInferred, direction, loadSavedPositions, setNodes, setEdges]);
 
   // Handle Drag Stop: persist dragged positions
@@ -218,6 +224,7 @@ export function DatabaseErdPage() {
       showPkFkOnly,
       showInferred,
       savedPositions: {},
+      direction,
     });
 
     const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
