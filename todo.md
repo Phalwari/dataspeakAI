@@ -33,6 +33,442 @@ Every AI agent working on this repository **MUST** adhere to this 4-step workflo
 
 ---
 
+<!-- next-release-workflow:start -->
+## Next-release planning and execution
+
+**Workflow adopted: 2026-10-16.** Use this structure for new work mapped from [Next Release Implementation Pathway](docs/next_release_implementation_pathway.md). The pathway defines the delivery plan; this file tracks executable tasks and verified completion.
+
+**Preserve previous records:** The existing backlog, Phase 6/7 entries, and archived completion records below remain intact. Do not renumber them, rewrite their historical claims, or treat their checkboxes as proof that a new release task is complete. Apply the new structure to future plans. Use the pathway's section 14 crosswalk to link overlapping legacy work instead of creating competing implementations.
+
+### Release and phase navigation
+
+| Release | Phases | Intended outcome |
+|---|---|---|
+| NR1 — Secure and Reliable Core | NR-0, NR-1, NR-2, NR-3 | Foundations, security, correctness, and release operations |
+| NR2 — Better Analyst Experience | NR-4 | Analyst capabilities built on the verified core |
+| NR3 — Automation and Enterprise Capabilities | NR-5 | Governed automation and enterprise capabilities |
+
+The default planning sequence is **NR-0 → NR-1 → NR-2 → NR-3 → NR-4 → NR-5**. Actual task dependencies take priority over phase numbers. For example, the storage/job contract in NR-3.1-A is needed before NR-2.2-B production ingestion integration. There is no NR-6 in the current pathway. These identifiers are separate from the historical Phase 6/7 records below.
+
+### Planning session: map one whole phase
+
+1. Read the user-selected phase, its sprint prerequisites and release gates, pathway section 14, [AGENTS.md](AGENTS.md), [CHANGELOG.md](CHANGELOG.md), this tracker, and relevant session notes. Use Graft and the current source to verify what exists; do not rely on old comments or completion claims.
+2. Populate the **Selected phase work area** below with the whole selected phase, grouped as **Phase → Milestones → Sprints → Tasks**. Preserve exact roadmap IDs, including task IDs such as `NR-0.1-A-T01`. If a task needs smaller steps, retain its parent ID and acceptance criteria.
+3. Make each task self-contained: include its purpose, implementation steps, target components, dependencies, acceptance criteria, verification, and any migration or recovery requirements. Record the current baseline revision and working directory so another session can resume.
+4. Resolve prerequisites to exact task IDs or an explicitly defined contract gate with its producing tasks and verification evidence. Check both active tasks and the archive. Include any required work brought forward from another phase in a separate prerequisite group, with its original IDs and reason; do not silently expand to that entire phase.
+5. Use pathway section 14 to reference overlapping legacy items. Keep a single implementation owner and state which part of the old item the new task covers. Do not close an entire legacy task when only part of its acceptance criteria is covered.
+6. Check for duplicate IDs, missing prerequisites, dependency cycles, and conflicting file ownership. Identify the first ready task. If a prerequisite is unresolved, record the blocker instead of inventing a completion.
+7. Set the planning status to `Ready for implementation` only after the selected phase has been mapped and checked. Mapping tasks does not complete them or start application implementation. Preserve unrelated pending tasks and all previous completion records.
+
+### Implementation session: execute by dependency readiness
+
+- Read the selected-phase metadata and latest files first. Work within the selected phase and its explicitly mapped prerequisites. When executing a selected NR phase, do not fall through to unrelated legacy tasks.
+- Select an unchecked task whose prerequisites are completed and verified. Among ready tasks, follow P0 → P1 → P2 → P3, then the planned milestone/sprint order. Dependencies always come before priority or numerical order.
+- Claim the task with an owner, working directory/branch, owned files, and last update. Confirm that another agent is not already editing those files. A stale progress note alone is not an active claim.
+- Implement the task, check its acceptance criteria, and run the applicable verification required by AGENTS.md and the pathway. A successful build alone does not establish security, numerical correctness, or recovery behavior.
+- Keep an unfinished task unchecked, including when code is written but verification is incomplete. Record failures or external blockers; continue with other ready tasks when safe.
+- After each verified completion, revisit blocked tasks. A dependency being completed makes a dependent task eligible to start; it does not complete that dependent task automatically.
+- On completion, follow the existing maintenance protocol: mark the item `[x]`, add completion metadata, and move the **entire task block**, including its ID, dependencies, acceptance criteria, and verification evidence, into the existing **Archived / Completed Tasks** section. Add required changelog/progress/handoff records for the implementation.
+- Resolve future dependencies against archived task IDs and their evidence. Keep a milestone/sprint completion summary in the selected phase area instead of leaving checked task copies there.
+- Continue until the selected phase and its exit checks are complete, or no remaining task can proceed. If blocked, record the exact missing prerequisite, failed check, or external decision and the next useful action.
+- Before advancing to another phase, verify the current phase's exit criteria and relevant release gates. A completed phase is not automatically a released product.
+
+### Checkbox and task-state rules
+
+| Checkbox / state | Meaning |
+|---|---|
+| `[ ]` / `Ready` | Prerequisites verified; task can be claimed |
+| `[ ]` / `Blocked` | A named prerequisite or external requirement is missing |
+| `[ ]` / `In progress` | An identified owner is implementing the task |
+| `[ ]` / `Needs verification` | Changes exist but required checks or review are incomplete |
+| `[x]` / `Completed` | Acceptance and verification passed; full task block is archived |
+
+Readiness is derived from dependencies and current evidence, not just the written state label. `Depends on: None` must be explicit. Missing, failed, or unverified dependencies never count as complete. Historical entries retain their existing format.
+
+### Selected phase work area
+
+| Field | Current value |
+|---|---|
+| Selected release / phase | NR1 / NR-0 — Establish the foundation |
+| Planning status | Ready for implementation — 12 tasks mapped; none implemented |
+| Baseline revision / working directory | 36065f2107e30b499302bd68ea299d51fbb2dcf5 / D:\dataspeak / branch main; existing local planning changes retained |
+| Planner / implementation owner / reviewer | Codex (mapping) / unassigned / unassigned |
+| First ready task | NR-0.1-A-T01 — Record the reproducible implementation baseline |
+| Last update | 2026-10-16 — NR-0 mapped; prior task and completion records preserved |
+
+Insert the selected phase's actual milestone, sprint, and task blocks here, before the template below. Keep any brought-forward prerequisites in a clearly labeled group. When changing phases, retain previous phase summaries and unresolved work; completed task records stay in the existing archive. The template below is illustrative and must never be treated as executable work.
+
+<!-- phase-nr0-plan:start -->
+### Phase NR-0 — Establish the foundation
+
+- **Release / source:** NR1 — Secure and Reliable Core; [pathway Phase NR-0](docs/next_release_implementation_pathway.md#phase-nr0), [Sprint A](docs/next_release_implementation_pathway.md#nr-01-a), [Sprint B](docs/next_release_implementation_pathway.md#nr-01-b).
+- **Planning status:** Ready for implementation. This is a mapped plan; none of its tasks has been implemented or verified by this planning action.
+- **Goal:** Establish a reproducible, isolated baseline and a controlled migration process before later release work changes persisted state.
+- **Baseline:** `36065f2107e30b499302bd68ea299d51fbb2dcf5`, branch `main`, working directory `D:\dataspeak`; mapped 2026-10-16. Existing local changes at planning start: modified `todo.md`; untracked `docs/next_release_implementation_pathway.md` and `intructions_for_humans.md`. Preserve them. Record the actual implementation starting revision and uncommitted diff when work begins; this revision alone does not include these planning documents.
+- **Planner / owners:** Codex prepared this mapping. Implementation owners and reviewers are unassigned. Suggested ownership: QA/backend for Sprint A, data/platform for Sprint B, release integrator for review and shared files. Claim before editing; no parallel agents are assigned by this document.
+- **Brought-forward prerequisites:** None from other NR phases. Python 3.11 and disposable SQLite/PostgreSQL test environments are execution requirements to establish/verify, not reasons to implement the entire NR-3 platform phase early.
+- **Scope:** Test isolation, audit reproductions, runtime/performance evidence, backlog reconciliation, schema inventory, Alembic history/preflight, installation/upgrade paths, startup migration separation, additive/backfill practice, and recovery verification.
+- **Scope boundaries:** NR-0 does not repair all I-01–I-18 defects or activate new features. Preserve later sprint ownership for authorization, widget privacy, query safety, grounding, metrics, durability, full CI hardening, and billing. Urgent P0 containment can be tracked separately if requested; never interpret NR-0 completion as permission to expose the affected public paths.
+- **Progress:** Milestone NR-0.1: 0/12 tasks verified; Sprint NR-0.1-A: 0/6; Sprint NR-0.1-B: 0/6. All implementation evidence is pending. No phase exit check has passed yet.
+
+#### Verified planning observations
+
+These observations come from source inspection, not a new application/test run. Re-read the files before implementation.
+
+| Observation | Current evidence | Planning consequence |
+|---|---|---|
+| App import changes state | `backend/main.py` lines 38–60 runs table creation, schema sync, admin seeding, and embedding warmup | Establish isolation before collecting tests that import the app; later remove production startup DDL |
+| Seeding is a second schema-change entry point | `backend/scripts/seed_admin.py` lines 18–24 invokes both `create_all` and `run_schema_migrations` | Moving only the calls in main.py will not close the migration bypass |
+| Environment loading and default DB path affect tests | `backend/database.py` loads dotenv and defaults to `sqlite:///./app.db`; widget tests import `main` at collection time | A fixture that runs only after collection is too late to protect real data |
+| Model/specification drift is concrete | 46 `__tablename__` declarations in `backend/models.py`; 35 `CREATE TABLE` statements in the canonical SQL | Inventory columns/constraints as well as counts; do not drop tables to match the old specification |
+| Conversation fields already disagree | ORM has nullable `user_id`, title, summary fields; canonical SQL requires a unique non-null `session_token` | Explicitly reconcile intended semantics; do not invent ownership or tokens during migration |
+| Current migrations have no tracked Alembic history | Tracked migration code is `backend/services/db_migration.py`, whose outer handler logs failures | Introduce versioned history and actionable failures; preserve supported legacy layouts |
+| Deployment and CI select Python 3.11 | `render.yaml` selects 3.11.0; `.github/workflows/ci-cd.yml` selects 3.11 | Obtain fresh Python 3.11 results; previous Python 3.14 evidence does not satisfy this requirement |
+| Existing CI does not run the test suites | Backend installs dependencies; frontend builds; test commands are commented out | Record the gap; full CI/type-check work remains NR-3.2-A |
+| Existing stream test needs isolation verification | `tests/test_phase2_stage_b_chat_widget.py::test_widget_chat_sse_streaming` uses the widget route; older audit found an unmocked streaming provider | Fix the test provider boundary without replacing the route/stream implementation with fake success |
+
+The pathway's earlier 486-pass/1-fail backend result, 20 frontend passes, and bundle size are historical comparison data only. Do not reuse them as new verification.
+
+#### NR-0 execution and evidence rules
+
+1. The first ready task is **NR-0.1-A-T01**. Complete and archive verified tasks while retaining these IDs. Recalculate readiness from the dependencies below, including archived evidence.
+2. After A-T02, A-T03 and A-T04 are both dependency-ready; use the displayed order by default. One agent can execute them sequentially. A-T05 requires both. Sprint B begins only after A-T06 closes the baseline.
+3. Establish temporary database, upload, index, cache, and working directories before application imports or pytest collection. Prevent real dotenv credentials, seeding, warmup, provider calls, email, and billing from affecting tests. Record redacted configuration names/presence, never secrets.
+4. Preserve real application logic in regression tests. Mock external providers/transport at their boundary, not the authorization, SQL executor, KPI, grounding, or persistence behavior being checked.
+5. Required audit regressions assert the desired safe behavior. First demonstrate that each fails for the intended defect. If known defects need to remain in the normal suite, use narrowly scoped strict expected-failure markers tied to an issue and owning fix sprint; distinguish those results from passes. Unexpected passes must trigger review/removal of the marker. Collection errors, unavailable providers, and unrelated exceptions are not expected defect failures.
+6. NR-0 may complete with clearly reproduced, explicitly tracked failures owned by later sprints; its own isolation, streaming-test repair, migration, and recovery checks must pass. P0/P1 regressions must pass before their owning fixes or relevant release gates can close.
+7. During implementation, use `docs/reports/nr0_baseline.md` as the proposed human-readable baseline/coverage/performance record, `docs/database/nr0_schema_reconciliation.md` for schema decisions, and `docs/setup/nr0_migration_runbook.md` for migration/recovery procedures. These are proposed outputs, not existing completed artifacts. Agent progress/handoffs belong under the assigned agent's `.agents/` directory.
+8. Obtain a reviewer and evidence for acceptance checks before claiming completion. Follow AGENTS.md for code-change builds, backend verification, model/API consistency, tracking, and handoff. This planning action edits only `todo.md`.
+9. Useful existing suite entrypoints are `cmd.exe /c "npm test"`, `cmd.exe /c "npm run build"`, and `& '<verified Python 3.11 executable>' -m pytest tests -q`. Run backend tests only after the isolation preflight. New migration/preflight commands below are proposed; record the actual implemented commands rather than pretending they already exist.
+
+#### Milestone NR-0.1 — Baseline and migration control
+
+- **Outcome:** Another developer can reproduce the baseline safely, identify known defects, and create/upgrade a supported database through reviewed migration commands.
+- **Exit criteria:** Both sprints' acceptance checks pass; issue-to-test and legacy-task mappings are recorded; fresh and supported existing databases converge to the reviewed schema; unknown drift stops safely; startup performs no production DDL through either main or seeding; backup/restore and compatible application rollback are demonstrated.
+- **Integration ownership:** Serialize edits to `backend/models.py`, `backend/database.py`, `backend/main.py`, `backend/scripts/seed_admin.py`, migration history, dependency manifests, canonical SQL, `todo.md`, and `CHANGELOG.md`. Extend existing tests where practical; paths labeled “new” below are implementation proposals.
+- **Open environment conditions:** Python 3.11 availability, installed dependency compatibility, and disposable PostgreSQL access have not been checked in this planning action. Record actual blockers at the owning task; do not substitute mocks for claimed PostgreSQL migration evidence.
+
+##### Sprint NR-0.1-A — Reproduce findings and align the backlog
+
+- **Priority / owner:** P0 foundation; QA/backend implementer and release integrator reviewer, unassigned.
+- **Prerequisites:** None outside this plan. Internal task dependencies are listed below.
+- **Issues / legacy links:** I-18 baseline and coverage for I-01–I-17; preserve the historical Phase 6/debt and Phase 7 records and use pathway section 14 for the crosswalk.
+- **Exit checks:** Reproducible environment record; reusable synthetic fixtures; six mandatory regression families; provider-free streaming tests; Python 3.11 and frontend baseline evidence; issue/backlog/performance mapping. Known defect failures are separated from environment failures and passes.
+- **Compatibility / recovery:** Changes are limited to tests, baseline tooling, and implementation records. External integrations remain explicit opt-in checks; no live data is migrated in this sprint.
+
+- [ ] **NR-0.1-A-T01 — Record the reproducible implementation baseline**
+  - **Priority / state:** P0 / Ready.
+  - **Owner / reviewer / last update:** Unassigned / release integrator to be assigned / 2026-10-16 (planning).
+  - **Depends on:** None.
+  - **Blocks:** NR-0.1-A-T02.
+  - **Source / purpose:** Pathway A-T01, I-18. Existing test claims use different runtimes and do not specify a safe repeatable execution environment.
+  - **Target files / outputs:** Read `package.json`, `package-lock.json`, `backend/requirements.txt`, `render.yaml`, `.github/workflows/ci-cd.yml`, startup/database configuration, and test entrypoints; create the baseline report proposed above during implementation.
+  - **Implementation:**
+    1. Record branch, full revision, dirty files, actual Python/Node/npm executables and versions, operating system, and intended deployment runtime; inventory installed package versions without upgrading them.
+    2. Inventory environment-variable names, default paths, dotenv loading, test imports, startup DDL/seeding/warmup, and external service entrypoints; redact values that contain secrets.
+    3. Record exact commands and working directories for the baseline, fixture bootstrap, tests, build, and later timings. Separate already observed evidence from commands not yet run.
+    4. Define the isolation preflight that A-T02 must implement. Do not collect/import unsafe backend tests merely to gather version information.
+  - **Acceptance criteria:** Another session can identify the baseline and prepare the same environment from the record; unsafe side effects and pending runtime/tool availability are explicitly documented.
+  - **Verification:** Cross-check recorded versions using the named executables and package metadata; compare documented script names with manifests; verify no production credentials or data were captured.
+  - **Migration / recovery:** No schema/data change; retain existing environment/dependency files and record any unavailable tools.
+  - **Blocker / next action:** None known for read-only inventory; claim this task first.
+  - **Evidence / handoff:** Pending execution; planning inspection is not task-completion evidence.
+
+- [ ] **NR-0.1-A-T02 — Build isolated synthetic security and data fixtures**
+  - **Priority / state:** P0 / Blocked.
+  - **Owner / reviewer / last update:** Unassigned / release integrator to be assigned / 2026-10-16 (planning).
+  - **Depends on:** NR-0.1-A-T01.
+  - **Blocks:** NR-0.1-A-T03, NR-0.1-A-T04.
+  - **Source / purpose:** Pathway A-T02; reusable regression setup for tenant, user, widget, and document boundaries.
+  - **Target files / outputs:** Existing test fixtures in `tests/test_phase2_stage_b_chat_widget.py` and Phase 4/7 suites; proposed new `tests/conftest.py`, `tests/fixtures/nr0/`, and `tests/test_nr0_isolation.py`; extend the baseline report.
+  - **Implementation:**
+    1. Establish isolation before test-module imports: use an explicit bootstrap/environment setup or equivalent collection-safe mechanism, not only an autouse fixture that runs after collection.
+    2. Use disposable SQLite sessions and temporary uploads/vector/cache directories; prevent real dotenv values, live network/provider/model downloads, and production database access.
+    3. Create two tenants; multiple same-tenant users including tenant admin and restricted/inactive users; private dashboard chats; two visitors and widget keys; and documents/chunks with distinct synthetic source identities.
+    4. Represent publication intent and expected visitor ownership in fixture expectations until the owning sprint supplies persisted fields. Do not invent production schema changes or authorize by replacing the real policy code.
+    5. Provide deterministic external provider/embedding doubles and cleanup of dependency overrides, sessions, caches, and mocks. Restore fixture state between tests.
+    6. Add isolation checks using disposable sentinel files/databases to prove startup/test collection cannot touch the real application's data or reset an existing real account.
+  - **Acceptance criteria:** Fixtures are reusable, contain no real data/secrets, distinguish the intended permission cases, and cannot leak state between tests; pre-collection isolation is demonstrated.
+  - **Verification:** Run the dedicated isolation checks in a subprocess and repeat fixture-dependent cases with different orders. Verify all database/file destinations stay under the disposable test root.
+  - **Migration / recovery:** Test databases only; dispose sessions/engines and clean only owned temporary artifacts.
+  - **Blocker / next action:** Await A-T01's startup/isolation inventory; then build fixtures before app-route probes.
+  - **Evidence / handoff:** Pending; record fixture IDs and isolation command for consumers.
+
+- [ ] **NR-0.1-A-T03 — Turn the six audit probe families into permanent regression tests**
+  - **Priority / state:** P0 / Blocked.
+  - **Owner / reviewer / last update:** Unassigned / release integrator to be assigned / 2026-10-16 (planning).
+  - **Depends on:** NR-0.1-A-T02.
+  - **Blocks:** NR-0.1-A-T05.
+  - **Source / purpose:** Pathway A-T03; reproduce I-01, I-02, I-08, I-09, I-11, and I-14 using actual code behavior.
+  - **Target files / outputs:** Proposed `tests/test_nr0_regressions.py` or clearly grouped additions to existing suites; inspect `backend/dependencies.py`, `backend/routers/analytics.py`, `backend/routers/widget.py`, `backend/services/sql_engine.py`, `backend/services/citation_service.py`, and `backend/services/automl_service.py`; extend the baseline coverage record.
+  - **Implementation:**
+    1. Assert tenant administrators cannot use global tenant/admin endpoints to obtain another tenant's data (I-01 → NR-1.1-A).
+    2. Exercise widget handshake and chat with another visitor's, another key's, and a private dashboard conversation ID; inspect captured provider input to detect private-history leakage without mocking authorization (I-02 → NR-1.1-B).
+    3. Execute synthetic SQLite queries with excessive outer LIMIT and nested LIMIT/CTE cases; assert the requested final cap is enforced by the real executor (I-08 → NR-1.2-B).
+    4. Force embedding failure and assert the answer is unverified, with no positive verified/grounded claim (I-11 → NR-2.2-A).
+    5. Count actual gateway invocations for widget response modes and verify one response does not generate its answer twice; use deterministic provider boundary doubles (I-14 → NR-2.3-A).
+    6. Feed ten revenue rows of 100 through the real KPI computation: total must be 1,000 and no invented 900% trend may be presented without a valid comparison period (I-09 → NR-2.1-A).
+    7. Verify each failing case reaches the intended behavior; add a legitimate positive/control case where applicable. Record the responsible fix sprint and apply the narrow known-failure policy above without changing product logic to force a pass.
+  - **Acceptance criteria:** All six families have reproducible tests of desired behavior; failures identify actual defects, not missing keys/downloads or copied expected outputs. A later repair can turn each case into a real passing regression.
+  - **Verification:** Run each family against the recorded baseline; capture actual assertions and control-case results. Report known failures/strict expected failures separately from passes.
+  - **Migration / recovery:** Disposable fixtures only; these tests do not authorize production exploitation or feature fixes.
+  - **Blocker / next action:** Await A-T02's collection-safe fixtures. Any unresolved defect outside these six is captured in A-T06's coverage map.
+  - **Evidence / handoff:** Pending; store issue IDs, test node IDs, observed failures, and fix-owner references.
+
+- [ ] **NR-0.1-A-T04 — Isolate widget SSE tests from live providers and downloads**
+  - **Priority / state:** P1 / Blocked.
+  - **Owner / reviewer / last update:** Unassigned / release integrator to be assigned / 2026-10-16 (planning).
+  - **Depends on:** NR-0.1-A-T02.
+  - **Blocks:** NR-0.1-A-T05.
+  - **Source / purpose:** Pathway A-T04, I-18. The historical widget SSE failure crossed an unmocked streaming-provider boundary.
+  - **Target files / outputs:** `tests/test_phase2_stage_b_chat_widget.py`, `tests/test_phase7_1_2_streaming_backend.py`, shared NR-0 test fixtures; inspect `backend/services/chat_stream.py` and the gateway call sites.
+  - **Implementation:**
+    1. Trace the stream route's actual gateway binding and mock `generate_stream` at the used reference with a real async iterator, plus consistent synthetic usage metadata.
+    2. Stub any additional provider/embedding calls reached by the test without replacing the route, SSE encoder, persistence callback, or limiter behavior being verified.
+    3. Parse SSE events and assert ordered content plus terminal success/error behavior instead of accepting any raw substring as proof of success.
+    4. Reuse existing cancellation/error cases where suitable and verify missing external keys and empty model caches do not cause outbound requests or downloads in normal test execution.
+  - **Acceptance criteria:** The previously provider-dependent widget SSE case passes offline for the correct reason. Tests still detect malformed streaming, missing completion, and relevant failures.
+  - **Verification:** Run the isolated widget and existing streaming suites with provider credentials absent and outbound calls guarded; repeat without relying on a downloaded embedding model.
+  - **Migration / recovery:** Test-only repair; maintain opt-in integration boundaries and preserve current stream contracts until their owning sprint changes them.
+  - **Blocker / next action:** Await A-T02; may be completed independently of A-T03 once fixtures are verified.
+  - **Evidence / handoff:** Pending; record patched call sites, exact commands, and actual case outcomes.
+
+- [ ] **NR-0.1-A-T05 — Establish the Python 3.11 and frontend verification baseline**
+  - **Priority / state:** P1 / Blocked.
+  - **Owner / reviewer / last update:** Unassigned / release integrator to be assigned / 2026-10-16 (planning).
+  - **Depends on:** NR-0.1-A-T03, NR-0.1-A-T04.
+  - **Blocks:** NR-0.1-A-T06.
+  - **Source / purpose:** Pathway A-T05, I-18. Current deployment/CI select Python 3.11; old audit results used Python 3.14.
+  - **Target files / outputs:** Existing backend/frontend suites, `package.json`, `backend/requirements.txt`, CI/runtime settings as reference; baseline report and necessary isolated verification tooling.
+  - **Implementation:**
+    1. Locate or establish a dedicated Python 3.11 environment and record its exact patch/dependency versions. Do not silently use a different global Python or change the production runtime to avoid incompatibility.
+    2. Run isolation preflight, backend collection/tests, and backend initialization checks against disposable data; use no live providers or secrets.
+    3. Run frontend tests and Vite production build with the recorded Node/npm environment. Record widget-specific checks when relevant and avoid committing generated artifacts by accident.
+    4. Classify every outcome as pass, known linked regression, unexpected code failure, skipped integration, or environment failure. Investigate unexpected failures; assign any out-of-scope repair explicitly rather than hiding it.
+    5. Save commands, counts, timings, warnings, runtime details, and repeatability notes. Do not describe skipped live integrations or expected failures as passing behavior.
+  - **Acceptance criteria:** Fresh Python 3.11 backend and frontend evidence exists; normal tests need no live credentials/downloads; unexpected failures are resolved or remain explicit blockers. Known linked product regressions follow the sprint policy.
+  - **Verification:** Repeat targeted affected checks after any test-tooling adjustment; reviewer can reproduce the recorded commands. A missing Python 3.11 environment leaves this task unverified.
+  - **Migration / recovery:** Disposable test environment only; full dependency pinning/type-check CI remains NR-3.2-A.
+  - **Blocker / next action:** Await A-T03/A-T04; verify Python 3.11 availability at execution and record any actual environment blocker.
+  - **Evidence / handoff:** Pending; do not copy the historical 486/1 or 20-test results.
+
+- [ ] **NR-0.1-A-T06 — Reconcile legacy work and record performance/coverage baselines**
+  - **Priority / state:** P2 / Blocked.
+  - **Owner / reviewer / last update:** Unassigned / release integrator to be assigned / 2026-10-16 (planning).
+  - **Depends on:** NR-0.1-A-T05.
+  - **Blocks:** NR-0.1-B-T01.
+  - **Source / purpose:** Pathway A-T06 and section 14; eliminate duplicate ownership and establish meaningful before/after measurements.
+  - **Target files / outputs:** `todo.md`, baseline report, existing build output statistics and disposable request harness; read the pathway crosswalk and catalog/ERD implementation through Graft.
+  - **Implementation:**
+    1. Cross-reference Task 6.1 → NR-5.2-B, Task 6.2 → NR-3.1-A, and Task 6.3 → NR-1.1-A/NR-1.2-A; map legacy key hashing, CORS, host validation, reflection, CI/type checks, and latency debt to their existing pathway owners.
+    2. Verify the “persistent catalog as ERD source” backlog claim against code before proposing any closure. Preserve ERD export/large-layout items as optional existing work and preserve every historical completion record.
+    3. Record I-01 through I-18 in a coverage map with test node IDs or an explicit coverage gap, current status, and owning fix sprint. Link remaining cases to later work; do not declare untested issues resolved.
+    4. Record fresh main/widget/ERD bundle sizes where produced, including compression and measurement method. Measure representative synthetic non-streaming/streaming requests and SQL/grounding paths with fixed data, warm/cold distinction, sample count, and latency/TTFT statistics.
+    5. Label mocked-provider latency as application overhead, separate from live-provider latency. Save the repeatable workload and confirm one owner per overlap.
+    6. Review Sprint A's evidence and record its exit decision, known-failure list, and unresolved operational limits.
+  - **Acceptance criteria:** Legacy work has an explicit crosswalk with no duplicate implementation ownership; all audit IDs have a truthful coverage status; current bundle/request baselines are reproducible.
+  - **Verification:** Reviewer checks mappings against pathway section 14 and recomputes representative measurements. Preserve legacy entries unless a separately verified completion is being recorded under the normal protocol.
+  - **Migration / recovery:** No product migration or performance optimization; measurement fixtures remain synthetic.
+  - **Blocker / next action:** Await A-T05 evidence, then close Sprint A and make B-T01 ready.
+  - **Evidence / handoff:** Pending; this task's reviewed completion is the baseline gate consumed by Sprint B.
+
+##### Sprint NR-0.1-B — Establish versioned migrations
+
+- **Priority / owner:** P1 foundation; data/platform implementer and release integrator reviewer, unassigned.
+- **Prerequisites:** Sprint A baseline, represented by verified NR-0.1-A-T06 and its transitive dependencies.
+- **Issues / legacy links:** I-17 schema-change portion; migration foundation for later persisted changes. Durable production storage, Docker/Compose, and worker infrastructure remain NR-3.1-A.
+- **Proposed outputs:** `backend/alembic.ini`, `backend/migrations/env.py`, `backend/migrations/versions/`, `backend/scripts/schema_preflight.py`, `tests/test_nr0_migrations.py`, schema reconciliation report, and migration runbook. Confirm naming during B-T01/B-T02 before introducing files; they do not exist merely because they are listed here.
+- **Exit checks:** Fresh/known-legacy convergence, read-only preflight, unknown-drift rejection, explicit deployment migration command, no production startup DDL, repeatable validated backfill, and measured restore/application rollback.
+- **Supported state versus query connectors:** This sprint governs the application's own state database. Verify SQLite and PostgreSQL compatibility. Support for querying customer MySQL/Mongo sources does not imply their schemas are owned or migrated by this application.
+
+- [ ] **NR-0.1-B-T01 — Reconcile ORM, canonical SQL, and supported installed layouts**
+  - **Priority / state:** P1 / Blocked.
+  - **Owner / reviewer / last update:** Unassigned / data/platform reviewer to be assigned / 2026-10-16 (planning).
+  - **Depends on:** NR-0.1-A-T06.
+  - **Blocks:** NR-0.1-B-T02.
+  - **Source / purpose:** Pathway B-T01, I-17. Table counts and concrete field/constraint meanings differ across the application and specification.
+  - **Target files / outputs:** `backend/models.py`, `backend/schemas.py`, `backend/services/db_migration.py`, `docs/database/Full_Project_Schemas.sql`, `docs/database/Database_ERD.md`; proposed reconciliation report and synthetic legacy-layout fixture definitions.
+  - **Implementation:**
+    1. Inventory tables, columns/types/defaults/nullability, primary/foreign/unique constraints, indexes, relationships, and SQLite/PostgreSQL differences from source and isolated reflection.
+    2. Compare the 46 declared ORM tables with the 35 SQL definitions; classify runtime-only tables, spec-only requirements, renamed fields, constraint differences, and historical migration additions.
+    3. Review concrete examples including conversation ownership/session fields, `Message.metadata_json` versus SQL `metadata`, document fields, and hierarchical chunk relationships.
+    4. Define the intended baseline schema and a finite set of supported installed layouts. Use synthetic/anonymized disposable copies; never access a real installation implicitly.
+    5. Record decisions and unresolved ambiguities without deleting fields, inventing data, or rewriting historic claims. Identify what the canonical spec must change to reflect deliberately preserved runtime behavior.
+  - **Acceptance criteria:** Reviewed table/column/constraint reconciliation and supported-layout matrix exist; unresolved mappings that affect migration block B-T02 until decided.
+  - **Verification:** Compare static inventory with reflected synthetic layouts; reviewer verifies representative constraints and source consumers, not just table counts.
+  - **Migration / recovery:** Inventory only; no DDL or stamping of an existing database.
+  - **Blocker / next action:** Await A-T06 baseline; then resolve schema decisions before generating a revision.
+  - **Evidence / handoff:** Pending; capture schema fingerprints and decision references for B-T02/B-T03.
+
+- [ ] **NR-0.1-B-T02 — Add reviewed Alembic history and read-only schema preflight**
+  - **Priority / state:** P1 / Blocked.
+  - **Owner / reviewer / last update:** Unassigned / data/platform reviewer to be assigned / 2026-10-16 (planning).
+  - **Depends on:** NR-0.1-B-T01.
+  - **Blocks:** NR-0.1-B-T03.
+  - **Source / purpose:** Pathway B-T02; replace unversioned schema mutation with an explicit, inspectable migration foundation.
+  - **Target files / outputs:** Proposed Alembic/preflight files and migration tests above; `backend/requirements.txt`, `backend/database.py` only as needed for side-effect-free configuration; reviewed canonical SQL/docs.
+  - **Implementation:**
+    1. Add a Python-3.11-compatible Alembic dependency and configuration that loads model metadata without importing `main`, triggering seeding, or connecting to an unintended default database.
+    2. Create a reviewed initial revision describing the reconciled schema. Do not call today's mutable `Base.metadata.create_all` inside a historic revision or accept autogenerated drops/renames without review.
+    3. Implement read-only preflight reporting dialect, detected revision, schema fingerprint, drift, and whether the layout is empty, recognized legacy, current, or unsupported.
+    4. Include indexes/constraints/type/default checks with deliberate dialect normalization; redact URLs and credentials. Unknown layouts fail with actionable details and no DDL/stamp.
+    5. Update canonical specification and schema documentation to reflect reviewed baseline decisions; preserve compatibility rather than forcing the application into obsolete field names.
+  - **Acceptance criteria:** The initial revision is reproducible; preflight identifies all declared fixture layouts and rejects unsupported drift without changing them; metadata discovery has no app-startup side effects.
+  - **Verification:** Test preflight against empty, known, current, malformed, and unknown-extra-column layouts; compare schema/data and revision markers before/after read-only checks. Review generated migration operations.
+  - **Migration / recovery:** Run only on disposable databases now; backup/restore policy must be documented before deployment. Full installation/adoption behavior is B-T03.
+  - **Blocker / next action:** Await B-T01's reviewed schema decisions.
+  - **Evidence / handoff:** Pending; record actual preflight/Alembic commands, exit codes, revision ID, and supported fingerprints.
+
+- [ ] **NR-0.1-B-T03 — Implement separate fresh-install and supported-upgrade procedures**
+  - **Priority / state:** P1 / Blocked.
+  - **Owner / reviewer / last update:** Unassigned / data/platform reviewer to be assigned / 2026-10-16 (planning).
+  - **Depends on:** NR-0.1-B-T02.
+  - **Blocks:** NR-0.1-B-T04.
+  - **Source / purpose:** Pathway B-T03; existing installations cannot safely be treated like empty databases.
+  - **Target files / outputs:** Alembic revision history, preflight/adoption entrypoint, migration tests/fixtures, proposed migration runbook.
+  - **Implementation:**
+    1. Define an empty-database path that applies the reviewed revisions from scratch without any implicit production seed.
+    2. Define a recognized-current-schema adoption path: require successful exact compatibility preflight before recording its initial revision; never use blind stamping.
+    3. Define a recognized-older-layout upgrade path with explicit reconciliation operations and validated data mapping before it reaches the current revision.
+    4. Reject unknown, ambiguous, partially applied, or newer incompatible layouts with a recovery/remediation report; preserve unexplained columns and records.
+    5. Document backup prerequisites, dry-run/preflight expectations, command order, retry behavior, and compatibility with existing application records and APIs.
+  - **Acceptance criteria:** Empty and every supported legacy fixture converge to the same intended schema; records/relationships survive; unsupported layouts remain unchanged and return a clear error.
+  - **Verification:** Exercise fresh install, safe adoption, known upgrades, repeated invocation, partial state, and unknown drift using disposable SQLite/PostgreSQL fixtures; compare schema fingerprints and data invariants.
+  - **Migration / recovery:** Require a readable pre-upgrade backup before actual deployment; failed adoption must not falsely mark a schema current.
+  - **Blocker / next action:** Await B-T02's revision/preflight contract; missing PostgreSQL execution evidence remains explicit rather than counted as a pass.
+  - **Evidence / handoff:** Pending; record supported starting layouts, resulting revision IDs, and invariant checks.
+
+- [ ] **NR-0.1-B-T04 — Move production DDL out of application startup**
+  - **Priority / state:** P1 / Blocked.
+  - **Owner / reviewer / last update:** Unassigned / release integrator to be assigned / 2026-10-16 (planning).
+  - **Depends on:** NR-0.1-B-T03.
+  - **Blocks:** NR-0.1-B-T05.
+  - **Source / purpose:** Pathway B-T04, I-17. Both `main` and the admin seed path can mutate schema and swallow errors.
+  - **Target files / outputs:** `backend/main.py`, `backend/scripts/seed_admin.py`, `backend/services/db_migration.py`, `backend/database.py`, `render.yaml`, relevant startup tests, migration runbook; deployment entrypoint if needed.
+  - **Implementation:**
+    1. Trace all production callers of `create_all` and `run_schema_migrations`, including the seed helper. Remove their production startup DDL path while preserving explicitly invoked disposable test/dev setup.
+    2. Make startup perform a read-only schema compatibility check with actionable failure for incompatible state; no swallowed migration exception should make an incompatible app appear healthy.
+    3. Define a separate one-time deployment migration command/job, with a single migration owner and concurrency control, before application instances start. Choose a supported mechanism for the actual deployment; do not assume a host feature exists.
+    4. Ensure seeding cannot bypass the compatibility check or secretly recreate/migrate production schema. Coordinate the seam with the later NR-1.1-A production-seeding/auth fix; do not mark I-03 resolved from DDL removal alone.
+    5. Update test setup, deployment/runbook instructions, and migration callers that depended on startup side effects. Keep full container/worker build-out assigned to NR-3.1-A.
+  - **Acceptance criteria:** A compatible production-mode app starts without DDL from either main or seeding; incompatible state fails clearly; only the explicit migration path changes schema, once per deployment.
+  - **Verification:** Start the app against disposable compatible/incompatible schemas with DDL blocked or instrumented; inspect all startup paths and concurrent migration attempts. Verify import failure does not mutate schema.
+  - **Migration / recovery:** Preflight/backup → explicit migration → compatibility check → app start. Roll back only to a demonstrated compatible app/schema combination; never restore hidden startup migration as a fallback.
+  - **Blocker / next action:** Await B-T03 installation/upgrade evidence and serialize ownership of shared startup/deployment files.
+  - **Evidence / handoff:** Pending; capture DDL instrumentation and explicit migration/start commands.
+
+- [ ] **NR-0.1-B-T05 — Establish additive expansion, validated backfill, and constraint enforcement**
+  - **Priority / state:** P1 / Blocked.
+  - **Owner / reviewer / last update:** Unassigned / data/platform reviewer to be assigned / 2026-10-16 (planning).
+  - **Depends on:** NR-0.1-B-T04.
+  - **Blocks:** NR-0.1-B-T06.
+  - **Source / purpose:** Pathway B-T05; later releases need a reusable safe pattern for changing persistent fields.
+  - **Target files / outputs:** Reviewed migration revisions/helpers, synthetic legacy fixtures, `tests/test_nr0_migrations.py`, reconciliation report and migration runbook; models/schemas/canonical SQL only for justified reconciliation.
+  - **Implementation:**
+    1. Select an actual reconciled addition from B-T01 for the exercise; if the accepted baseline needs no new production field, demonstrate the sequence with test-only schema fixtures rather than inventing a feature column.
+    2. Expand with compatible nullable/defaulted fields or tables; preserve existing data, old readers, and relationships.
+    3. Backfill in bounded, restartable steps using validated mappings, preserving ambiguous records and reporting exceptions without assigning guessed ownership, publishing internal content, or changing account authority.
+    4. Validate row counts, null/duplicate/orphan counts, types, and required relationships before enforcing non-null/unique/foreign-key constraints.
+    5. Enforce constraints only when checks pass. Document transactional/SQLite batch-rebuild differences, interruption behavior, and any later consumer cutover required before retiring old fields.
+  - **Acceptance criteria:** Repeat/restart is safe; malformed or ambiguous rows block constraint enforcement with an actionable report; no unexplained drop/rename or invented business data occurs.
+  - **Verification:** Test empty/valid/invalid/duplicate/orphan rows, interruption and rerun, and SQLite/PostgreSQL behavior. Confirm constraints are not applied when validation fails and secrets are absent from reports.
+  - **Migration / recovery:** Keep an expansion-compatible application version and backup; document restore/forward-fix for irreversible steps, not a fictional universally safe downgrade.
+  - **Blocker / next action:** Await B-T04's explicit migration entrypoint and reviewed reconciliation fixture.
+  - **Evidence / handoff:** Pending; record chosen example, validation counts, interruption results, and compatibility limits.
+
+- [ ] **NR-0.1-B-T06 — Rehearse upgrade, restore, and application rollback; close NR-0**
+  - **Priority / state:** P1 / Blocked.
+  - **Owner / reviewer / last update:** Unassigned / release integrator to be assigned / 2026-10-16 (planning).
+  - **Depends on:** NR-0.1-B-T05.
+  - **Blocks:** NR-0 phase exit; migration-dependent persisted changes in later NR phases.
+  - **Source / purpose:** Pathway B-T06, I-17 schema portion; prove recovery rather than relying on a documented procedure alone.
+  - **Target files / outputs:** Migration tests/fixtures, baseline report, schema reconciliation report, migration runbook, required task/changelog/handoff records.
+  - **Implementation:**
+    1. Create readable backups of populated disposable supported layouts; record schema version/fingerprint, row counts, key relationships, and synthetic source/index references where relevant.
+    2. Run fresh installs and full supported upgrades on SQLite and disposable PostgreSQL, then compare converged schema, records, constraints, and application smoke behavior.
+    3. Inject migration/backfill interruption and unknown drift; verify safe stopping and the documented retry/recovery behavior.
+    4. Restore the backup into a separate empty disposable destination and verify data and application behavior. Record measured recovery time and any data-loss window instead of promising unmeasured recovery targets.
+    5. Rehearse application rollback only to a demonstrated compatible version; if an older revision has unsafe startup mutation, document that restriction and verify the supported restore/forward-fix alternative.
+    6. Run required final backend/frontend checks, review both sprint gates, and link the remaining known issue failures to their owning later phases. Publish the NR-0 completion evidence and next ready phase/task recommendation without claiming NR1 is release-ready.
+  - **Acceptance criteria:** All supported install/upgrade/restore scenarios have actual passing evidence; unsupported layouts fail without destructive changes; compatible rollback or an explicitly verified recovery alternative exists; all 12 NR-0 task requirements are accounted for.
+  - **Verification:** Reviewer checks commands, actual revisions/runtimes, restored row/relationship invariants, startup DDL checks, and baseline suite results. Mocked PostgreSQL behavior or an unexecuted restore is not sufficient to close this task.
+  - **Migration / recovery:** Use disposable copies only in this implementation phase; actual production migration/deployment is a separate operation requiring its own selected target and execution scope.
+  - **Blocker / next action:** Await B-T05 and real disposable PostgreSQL/recovery evidence; record missing infrastructure as a blocker if necessary.
+  - **Evidence / handoff:** Pending; archive verified task records and retain current phase summary plus unresolved later-phase defects.
+
+#### NR-0 completion checklist for the implementation/review session
+
+This is a gate description, not a claim that any check is complete.
+
+| Gate | Required evidence | Current status |
+|---|---|---|
+| Reproducible isolated baseline | A-T01/A-T02 records and pre-collection isolation checks | Pending |
+| Actual defect coverage and offline SSE | A-T03 issue-linked regressions; A-T04 real passing offline tests | Pending |
+| Deployment-runtime and performance evidence | A-T05 Python 3.11/frontend results; A-T06 crosswalk and measured baselines | Pending |
+| Reviewed schema and explicit upgrade paths | B-T01 decisions; B-T02 preflight/history; B-T03 fresh/legacy convergence | Pending |
+| Controlled schema changes and backfill | B-T04 startup DDL absence; B-T05 validation/retry evidence | Pending |
+| Recovery and integration | B-T06 executed SQLite/PostgreSQL upgrade/restore/rollback evidence and review | Pending |
+| Accurate project records | Archived task IDs with evidence; current summaries; required implementation records; legacy history preserved | Pending |
+
+**Suggested implementation handoff:** Read AGENTS.md and implement Phase NR-0 from this selected-phase work area, beginning with NR-0.1-A-T01. Execute ready tasks, establish isolation before backend imports, verify the stated acceptance criteria, archive complete task blocks, and revisit blocked tasks after prerequisites pass. Continue through NR-0 only; report unresolved blockers and remaining known product defects. Do not commit, push, or deploy unless separately requested.
+
+<!-- phase-nr0-plan:end -->
+
+
+### Reusable phase and task template
+
+```markdown
+### Phase <exact NR phase ID> — <name>
+- Release: <NR1 / NR2 / NR3>
+- Source: <pathway section/link>
+- Goal and scope: <outcome and boundaries>
+- Planning status: <Mapping / Ready for implementation / In progress / Blocked / Complete>
+- Baseline: <revision, working directory, branch/worktree, date>
+- Owner / reviewer: <names or unassigned; claim before implementation>
+- Brought-forward prerequisites: <exact IDs and reasons, or None>
+- Exit criteria: <observable phase requirements and applicable release gates>
+- Progress summary: <milestone/sprint status and links to archived task IDs>
+
+#### Milestone <exact milestone ID> — <name>
+- Outcome: <observable result>
+
+##### Sprint <exact sprint ID> — <name>
+- Prerequisites: <task IDs or named contract gate and producing task IDs>
+- Exit checks: <sprint acceptance, integration checks, and rollout conditions>
+
+- [ ] **<exact task ID> — <task title>**
+  - Priority / state: <P0–P3> / <Ready or Blocked>
+  - Owner / reviewer / last update: <assignment and timestamp>
+  - Depends on: <exact task IDs, or None>
+  - Dependency evidence: <archived records and verified contract references>
+  - Blocks: <downstream task IDs, or None known>
+  - Source / related work: <pathway task, I-xx/F-xx, legacy task reference if any>
+  - Problem and expected outcome: <current behavior, cause, required behavior>
+  - Target files / shared ownership: <verified paths and coordination requirements>
+  - Implementation:
+    1. <first concrete step>
+    2. <next concrete step>
+  - Acceptance criteria: <specific observable success and failure behavior>
+  - Verification: <commands, regression cases, and required review>
+  - Migration / rollout / recovery: <steps, or Not applicable with reason>
+  - Blocker / next action: <specific blocker and resolution, or None>
+  - Evidence / handoff: <actual results and references; fill during execution>
+```
+
+When archiving a completed task, add `[Completed: YYYY-MM-DD | Agent/Role | Summary]` and preserve the complete task block. Do not mark template placeholders or an unverified task as completed.
+
+### Handoff between windows or sessions
+
+The implementation session must receive the saved plan in the same up-to-date checkout, or a branch/commit containing it. Finish the planning edits before the implementation session updates this file. One integration owner should control changes to shared tracking files when multiple agents are working.
+
+**Planning prompt:** "Map Phase <ID> from docs/next_release_implementation_pathway.md into the selected phase work area of todo.md using this tracker format. Verify current code and prerequisites, preserve roadmap IDs and existing records, and identify the first ready task. Only edit todo.md; do not implement application code."
+
+**Implementation prompt:** "Read AGENTS.md and execute the selected phase in todo.md step by step. Implement ready tasks, verify them before completion, archive complete task blocks, maintain required project records, and revisit blocked tasks as dependencies finish. Continue until the phase is complete or no remaining task can proceed. Report unresolved blockers."
+
+---
+
+<!-- next-release-workflow:end -->
+
 ## 🚀 Active Engineering Roadmap
 
 ---
