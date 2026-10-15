@@ -29,6 +29,8 @@ scratch/
 .DS_Store
 .claude/
 .cursor/
+.gemini/
+.mcp.json
 qa_app.db
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
