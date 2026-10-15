@@ -201,7 +201,9 @@ CREATE TABLE document_chunks (
     id SERIAL PRIMARY KEY,
     document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
     content TEXT NOT NULL,
-    chunk_index INTEGER NOT NULL
+    chunk_index INTEGER NOT NULL,
+    parent_chunk_id INTEGER REFERENCES document_chunks(id) ON DELETE CASCADE,
+    hierarchy_level INTEGER DEFAULT 1
 );
 
 CREATE TABLE collections (

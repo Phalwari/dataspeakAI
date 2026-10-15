@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
 from sqlalchemy.orm import Session
+from typing import Tuple, List, Optional, Dict, Any
 import models, schemas
 from database import get_db
 from dependencies import get_current_user
@@ -23,6 +24,23 @@ def _load_hf_embeddings(model_name="all-MiniLM-L6-v2"):
     except ImportError:
         from langchain_community.embeddings import HuggingFaceEmbeddings
     return HuggingFaceEmbeddings(model_name=model_name)
+
+def resolve_tenant_vector_index_path(tenant_id: int, model_name: str = "all-MiniLM-L6-v2") -> Tuple[str, bool]:
+    """
+    Resolves the versioned FAISS vector store path for a tenant.
+    Returns (path, exists).
+    Falls back to legacy un-slugged path if versioned directory does not exist.
+    """
+    model_slug = (model_name or "all-MiniLM-L6-v2").replace("/", "_").replace(":", "_")
+    versioned_path = f"vector_store/tenant_{tenant_id}_{model_slug}"
+    legacy_path = f"vector_store/tenant_{tenant_id}"
+
+    if os.path.exists(versioned_path):
+        return versioned_path, True
+    if os.path.exists(legacy_path):
+        return legacy_path, True
+    return versioned_path, False
+
 
 def table_to_markdown(table):
     if not table or not table[0]:
@@ -90,81 +108,99 @@ def process_document(document_id: int, file_path: str, tenant_id: int, chunk_siz
         doc.progress = 0.3
         db.commit()
 
-        # 2. Chunk Narrative Blocks
-        from langchain_text_splitters import RecursiveCharacterTextSplitter
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size,
+        # 2. Hierarchical Chunking (Task 7.2.2)
+        from ingestion.semantic_chunker import SemanticHierarchicalChunker
+        chunker = SemanticHierarchicalChunker(
+            target_chunk_size=chunk_size,
             chunk_overlap=chunk_overlap
         )
+        parent_specs, child_specs = chunker.chunk_extracted_content(
+            extracted_content=extracted,
+            document_id=document_id,
+            document_name=doc.name
+        )
 
-        all_chunks = []
-        all_metadatas = []
+        # 3. Persist Level 0 Parent Chunks to SQL table
+        parent_db_objs = []
+        for i, p in enumerate(parent_specs):
+            db_p = models.DocumentChunk(
+                document_id=document_id,
+                content=p.content,
+                overlap_chars=0,
+                chunk_index=i,
+                page_number=p.page_number,
+                content_type=p.content_type,
+                section_heading=p.section_heading,
+                reference_id=p.reference_id,
+                parent_chunk_id=None,
+                hierarchy_level=0
+            )
+            db.add(db_p)
+            parent_db_objs.append(db_p)
+        db.flush()
 
-        for block in extracted.narrative_chunks:
-            sub_chunks = text_splitter.split_text(block.text)
-            for sub_text in sub_chunks:
-                all_chunks.append(sub_text)
-                all_metadatas.append({
-                    "document_id": document_id,
-                    "source": doc.name,
-                    "page_number": block.page_number,
-                    "content_type": "text",
-                    "section_heading": block.section_heading
-                })
+        # 4. Persist Level 1 Child Chunks to SQL table (linked to parent_chunk_id)
+        child_db_objs = []
+        for j, c in enumerate(child_specs):
+            parent_id = None
+            if c.parent_local_index is not None and c.parent_local_index < len(parent_db_objs):
+                parent_id = parent_db_objs[c.parent_local_index].id
 
-        for tbl in extracted.table_chunks:
-            all_chunks.append(tbl.html_content)
-            all_metadatas.append({
-                "document_id": document_id,
-                "source": doc.name,
-                "page_number": tbl.page_number,
-                "content_type": "table",
-                "reference_id": tbl.reference_id
-            })
-
-        for vis in extracted.visual_chunks:
-            all_chunks.append(vis.description)
-            all_metadatas.append({
-                "document_id": document_id,
-                "source": doc.name,
-                "page_number": vis.page_number,
-                "content_type": "image",
-                "reference_id": vis.reference_id
-            })
+            db_c = models.DocumentChunk(
+                document_id=document_id,
+                content=c.content,
+                overlap_chars=chunk_overlap,
+                chunk_index=len(parent_specs) + j,
+                page_number=c.page_number,
+                content_type=c.content_type,
+                section_heading=c.section_heading,
+                reference_id=c.reference_id,
+                parent_chunk_id=parent_id,
+                hierarchy_level=1
+            )
+            db.add(db_c)
+            child_db_objs.append(db_c)
+        db.flush()
 
         doc.progress = 0.6
         db.commit()
 
-        # 3. Create/Load FAISS
-        global embeddings_model
-        if embeddings_model is None:
-            embeddings_model = _load_hf_embeddings("all-MiniLM-L6-v2")
+        # 5. Index Child Chunks into Versioned FAISS (Task 7.2.4)
+        target_specs = child_specs if child_specs else parent_specs
+        target_db_objs = child_db_objs if child_specs else parent_db_objs
 
-        index_path = f"vector_store/tenant_{tenant_id}"
+        all_chunks = [s.content for s in target_specs]
+        all_metadatas = []
+        for s, db_chunk in zip(target_specs, target_db_objs):
+            meta = dict(s.metadata)
+            meta["chunk_id"] = db_chunk.id
+            meta["parent_chunk_id"] = db_chunk.parent_chunk_id
+            meta["document_id"] = document_id
+            meta["source"] = doc.name
+            all_metadatas.append(meta)
+
+        global embeddings_model
+        model_name = getattr(doc, "embedding_model", "all-MiniLM-L6-v2") or "all-MiniLM-L6-v2"
+        if embeddings_model is None or getattr(embeddings_model, "model_name", None) != model_name:
+            embeddings_model = _load_hf_embeddings(model_name)
+
+        model_slug = model_name.replace("/", "_").replace(":", "_")
+        versioned_index_path = f"vector_store/tenant_{tenant_id}_{model_slug}"
+        legacy_index_path = f"vector_store/tenant_{tenant_id}"
+
+        index_load_path = versioned_index_path
+        if not os.path.exists(versioned_index_path) and os.path.exists(legacy_index_path):
+            index_load_path = legacy_index_path
+
         from langchain_community.vectorstores import FAISS
-        if os.path.exists(index_path):
-            vectorstore = FAISS.load_local(index_path, embeddings_model, allow_dangerous_deserialization=True)
+        if os.path.exists(index_load_path):
+            vectorstore = FAISS.load_local(index_load_path, embeddings_model, allow_dangerous_deserialization=True)
             vectorstore.add_texts(texts=all_chunks, metadatas=all_metadatas)
         else:
             vectorstore = FAISS.from_texts(texts=all_chunks, embedding=embeddings_model, metadatas=all_metadatas)
 
-        vectorstore.save_local(index_path)
-
-        # 4. Save to DocumentChunk SQL table & update BM25
-        db_chunk_objects = []
-        for i, (chunk_text, meta) in enumerate(zip(all_chunks, all_metadatas)):
-            db_chunk = models.DocumentChunk(
-                document_id=document_id,
-                content=chunk_text,
-                overlap_chars=chunk_overlap,
-                chunk_index=i,
-                page_number=meta.get("page_number"),
-                content_type=meta.get("content_type", "text"),
-                section_heading=meta.get("section_heading"),
-                reference_id=meta.get("reference_id")
-            )
-            db.add(db_chunk)
-            db_chunk_objects.append(db_chunk)
+        os.makedirs("vector_store", exist_ok=True)
+        vectorstore.save_local(versioned_index_path)
 
         doc.status = "Completed"
         doc.embeddings_count = len(all_chunks)
@@ -228,11 +264,16 @@ def reembed_stored_chunks(document_id: int, tenant_id: int, db: Session = None):
         db.commit()
 
         global embeddings_model
-        model_name = doc.embedding_model or "all-MiniLM-L6-v2"
+        model_name = getattr(doc, "embedding_model", "all-MiniLM-L6-v2") or "all-MiniLM-L6-v2"
         if embeddings_model is None or getattr(embeddings_model, "model_name", None) != model_name:
             embeddings_model = _load_hf_embeddings(model_name)
 
-        index_path = f"vector_store/tenant_{tenant_id}"
+        model_slug = model_name.replace("/", "_").replace(":", "_")
+        versioned_index_path = f"vector_store/tenant_{tenant_id}_{model_slug}"
+        index_path, exists = resolve_tenant_vector_index_path(tenant_id, model_name)
+        if not exists:
+            index_path = versioned_index_path
+
         if os.path.exists(index_path):
             from langchain_community.vectorstores import FAISS
             vectorstore = FAISS.load_local(index_path, embeddings_model, allow_dangerous_deserialization=True)
@@ -252,7 +293,10 @@ def reembed_stored_chunks(document_id: int, tenant_id: int, db: Session = None):
         if db_chunks:
             all_chunks = [c.content for c in db_chunks]
             all_metadatas = [{
+                "chunk_id": c.id,
                 "document_id": document_id,
+                "parent_chunk_id": c.parent_chunk_id,
+                "hierarchy_level": c.hierarchy_level,
                 "source": doc.name,
                 "page_number": c.page_number,
                 "content_type": c.content_type,
@@ -270,6 +314,7 @@ def reembed_stored_chunks(document_id: int, tenant_id: int, db: Session = None):
             else:
                 vectorstore = FAISS.from_texts(texts=all_chunks, embedding=embeddings_model, metadatas=all_metadatas)
 
+            os.makedirs("vector_store", exist_ok=True)
             vectorstore.save_local(index_path)
 
         all_tenant_chunks = db.query(models.DocumentChunk).join(models.Document).filter(
@@ -392,11 +437,12 @@ def delete_document(
         
     try:
         global embeddings_model
-        if embeddings_model is None:
-            embeddings_model = _load_hf_embeddings("all-MiniLM-L6-v2")
+        model_name = getattr(doc, "embedding_model", "all-MiniLM-L6-v2") or "all-MiniLM-L6-v2"
+        if embeddings_model is None or getattr(embeddings_model, "model_name", None) != model_name:
+            embeddings_model = _load_hf_embeddings(model_name)
         
-        index_path = f"vector_store/tenant_{current_user.tenant_id}"
-        if os.path.exists(index_path):
+        index_path, exists = resolve_tenant_vector_index_path(current_user.tenant_id, model_name)
+        if exists and os.path.exists(index_path):
             from langchain_community.vectorstores import FAISS
             vectorstore = FAISS.load_local(index_path, embeddings_model, allow_dangerous_deserialization=True)
             docstore_dict = vectorstore.docstore._dict
@@ -482,8 +528,8 @@ def search_documents(
         if embeddings_model is None:
             embeddings_model = _load_hf_embeddings("all-MiniLM-L6-v2")
             
-        index_path = f"vector_store/tenant_{current_user.tenant_id}"
-        if not os.path.exists(index_path):
+        index_path, exists = resolve_tenant_vector_index_path(current_user.tenant_id, "all-MiniLM-L6-v2")
+        if not exists:
              return {
                  "query": query.query,
                  "answer": "No indexed documents found for your tenant. Please upload documents first.",
@@ -494,35 +540,37 @@ def search_documents(
         from langchain_community.vectorstores import FAISS
         vectorstore = FAISS.load_local(index_path, embeddings_model, allow_dangerous_deserialization=True)
         
-        # 1. Dense FAISS Search
+        # 1. Dense FAISS Search with Dimension Safety Guard (Task 7.2.4)
         embedding = embeddings_model.embed_query(query.query)
-        scores, indices = vectorstore.index.search(np.array([embedding], dtype=np.float32), 50)
-        
+        query_arr = np.array([embedding], dtype=np.float32)
+
         dense_results = []
-        for score, i in zip(scores[0], indices[0]):
-            if i == -1: continue
-            try:
-                _id = vectorstore.index_to_docstore_id[int(i)]
-                doc = vectorstore.docstore.search(_id)
-                meta = doc.metadata or {}
-                
-                # Apply metadata filters
-                if query.document_ids and meta.get("document_id") not in query.document_ids:
-                    continue
-                if query.content_types and meta.get("content_type") not in query.content_types:
-                    continue
-                if query.page_range and len(query.page_range) == 2:
-                    p_num = meta.get("page_number")
-                    if p_num and not (query.page_range[0] <= p_num <= query.page_range[1]):
+        if query_arr.shape[1] == getattr(vectorstore.index, "d", 384):
+            scores, indices = vectorstore.index.search(query_arr, 50)
+            for score, i in zip(scores[0], indices[0]):
+                if i == -1: continue
+                try:
+                    _id = vectorstore.index_to_docstore_id[int(i)]
+                    doc = vectorstore.docstore.search(_id)
+                    meta = doc.metadata or {}
+                    
+                    # Apply metadata filters
+                    if query.document_ids and meta.get("document_id") not in query.document_ids:
                         continue
-                        
-                dense_results.append({
-                    "content": doc.page_content,
-                    "metadata": meta,
-                    "score": float(score)
-                })
-            except KeyError:
-                continue
+                    if query.content_types and meta.get("content_type") not in query.content_types:
+                        continue
+                    if query.page_range and len(query.page_range) == 2:
+                        p_num = meta.get("page_number")
+                        if p_num and not (query.page_range[0] <= p_num <= query.page_range[1]):
+                            continue
+                            
+                    dense_results.append({
+                        "content": doc.page_content,
+                        "metadata": meta,
+                        "score": float(score)
+                    })
+                except KeyError:
+                    continue
 
         # 2. Sparse BM25 Search
         sparse_results = []

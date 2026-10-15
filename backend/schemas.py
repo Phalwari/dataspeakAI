@@ -512,6 +512,8 @@ class SourceCitation(BaseModel):
     reference_id: Optional[str] = None
     snippet: str
     score: Optional[float] = 0.0
+    grounding_score: Optional[float] = None
+    is_grounded: Optional[bool] = None
 
 class ChatResponse(BaseModel):
     conversation_id: int
@@ -522,6 +524,7 @@ class ChatResponse(BaseModel):
     query_type: str
     sources: List[SourceCitation] = []
     sql_data: Optional[Dict[str, Any]] = None
+    grounding: Optional[Dict[str, Any]] = None
     created_at: datetime
 
 class WidgetChatRequest(BaseModel):

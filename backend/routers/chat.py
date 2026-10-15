@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 import os
 import asyncio
 import requests
@@ -65,9 +65,11 @@ def warmup_embeddings() -> bool:
 def retrieve_rag_chunks(query: str, tenant_id: int, db: Session, top_k: int = 5) -> List[Dict[str, Any]]:
     """
     Executes hybrid dense-sparse search with RRF fusion across tenant documents.
+    Uses versioned index path with fallback, and protects against vector dimension mismatches.
     """
-    index_path = f"vector_store/tenant_{tenant_id}"
-    if not os.path.exists(index_path):
+    from routers.documents import resolve_tenant_vector_index_path
+    index_path, exists = resolve_tenant_vector_index_path(tenant_id, "all-MiniLM-L6-v2")
+    if not exists or not os.path.exists(index_path):
         return []
 
     emb_model = get_embeddings()
@@ -81,7 +83,15 @@ def retrieve_rag_chunks(query: str, tenant_id: int, db: Session, top_k: int = 5)
 
     # 1. Dense search
     embedding = emb_model.embed_query(query)
-    scores, indices = vectorstore.index.search(np.array([embedding], dtype=np.float32), 40)
+    query_vec = np.array([embedding], dtype=np.float32)
+
+    # Dimension mismatch guard (Task 7.2.4)
+    if hasattr(vectorstore, "index") and hasattr(vectorstore.index, "d"):
+        if vectorstore.index.d != query_vec.shape[1]:
+            print(f"[RAG] Dimension mismatch in tenant {tenant_id} index: expected {vectorstore.index.d}, got {query_vec.shape[1]}")
+            return []
+
+    scores, indices = vectorstore.index.search(query_vec, 40)
 
     dense_results = []
     for score, i in zip(scores[0], indices[0]):
@@ -114,9 +124,13 @@ def retrieve_rag_chunks(query: str, tenant_id: int, db: Session, top_k: int = 5)
         for hit in bm25_hits:
             chunk_obj = db.query(models.DocumentChunk).filter(models.DocumentChunk.id == hit["chunk_id"]).first()
             if chunk_obj:
+                meta = dict(hit.get("metadata") or {})
+                meta["chunk_id"] = chunk_obj.id
+                meta["parent_chunk_id"] = chunk_obj.parent_chunk_id
+                meta["hierarchy_level"] = chunk_obj.hierarchy_level
                 sparse_results.append({
                     "content": chunk_obj.content,
-                    "metadata": hit["metadata"],
+                    "metadata": meta,
                     "score": hit["score"]
                 })
     except Exception as e:
@@ -133,6 +147,61 @@ def retrieve_rag_chunks(query: str, tenant_id: int, db: Session, top_k: int = 5)
             top_results = top_results[:top_k]
 
     return top_results
+
+
+def build_grounded_rag_context(
+    retrieved_chunks: List[Dict[str, Any]],
+    db: Session
+) -> Tuple[str, List[schemas.SourceCitation]]:
+    """
+    Resolves parent chunk context for retrieved child chunks (Task 7.2.2).
+    Deduplicates parent sections so surrounding context is provided to the LLM
+    without repeating tokens. Retains precise child chunk citations for UI pills.
+    """
+    context_sections = []
+    seen_parent_ids = set()
+    citations: List[schemas.SourceCitation] = []
+
+    for idx, r in enumerate(retrieved_chunks, 1):
+        meta = r.get("metadata", {}) or {}
+        source_name = meta.get("source", f"Document_{idx}")
+        page_num = meta.get("page_number")
+        c_type = meta.get("content_type", "text")
+        ref_id = meta.get("reference_id")
+        content = r.get("content", "").strip()
+        parent_chunk_id = meta.get("parent_chunk_id")
+
+        citation_obj = schemas.SourceCitation(
+            document_name=source_name,
+            page_number=page_num,
+            content_type=c_type,
+            reference_id=ref_id,
+            snippet=(content[:220] + "...") if len(content) > 220 else content,
+            score=round(float(r.get("score", 0.0)), 3)
+        )
+        citations.append(citation_obj)
+
+        parent_chunk = None
+        if parent_chunk_id and parent_chunk_id not in seen_parent_ids:
+            parent_chunk = db.query(models.DocumentChunk).filter(models.DocumentChunk.id == parent_chunk_id).first()
+            if parent_chunk:
+                seen_parent_ids.add(parent_chunk_id)
+
+        page_tag = f", Page {page_num}" if page_num else ""
+        type_tag = f" [{c_type.upper()}]" if c_type != "text" else ""
+
+        if parent_chunk and parent_chunk.content:
+            sec_heading = f" - Section: {parent_chunk.section_heading}" if parent_chunk.section_heading else ""
+            context_sections.append(
+                f"[Document Section #{idx} - Source: {source_name}{page_tag}{sec_heading} (Parent Context)]\n"
+                f"{parent_chunk.content.strip()}\n\n"
+                f"Specific Matching Passage:\n{content}"
+            )
+        else:
+            context_sections.append(f"[Document Chunk #{idx} - Source: {source_name}{page_tag}{type_tag}]\n{content}")
+
+    context_text = "\n\n".join(context_sections)
+    return context_text, citations
 
 
 def build_conversation_history_text(messages: List[models.Message], max_messages: int = 10, conversation: Optional[models.Conversation] = None) -> str:
@@ -370,6 +439,7 @@ def chat_endpoint(
     route_type = route_decision.route_type
     gemini_api_key = os.getenv("GEMINI_API_KEY")
     citations: List[schemas.SourceCitation] = []
+    retrieved_chunks: List[Dict[str, Any]] = []
     sql_response_obj = None
     assistant_answer = ""
     synthesis_prompt = ""
@@ -395,8 +465,12 @@ def chat_endpoint(
         if not db_conn:
             assistant_answer = "No database connection is available for your organization. Please connect a database in the Databases tab or switch source to Knowledge Base."
         else:
-            # Generate and execute SQL
+            # Generate and execute SQL via Self-Correcting SQLAgent
             nl_res = generate_sql_from_nl(db_conn, user_query, db_session=db)
+            msg_metadata["sql_agent"] = {
+                "attempts": nl_res.get("attempts", 1),
+                "corrections_made": nl_res.get("corrections_made", False)
+            }
             if nl_res.get("error"):
                 assistant_answer = f"I encountered an issue generating the query: {nl_res['error']}"
                 sql_response_obj = schemas.NLQueryResponse(
@@ -483,30 +557,7 @@ def chat_endpoint(
         if not retrieved_chunks:
             assistant_answer = "I searched your Knowledge Base, but found no relevant document chunks matching your question. Please ensure documents have been uploaded and indexed."
         else:
-            context_parts = []
-            for idx, r in enumerate(retrieved_chunks, 1):
-                meta = r.get("metadata", {})
-                source_name = meta.get("source", f"Document_{idx}")
-                page_num = meta.get("page_number")
-                c_type = meta.get("content_type", "text")
-                ref_id = meta.get("reference_id")
-                content = r.get("content", "").strip()
-
-                citation_obj = schemas.SourceCitation(
-                    document_name=source_name,
-                    page_number=page_num,
-                    content_type=c_type,
-                    reference_id=ref_id,
-                    snippet=(content[:220] + "...") if len(content) > 220 else content,
-                    score=round(r.get("score", 0.0), 3)
-                )
-                citations.append(citation_obj)
-
-                page_tag = f", Page {page_num}" if page_num else ""
-                type_tag = f" [{c_type.upper()}]" if c_type != "text" else ""
-                context_parts.append(f"[Document Chunk #{idx} - Source: {source_name}{page_tag}{type_tag}]\n{content}")
-
-            context_text = "\n\n".join(context_parts)
+            context_text, citations = build_grounded_rag_context(retrieved_chunks, db)
             synthesis_prompt = (
                 "You are DataSpeakAI, an expert Conversational AI Assistant grounded in enterprise knowledge base documents.\n"
                 f"{history_text}\n"
@@ -534,31 +585,30 @@ def chat_endpoint(
                 summary_items = [f"- {c.snippet} [Source: {c.document_name}]" for c in citations[:3]]
                 assistant_answer = f"Found relevant information across {len(citations)} document chunk(s):\n\n" + "\n".join(summary_items)
 
+            # Grounding Verification (Task 7.2.3)
+            if not is_stream:
+                from services.citation_service import citation_service
+                grounding_res = citation_service.verify_grounding(
+                    response_text=assistant_answer,
+                    retrieved_chunks=retrieved_chunks,
+                    embedding_model=get_embeddings()
+                )
+                if grounding_res.get("citations"):
+                    citations = grounding_res["citations"]
+                msg_metadata["grounding"] = {
+                    "confidence": grounding_res.get("grounding_confidence", 0.0),
+                    "has_low_confidence": grounding_res.get("has_low_confidence", False),
+                    "disclaimer": grounding_res.get("disclaimer"),
+                    "verified_claims": grounding_res.get("claims", [])
+                }
+
     # ==========================================
     # BRANCH C: Hybrid Multi-Source Retrieval
     # ==========================================
     elif route_type == "hybrid":
-        # 1. RAG Chunks
+        # 1. RAG Chunks with Parent Context Expansion
         retrieved_chunks = retrieve_rag_chunks(user_query, tenant_id=tenant_id, db=db, top_k=3)
-        context_parts = []
-        for idx, r in enumerate(retrieved_chunks, 1):
-            meta = r.get("metadata", {})
-            source_name = meta.get("source", f"Document_{idx}")
-            page_num = meta.get("page_number")
-            c_type = meta.get("content_type", "text")
-            ref_id = meta.get("reference_id")
-            content = r.get("content", "").strip()
-
-            citation_obj = schemas.SourceCitation(
-                document_name=source_name,
-                page_number=page_num,
-                content_type=c_type,
-                reference_id=ref_id,
-                snippet=(content[:200] + "...") if len(content) > 200 else content,
-                score=round(r.get("score", 0.0), 3)
-            )
-            citations.append(citation_obj)
-            context_parts.append(f"[Document: {source_name}]\n{content}")
+        context_text, citations = build_grounded_rag_context(retrieved_chunks, db)
 
         # 2. SQL Execution
         db_conn = auto_select_database(user_query, tenant_id, db)
@@ -589,7 +639,7 @@ def chat_endpoint(
                     "You are DataSpeakAI, synthesizing an answer using BOTH structured database tables AND document knowledge base files.\n"
                     f"{history_text}\n"
                     f"User Question: {user_query}\n\n"
-                    f"Document Context:\n{chr(10).join(context_parts)}\n\n"
+                    f"Document Context:\n{context_text}\n\n"
                     f"Database Table Results:\n{sql_rows_text}\n\n"
                     "Synthesize a unified, comprehensive answer combining both the numerical database findings and the qualitative document context. Cite document sources using [Source: filename]."
                 )
@@ -607,6 +657,23 @@ def chat_endpoint(
         if not assistant_answer:
             assistant_answer = f"Synthesized hybrid insights from knowledge base documents and database tables."
 
+        # Grounding Verification (Task 7.2.3)
+        if not is_stream and retrieved_chunks:
+            from services.citation_service import citation_service
+            grounding_res = citation_service.verify_grounding(
+                response_text=assistant_answer,
+                retrieved_chunks=retrieved_chunks,
+                embedding_model=get_embeddings()
+            )
+            if grounding_res.get("citations"):
+                citations = grounding_res["citations"]
+            msg_metadata["grounding"] = {
+                "confidence": grounding_res.get("grounding_confidence", 0.0),
+                "has_low_confidence": grounding_res.get("has_low_confidence", False),
+                "disclaimer": grounding_res.get("disclaimer"),
+                "verified_claims": grounding_res.get("claims", [])
+            }
+
     # 5. Record Assistant Message in DB
     msg_metadata["sources"] = [c.model_dump() for c in citations]
     if sql_response_obj:
@@ -616,6 +683,25 @@ def chat_endpoint(
         from services.chat_stream import stream_chat_response
 
         def on_stream_complete(full_answer: str) -> int:
+            if route_type in ("rag", "hybrid") and retrieved_chunks:
+                try:
+                    from services.citation_service import citation_service
+                    grounding_res = citation_service.verify_grounding(
+                        response_text=full_answer,
+                        retrieved_chunks=retrieved_chunks,
+                        embedding_model=get_embeddings()
+                    )
+                    if grounding_res.get("citations"):
+                        msg_metadata["sources"] = [c.model_dump() for c in grounding_res["citations"]]
+                    msg_metadata["grounding"] = {
+                        "confidence": grounding_res.get("grounding_confidence", 0.0),
+                        "has_low_confidence": grounding_res.get("has_low_confidence", False),
+                        "disclaimer": grounding_res.get("disclaimer"),
+                        "verified_claims": grounding_res.get("claims", [])
+                    }
+                except Exception as g_err:
+                    print(f"Streaming grounding verification note: {g_err}")
+
             assistant_msg = models.Message(
                 conversation_id=conv_id,
                 sender_role="assistant",
@@ -712,6 +798,7 @@ def chat_endpoint(
         query_type=route_type,
         sources=citations,
         sql_data=sql_response_obj.model_dump() if sql_response_obj else None,
+        grounding=msg_metadata.get("grounding"),
         created_at=assistant_msg.created_at
     )
 

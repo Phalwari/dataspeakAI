@@ -22,17 +22,27 @@ from sqlalchemy.exc import SQLAlchemyError
 def get_connection_url(db_conn: models.DatabaseConnection) -> str | None:
     """
     Constructs a SQLAlchemy connection string from a DatabaseConnection model,
-    decrypting the stored password.
+    decrypting the stored password or explicit connection string.
     """
     if not db_conn:
         return None
+    conn_str = getattr(db_conn, "connection_string", None)
+    if conn_str:
+        raw_conn = decrypt_password(conn_str)
+        if raw_conn and str(raw_conn).startswith(("sqlite:", "postgresql:", "mysql:")):
+            return str(raw_conn)
+
     raw_password = decrypt_password(db_conn.password)
     if db_conn.db_type == "postgresql":
         return f"postgresql://{db_conn.username}:{raw_password}@{db_conn.host}/{db_conn.database}"
     elif db_conn.db_type in ("mysql", "mariadb"):
         return f"mysql+pymysql://{db_conn.username}:{raw_password}@{db_conn.host}/{db_conn.database}"
     elif db_conn.db_type == "sqlite":
-        return f"sqlite:///{db_conn.database}"
+        path = (db_conn.database if db_conn.database else getattr(db_conn, "host", "")) or ""
+        path = str(path).strip('"\'').replace("\\", "/")
+        if path.startswith("sqlite:///"):
+            return path
+        return f"sqlite:///{path}"
     return None
 
 
@@ -401,87 +411,36 @@ def validate_widget_sql(sql_query: str, allowed_tables: Optional[List[str]] = No
 
 def generate_sql_from_nl(db_conn: models.DatabaseConnection, user_question: str, db_session=None, tenant_id: Optional[int] = None) -> Dict[str, Any]:
     """
-    Uses unified LLMGateway (multi-key Gemini with automatic Groq failover) to generate
-    a read-only SQL query and explanation from natural language and schema context.
+    Uses SQLAgent (with AST schema validation, SAVEPOINT rollback dry-runs,
+    and automatic in-flight retry loop) to generate a verified, read-only SQL query.
     """
-    schema_ctx = get_db_schema_context(db_conn, db_session)
-
-    prompt = (
-        f"You are a Senior SQL & Database Engineer. Given the following database schema context and user question, "
-        f"generate a valid, read-only SQL query ({db_conn.db_type} dialect) and a short explanation.\n\n"
-        "CRITICAL SECURITY RULES:\n"
-        "1. Output ONLY a single read-only SELECT or WITH statement.\n"
-        "2. NEVER use DDL/DML keywords (INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, etc.).\n"
-        "3. Do NOT include multiple statements or semicolons.\n"
-        "4. Format your output EXACTLY with the following structure:\n"
-        "```sql\n<your SQL query here>\n```\n"
-        "Explanation: <1-2 sentence explanation of how the query works>\n\n"
-        f"DATABASE SCHEMA:\n{schema_ctx}\n\n"
-        f"USER QUESTION: {user_question}"
-    )
-
     try:
-        t_id = tenant_id or getattr(db_conn, "tenant_id", None)
-        raw_text = llm_gateway.generate_sync(
-            prompt=prompt,
-            tenant_id=t_id,
-            purpose="nl_to_sql",
-            temperature=0.1
+        from services.sql_agent import sql_agent
+        return sql_agent.run(
+            db_conn=db_conn,
+            user_question=user_question,
+            db_session=db_session,
+            tenant_id=tenant_id
         )
+    except Exception as agent_err:
+        logger.error(f"[SQL Engine] SQLAgent run failed, using standard fallback: {agent_err}")
+        schema_ctx = get_db_schema_context(db_conn, db_session)
+        fallback_table = "users"
+        if "Table: " in schema_ctx:
+            tables = re.findall(r'Table:\s*(\w+)', schema_ctx)
+            if tables:
+                fallback_table = tables[0]
 
-        if raw_text and not raw_text.startswith("Sorry, all AI providers"):
-            # Extract SQL block
-            sql_match = re.search(r'```sql\s*(.*?)\s*```', raw_text, re.DOTALL | re.IGNORECASE)
-            if sql_match:
-                generated_sql = sql_match.group(1).strip()
-            else:
-                generated_sql = raw_text.split('\n')[0].strip()
+        return {
+            "sql": f"SELECT * FROM {fallback_table} LIMIT 10;",
+            "explanation": f"Generated safe fallback preview query on table '{fallback_table}'.",
+            "schema_context": schema_ctx,
+            "attempts": 1,
+            "corrections_made": False,
+            "status": "failed",
+            "error": str(agent_err)
+        }
 
-            # Extract Explanation
-            explanation_match = re.search(r'Explanation:\s*(.*)', raw_text, re.IGNORECASE | re.DOTALL)
-            if explanation_match:
-                explanation = explanation_match.group(1).strip()
-            else:
-                explanation = f"Generated {db_conn.db_type} query to answer: '{user_question}'."
-
-            # Validate generated SQL against security guardrails
-            is_valid, reason = validate_read_only_sql(generated_sql)
-            if not is_valid:
-                return {
-                    "sql": "",
-                    "explanation": f"Security Guardrail Triggered: {reason}",
-                    "schema_context": schema_ctx,
-                    "error": reason
-                }
-
-            return {
-                "sql": generated_sql,
-                "explanation": explanation,
-                "schema_context": schema_ctx,
-                "error": None
-            }
-    except Exception as e:
-        print(f"Error calling LLM Gateway for NL-to-SQL: {e}")
-
-    # Fallback if LLM was unconfigured or request failed
-    fallback_table = "users"
-    if "Table: " in schema_ctx:
-        tables = re.findall(r'Table:\s*(\w+)', schema_ctx)
-        if tables:
-            fallback_table = tables[0]
-
-    fallback_sql = f"SELECT * FROM {fallback_table} LIMIT 10;"
-    fallback_exp = (
-        "Note: AI generation was unreachable. "
-        f"Generated safe fallback preview query on table '{fallback_table}'."
-    )
-
-    return {
-        "sql": fallback_sql,
-        "explanation": fallback_exp,
-        "schema_context": schema_ctx,
-        "error": None
-    }
 
 
 PII_COLUMN_PATTERNS = [

@@ -43,6 +43,8 @@ interface SourceCitation {
   reference_id?: string;
   snippet: string;
   score?: number;
+  grounding_score?: number;
+  is_grounded?: boolean;
 }
 
 interface SqlData {
@@ -65,6 +67,22 @@ interface ChatMessage {
   metadata_json?: {
     sources?: SourceCitation[];
     sql_data?: SqlData;
+    sql_agent?: {
+      attempts?: number;
+      corrections_made?: boolean;
+    };
+    grounding?: {
+      confidence?: number;
+      has_low_confidence?: boolean;
+      disclaimer?: string;
+      verified_claims?: Array<{
+        claim: string;
+        is_grounded: boolean;
+        score: number;
+        source?: string;
+        page_number?: number;
+      }>;
+    };
     route_decision?: {
       route_type: string;
       confidence: number;
@@ -712,6 +730,12 @@ export function ChatPage() {
                                 Hybrid Multi-Source
                               </Badge>
                             )}
+                            {msg.metadata_json?.sql_agent?.corrections_made && (
+                              <Badge variant="outline" className="bg-indigo-50 text-indigo-700 border-indigo-200 text-[10px]">
+                                <Sparkles className="w-2.5 h-2.5 mr-1" />
+                                Self-Corrected (Attempt {msg.metadata_json.sql_agent.attempts || 2})
+                              </Badge>
+                            )}
                           </div>
                           <button
                             onClick={() => copyToClipboard(msg.content)}
@@ -734,6 +758,14 @@ export function ChatPage() {
                           </span>
                         ) : null)}
                       </div>
+
+                      {/* Hallucination / Low Grounding Disclaimer */}
+                      {msg.metadata_json?.grounding?.disclaimer && (
+                        <div className="mt-2.5 p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-[11px] flex items-start gap-2">
+                          <span className="font-semibold text-xs leading-none mt-0.5">⚠️</span>
+                          <span className="leading-relaxed">{msg.metadata_json.grounding.disclaimer}</span>
+                        </div>
+                      )}
                     </div>
 
                     {/* SQL Execution Card (if present) */}
@@ -794,9 +826,21 @@ export function ChatPage() {
                           onClick={() => toggleSourceExpand(msg.id)}
                           className="flex items-center justify-between cursor-pointer text-xs font-semibold text-gray-700 hover:text-blue-600 transition-colors select-none"
                         >
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
                             <FileText className="w-3.5 h-3.5 text-blue-600" />
                             <span>Grounding Sources ({sources.length} Citation{sources.length > 1 ? "s" : ""})</span>
+                            {msg.metadata_json?.grounding?.confidence !== undefined && (
+                              <Badge
+                                variant="outline"
+                                className={`text-[9px] px-1.5 py-0 h-4 ${
+                                  msg.metadata_json.grounding.has_low_confidence
+                                    ? "bg-amber-50 text-amber-700 border-amber-200"
+                                    : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                }`}
+                              >
+                                {msg.metadata_json.grounding.has_low_confidence ? "Low Grounding" : "Verified Grounding"} ({Math.round(msg.metadata_json.grounding.confidence * 100)}%)
+                              </Badge>
+                            )}
                           </div>
                           {isSourcesExpanded ? (
                             <ChevronUp className="w-3.5 h-3.5 text-gray-400" />
@@ -816,11 +860,25 @@ export function ChatPage() {
                               >
                                 <div className="flex items-center justify-between text-[11px] font-semibold text-gray-800">
                                   <span className="truncate max-w-[140px]">{src.document_name}</span>
-                                  {src.page_number && (
-                                    <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-4">
-                                      p. {src.page_number}
-                                    </Badge>
-                                  )}
+                                  <div className="flex items-center gap-1">
+                                    {src.page_number && (
+                                      <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-4">
+                                        p. {src.page_number}
+                                      </Badge>
+                                    )}
+                                    {(src.score !== undefined || src.grounding_score !== undefined) && (
+                                      <Badge
+                                        variant="outline"
+                                        className={`text-[9px] px-1.5 py-0 h-4 ${
+                                          (src.grounding_score ?? src.score ?? 0) >= 0.65
+                                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                            : "bg-gray-100 text-gray-600 border-gray-200"
+                                        }`}
+                                      >
+                                        {Math.round((src.grounding_score ?? src.score ?? 0) * 100)}%
+                                      </Badge>
+                                    )}
+                                  </div>
                                 </div>
                                 <p className="text-[10px] text-gray-600 line-clamp-2 leading-relaxed">
                                   "{src.snippet}"

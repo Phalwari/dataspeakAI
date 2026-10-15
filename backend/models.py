@@ -305,9 +305,12 @@ class DocumentChunk(Base):
     content_type = Column(String, default="text")       # "text" | "table" | "image"
     section_heading = Column(String, nullable=True)
     reference_id = Column(String, nullable=True)
+    parent_chunk_id = Column(Integer, ForeignKey("document_chunks.id", ondelete="CASCADE"), nullable=True)
+    hierarchy_level = Column(Integer, default=1, nullable=False)  # 0 = parent (section/table), 1 = child (paragraph/leaf)
     created_at = Column(DateTime, default=utc_now)
     
     document = relationship("Document", back_populates="chunks")
+    parent_chunk = relationship("DocumentChunk", remote_side=[id], backref="child_chunks")
 
 class PasswordResetOTP(Base):
     __tablename__ = "password_reset_otps"
