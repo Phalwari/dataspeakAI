@@ -191,20 +191,25 @@ class CitationService:
                 content_type=meta.get("content_type", "text"),
                 reference_id=meta.get("reference_id"),
                 snippet=ch.get("content", "")[:320],
-                score=round(hit_score, 3)
+                score=round(hit_score, 3),
+                grounding_score=round(hit_score, 3),
+                is_grounded=bool(hit_score >= self.threshold)
             ))
 
         # If no citations were generated via hits, populate from top retrieved
         if not citations_list:
             for ch in retrieved_chunks[:3]:
                 meta = ch.get("metadata", {}) or {}
+                chunk_sc = float(ch.get("score", 0.65))
                 citations_list.append(schemas.SourceCitation(
                     document_name=meta.get("source", "Document"),
                     page_number=meta.get("page_number"),
                     content_type=meta.get("content_type", "text"),
                     reference_id=meta.get("reference_id"),
                     snippet=ch.get("content", "")[:320],
-                    score=round(float(ch.get("score", 0.65)), 3)
+                    score=round(chunk_sc, 3),
+                    grounding_score=round(chunk_sc, 3),
+                    is_grounded=bool(chunk_sc >= self.threshold)
                 ))
 
         # Compute aggregate confidence

@@ -217,6 +217,8 @@ class SQLAgent:
                 connect_args = {"timeout": 6.0}
             elif db_conn.db_type == "postgresql":
                 connect_args = {"options": "-c statement_timeout=6000"}
+            elif db_conn.db_type in ("mysql", "mariadb"):
+                connect_args = {"init_command": "SET SESSION MAX_EXECUTION_TIME=6000"}
 
             engine = create_engine(conn_url, poolclass=NullPool, connect_args=connect_args)
             with engine.connect() as conn:

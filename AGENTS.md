@@ -288,6 +288,13 @@ backend/
 * **Conversation Memory Management (`ConversationMemoryManager`):** The last `MAX_RECENT_TURNS = 10` messages are preserved verbatim in context. Conversations crossing 15 turns trigger asynchronous background summarization of older turns. Monotonically increasing versioning (`summary_turn_count`) and per-conversation locks prevent concurrent overwrite or regression. Failures fall back cleanly to sliding window without logging message text.
 * **Dynamic Background Title Generation (`services/conversation_title.py`):** Initial conversation creation assigns a fast 6-word heuristic title. Following the first assistant answer, an async task generates a concise 3-6 word sanitized title via LLM Gateway. If the user has already manually renamed the conversation, the custom title is preserved.
 
+### 4.10 Agentic Self-Correcting SQL, Grounding Verification & Retrieval Precision Standard
+
+* **Self-Correcting SQL Agent (`SQLAgent`):** Iterative schema-guided loop (up to `MAX_ATTEMPTS = 3`) that catches dialect errors via isolated `begin_nested()` SAVEPOINT rollback dry-runs before attempting execution. Statement execution timeouts apply to all supported relational engines (SQLite `timeout=6.0`, PostgreSQL `-c statement_timeout=6000`, MySQL/MariaDB `SET SESSION MAX_EXECUTION_TIME=6000`). If repairs fail, executes clean graceful fallback to baseline read without mutating database state.
+* **Precision Grounding & Source Attribution (`CitationService`):** Every synthesized answer in RAG and Hybrid routes is claim-split and verified against retrieved parent/child chunks using semantic cosine similarity. Source citations are decorated with explicit `grounding_score` and `is_grounded` boolean flags. Low-confidence syntheses (`confidence < 0.65`) append an advisory disclaimer.
+* **Streaming Metadata Transmission:** `stream_chat_response` communicates completion metadata (`grounding`, `sql_agent`, `sources`, `sql_data`) directly within the terminal SSE `done` frame to eliminate race conditions between client-side stream termination and database persistence.
+* **Vector Store Isolation & Dimension Integrity:** FAISS vector index directories are partitioned strictly by `tenant_{id}_{model_slug}` where `model_slug` is sanitized with strict regex character filtering (`[^a-zA-Z0-9_\-\.]`) to prevent directory traversal across platforms. Query embeddings strictly validate dimension equality against `index.d`, returning explicit HTTP 400 Bad Request on model mismatch.
+
 ---
 
 

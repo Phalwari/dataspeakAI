@@ -90,24 +90,45 @@ async def stream_chat_response(
             chunk_payload = json.dumps({"chunk": static_fallback, "done": False})
             yield f"data: {chunk_payload}\n\n"
             returned_msg_id = message_id
+            static_sources = None
+            static_grounding = None
+            static_sql_agent = None
             if on_complete:
                 try:
                     res = on_complete(static_fallback)
                     if isinstance(res, int):
                         returned_msg_id = res
+                    elif isinstance(res, dict):
+                        returned_msg_id = res.get("message_id", returned_msg_id)
+                        static_sources = res.get("sources")
+                        static_grounding = res.get("grounding")
+                        static_sql_agent = res.get("sql_agent")
                 except Exception as cb_err:
                     logger.warning(f"[ChatStream Callback Error] {cb_err}")
+
+            effective_static_citations = static_sources if static_sources is not None else citations
+            static_sources_list = []
+            if effective_static_citations:
+                for c in effective_static_citations:
+                    if hasattr(c, "model_dump"):
+                        static_sources_list.append(c.model_dump())
+                    elif isinstance(c, dict):
+                        static_sources_list.append(c)
 
             final_payload = {
                 "chunk": "",
                 "done": True,
                 "conversation_id": conversation_id,
-                "sources": sources_list
+                "sources": static_sources_list
             }
             if returned_msg_id is not None:
                 final_payload["message_id"] = returned_msg_id
             if sql_data is not None:
                 final_payload["sql_data"] = sql_data.model_dump() if hasattr(sql_data, "model_dump") else sql_data
+            if static_grounding is not None:
+                final_payload["grounding"] = static_grounding
+            if static_sql_agent is not None:
+                final_payload["sql_agent"] = static_sql_agent
             yield f"data: {json.dumps(final_payload)}\n\n"
             return
 
@@ -138,18 +159,28 @@ async def stream_chat_response(
 
         # Notify completion callback (e.g. to persist assistant message & QueryLog)
         returned_msg_id = message_id
+        callback_sources = None
+        callback_grounding = None
+        callback_sql_agent = None
+
         if on_complete:
             try:
                 res = on_complete(full_answer)
                 if isinstance(res, int):
                     returned_msg_id = res
+                elif isinstance(res, dict):
+                    returned_msg_id = res.get("message_id", returned_msg_id)
+                    callback_sources = res.get("sources")
+                    callback_grounding = res.get("grounding")
+                    callback_sql_agent = res.get("sql_agent")
             except Exception as cb_err:
                 logger.warning(f"[ChatStream Callback Error] {cb_err}")
 
         # Construct backward-compatible done payload
         sources_list = []
-        if citations:
-            for c in citations:
+        effective_citations = callback_sources if callback_sources is not None else citations
+        if effective_citations:
+            for c in effective_citations:
                 if hasattr(c, "model_dump"):
                     sources_list.append(c.model_dump())
                 elif isinstance(c, dict):
@@ -165,6 +196,10 @@ async def stream_chat_response(
             final_payload["message_id"] = returned_msg_id
         if sql_data is not None:
             final_payload["sql_data"] = sql_data.model_dump() if hasattr(sql_data, "model_dump") else sql_data
+        if callback_grounding is not None:
+            final_payload["grounding"] = callback_grounding
+        if callback_sql_agent is not None:
+            final_payload["sql_agent"] = callback_sql_agent
 
         yield f"data: {json.dumps(final_payload)}\n\n"
 

@@ -25,6 +25,7 @@ from services.conversation_title import (
     generate_heuristic_title,
     generate_and_set_conversation_title_in_background
 )
+from services.llm_generation_service import llm_gateway
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -506,17 +507,17 @@ def chat_endpoint(
                         f"Data Rows (JSON sample):\n{rows_preview}\n\n"
                         "Provide a clear, natural language answer summarizing the key findings directly answering the user's question. Highlight key figures, averages, top entities, or trends concisely."
                     )
-                    if not is_stream and gemini_api_key:
+                    if not is_stream:
                         try:
-                            gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
-                            gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_api_key}"
-                            payload = {"contents": [{"parts": [{"text": synthesis_prompt}]}]}
-                            headers = {"Content-Type": "application/json"}
-                            res = requests.post(gemini_url, json=payload, headers=headers, timeout=25)
-                            if res.status_code == 200:
-                                assistant_answer = res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+                            raw_answer = llm_gateway.generate_sync(
+                                prompt=synthesis_prompt,
+                                tenant_id=tenant_id,
+                                purpose="sql_synthesis"
+                            )
+                            if raw_answer and not raw_answer.startswith("Sorry, all AI providers"):
+                                assistant_answer = raw_answer.strip()
                         except Exception as err:
-                            print(f"Gemini SQL synthesis error: {err}")
+                            print(f"LLM SQL synthesis error: {err}")
 
                     if not assistant_answer:
                         assistant_answer = f"{nl_res['explanation']}\n\nReturned **{exec_res['row_count']}** matching record(s) from database `{db_conn.name}`."
@@ -569,17 +570,17 @@ def chat_endpoint(
                 f"Retrieved Document Context:\n{context_text}"
             )
 
-            if not is_stream and gemini_api_key:
+            if not is_stream:
                 try:
-                    gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
-                    gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_api_key}"
-                    payload = {"contents": [{"parts": [{"text": synthesis_prompt}]}]}
-                    headers = {"Content-Type": "application/json"}
-                    res = requests.post(gemini_url, json=payload, headers=headers, timeout=30)
-                    if res.status_code == 200:
-                        assistant_answer = res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+                    raw_answer = llm_gateway.generate_sync(
+                        prompt=synthesis_prompt,
+                        tenant_id=tenant_id,
+                        purpose="rag_synthesis"
+                    )
+                    if raw_answer and not raw_answer.startswith("Sorry, all AI providers"):
+                        assistant_answer = raw_answer.strip()
                 except Exception as err:
-                    print(f"Gemini RAG synthesis error: {err}")
+                    print(f"LLM RAG synthesis error: {err}")
 
             if not assistant_answer:
                 summary_items = [f"- {c.snippet} [Source: {c.document_name}]" for c in citations[:3]]
@@ -615,6 +616,10 @@ def chat_endpoint(
         sql_rows_text = "None"
         if db_conn:
             nl_res = generate_sql_from_nl(db_conn, user_query, db_session=db)
+            msg_metadata["sql_agent"] = {
+                "attempts": nl_res.get("attempts", 1),
+                "corrections_made": nl_res.get("corrections_made", False)
+            }
             if not nl_res.get("error"):
                 try:
                     exec_res = execute_safe_sql(db_conn, nl_res["sql"], max_rows=50)
@@ -633,26 +638,25 @@ def chat_endpoint(
                     print(f"Hybrid SQL execution note: {ex}")
 
         # 3. Unified Synthesis
-        if gemini_api_key:
-            try:
-                synthesis_prompt = (
-                    "You are DataSpeakAI, synthesizing an answer using BOTH structured database tables AND document knowledge base files.\n"
-                    f"{history_text}\n"
-                    f"User Question: {user_query}\n\n"
-                    f"Document Context:\n{context_text}\n\n"
-                    f"Database Table Results:\n{sql_rows_text}\n\n"
-                    "Synthesize a unified, comprehensive answer combining both the numerical database findings and the qualitative document context. Cite document sources using [Source: filename]."
+        try:
+            synthesis_prompt = (
+                "You are DataSpeakAI, synthesizing an answer using BOTH structured database tables AND document knowledge base files.\n"
+                f"{history_text}\n"
+                f"User Question: {user_query}\n\n"
+                f"Document Context:\n{context_text}\n\n"
+                f"Database Table Results:\n{sql_rows_text}\n\n"
+                "Synthesize a unified, comprehensive answer combining both the numerical database findings and the qualitative document context. Cite document sources using [Source: filename]."
+            )
+            if not is_stream:
+                raw_answer = llm_gateway.generate_sync(
+                    prompt=synthesis_prompt,
+                    tenant_id=tenant_id,
+                    purpose="hybrid_chat"
                 )
-                if not is_stream:
-                    gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
-                    gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_api_key}"
-                    payload = {"contents": [{"parts": [{"text": synthesis_prompt}]}]}
-                    headers = {"Content-Type": "application/json"}
-                    res = requests.post(gemini_url, json=payload, headers=headers, timeout=30)
-                    if res.status_code == 200:
-                        assistant_answer = res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-            except Exception as err:
-                print(f"Hybrid synthesis error: {err}")
+                if raw_answer and not raw_answer.startswith("Sorry, all AI providers"):
+                    assistant_answer = raw_answer.strip()
+        except Exception as err:
+            print(f"Hybrid synthesis error: {err}")
 
         if not assistant_answer:
             assistant_answer = f"Synthesized hybrid insights from knowledge base documents and database tables."
@@ -682,7 +686,7 @@ def chat_endpoint(
     if is_stream:
         from services.chat_stream import stream_chat_response
 
-        def on_stream_complete(full_answer: str) -> int:
+        def on_stream_complete(full_answer: str) -> Dict[str, Any]:
             if route_type in ("rag", "hybrid") and retrieved_chunks:
                 try:
                     from services.citation_service import citation_service
@@ -731,7 +735,12 @@ def chat_endpoint(
                 except RuntimeError:
                     pass
 
-            return int(assistant_msg.id)
+            return {
+                "message_id": int(assistant_msg.id),
+                "sources": msg_metadata.get("sources"),
+                "grounding": msg_metadata.get("grounding"),
+                "sql_agent": msg_metadata.get("sql_agent")
+            }
 
         return StreamingResponse(
             stream_chat_response(
@@ -799,6 +808,7 @@ def chat_endpoint(
         sources=citations,
         sql_data=sql_response_obj.model_dump() if sql_response_obj else None,
         grounding=msg_metadata.get("grounding"),
+        sql_agent=msg_metadata.get("sql_agent"),
         created_at=assistant_msg.created_at
     )
 

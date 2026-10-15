@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, status
 from sqlalchemy.orm import Session
 from typing import Tuple, List, Optional, Dict, Any
+import re
 import models, schemas
 from database import get_db
 from dependencies import get_current_user
@@ -31,7 +32,8 @@ def resolve_tenant_vector_index_path(tenant_id: int, model_name: str = "all-Mini
     Returns (path, exists).
     Falls back to legacy un-slugged path if versioned directory does not exist.
     """
-    model_slug = (model_name or "all-MiniLM-L6-v2").replace("/", "_").replace(":", "_")
+    clean_model = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', model_name or "all-MiniLM-L6-v2").strip("._")
+    model_slug = clean_model or "all-MiniLM-L6-v2"
     versioned_path = f"vector_store/tenant_{tenant_id}_{model_slug}"
     legacy_path = f"vector_store/tenant_{tenant_id}"
 
@@ -545,32 +547,37 @@ def search_documents(
         query_arr = np.array([embedding], dtype=np.float32)
 
         dense_results = []
-        if query_arr.shape[1] == getattr(vectorstore.index, "d", 384):
-            scores, indices = vectorstore.index.search(query_arr, 50)
-            for score, i in zip(scores[0], indices[0]):
-                if i == -1: continue
-                try:
-                    _id = vectorstore.index_to_docstore_id[int(i)]
-                    doc = vectorstore.docstore.search(_id)
-                    meta = doc.metadata or {}
-                    
-                    # Apply metadata filters
-                    if query.document_ids and meta.get("document_id") not in query.document_ids:
-                        continue
-                    if query.content_types and meta.get("content_type") not in query.content_types:
-                        continue
-                    if query.page_range and len(query.page_range) == 2:
-                        p_num = meta.get("page_number")
-                        if p_num and not (query.page_range[0] <= p_num <= query.page_range[1]):
-                            continue
-                            
-                    dense_results.append({
-                        "content": doc.page_content,
-                        "metadata": meta,
-                        "score": float(score)
-                    })
-                except KeyError:
+        expected_dim = getattr(vectorstore.index, "d", 384)
+        if query_arr.shape[1] != expected_dim:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Vector dimension mismatch: query embedding has dimension {query_arr.shape[1]} but index expects {expected_dim}. Please re-index documents with the matching model."
+            )
+        scores, indices = vectorstore.index.search(query_arr, 50)
+        for score, i in zip(scores[0], indices[0]):
+            if i == -1: continue
+            try:
+                _id = vectorstore.index_to_docstore_id[int(i)]
+                doc = vectorstore.docstore.search(_id)
+                meta = doc.metadata or {}
+                
+                # Apply metadata filters
+                if query.document_ids and meta.get("document_id") not in query.document_ids:
                     continue
+                if query.content_types and meta.get("content_type") not in query.content_types:
+                    continue
+                if query.page_range and len(query.page_range) == 2:
+                    p_num = meta.get("page_number")
+                    if p_num and not (query.page_range[0] <= p_num <= query.page_range[1]):
+                        continue
+                        
+                dense_results.append({
+                    "content": doc.page_content,
+                    "metadata": meta,
+                    "score": float(score)
+                })
+            except KeyError:
+                continue
 
         # 2. Sparse BM25 Search
         sparse_results = []

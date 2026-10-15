@@ -2,9 +2,12 @@ import os
 import re
 import sys
 import time
+import logging
 import requests
 import concurrent.futures
 from typing import Tuple, Dict, Any, List, Optional
+
+logger = logging.getLogger("dataspeak.sql_engine")
 
 # Ensure backend directory is in sys.path for models/crypto imports
 backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))

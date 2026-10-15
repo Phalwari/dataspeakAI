@@ -525,6 +525,7 @@ class ChatResponse(BaseModel):
     sources: List[SourceCitation] = []
     sql_data: Optional[Dict[str, Any]] = None
     grounding: Optional[Dict[str, Any]] = None
+    sql_agent: Optional[Dict[str, Any]] = None
     created_at: datetime
 
 class WidgetChatRequest(BaseModel):

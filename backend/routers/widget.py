@@ -100,26 +100,16 @@ def mask_pii_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sanitized
 
 
-def call_gemini_api(prompt: str, api_key: str, timeout: int = 25) -> Optional[str]:
+def call_gemini_api(prompt: str, api_key: str = "", timeout: int = 25, tenant_id: Optional[int] = None) -> Optional[str]:
     if os.getenv("PYTEST_CURRENT_TEST"):
         return "Simulated assistant response."
-    primary_model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
-    models_to_try = [primary_model, "gemini-flash-latest", "gemini-3.5-flash-lite"]
-    # De-duplicate while preserving order
-    seen = set()
-    unique_models = [m for m in models_to_try if not (m in seen or seen.add(m))]
-    for m in unique_models:
-        try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={api_key}"
-            res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, headers={"Content-Type": "application/json"}, timeout=timeout)
-            if res.status_code == 200:
-                candidates = res.json().get("candidates", [])
-                if candidates and "content" in candidates[0] and "parts" in candidates[0]["content"]:
-                    return candidates[0]["content"]["parts"][0]["text"].strip()
-            elif res.status_code in (429, 503):
-                continue
-        except Exception:
-            continue
+    try:
+        from services.llm_generation_service import llm_gateway
+        raw = llm_gateway.generate_sync(prompt=prompt, tenant_id=tenant_id, purpose="widget_chat")
+        if raw and not raw.startswith("Sorry, all AI providers"):
+            return raw.strip()
+    except Exception as e:
+        print(f"[Widget] LLMGateway call note: {e}")
     return None
 
 
@@ -129,7 +119,7 @@ def get_client_ip(request: Request) -> str:
     request.client.host matches a configured trusted proxy list (SEC-03).
     """
     remote_host = request.client.host if request.client else "127.0.0.1"
-    raw_trusted = os.getenv("TRUSTED_PROXIES", "127.0.0.1,::1")
+    raw_trusted = os.getenv("TRUSTED_PROXIES") or "127.0.0.1,::1"
     trusted_proxies = {p.strip() for p in raw_trusted.split(",") if p.strip()}
 
     if remote_host in trusted_proxies:

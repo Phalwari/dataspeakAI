@@ -339,7 +339,9 @@ export function ChatPage() {
                         query_type: parsed.query_type || m.query_type,
                         metadata_json: {
                           sources: parsed.sources,
-                          sql_data: parsed.sql_data
+                          sql_data: parsed.sql_data,
+                          grounding: parsed.grounding,
+                          sql_agent: parsed.sql_agent
                         }
                       }
                     : m
