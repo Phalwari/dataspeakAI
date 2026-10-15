@@ -130,6 +130,53 @@ export async function fetchWidgetConfig(
   }
 }
 
+export interface SseEventPayload {
+  chunk?: string;
+  done?: boolean;
+  error?: string;
+  conversation_id?: number;
+  message_id?: number;
+  sources?: SourceCitation[];
+  sql_data?: any;
+}
+
+export function parseSseBlock(block: string): SseEventPayload | null {
+  const trimmed = block.trim();
+  if (!trimmed.startsWith('data:')) return null;
+  const jsonStr = trimmed.slice(5).trim();
+  if (!jsonStr || jsonStr === '[DONE]') return null;
+  try {
+    return JSON.parse(jsonStr) as SseEventPayload;
+  } catch {
+    return null;
+  }
+}
+
+export class SseStreamParser {
+  private buffer: string = '';
+
+  public feed(chunkText: string): SseEventPayload[] {
+    this.buffer += chunkText;
+    const parts = this.buffer.split('\n\n');
+    this.buffer = parts.pop() || '';
+    const events: SseEventPayload[] = [];
+    for (const part of parts) {
+      const parsed = parseSseBlock(part);
+      if (parsed) {
+        events.push(parsed);
+      }
+    }
+    return events;
+  }
+
+  public flush(): SseEventPayload[] {
+    if (!this.buffer.trim()) return [];
+    const parsed = parseSseBlock(this.buffer);
+    this.buffer = '';
+    return parsed ? [parsed] : [];
+  }
+}
+
 /**
  * Streams chat response over POST using fetch + ReadableStream (SSE format).
  */
@@ -140,13 +187,15 @@ export async function streamWidgetChat(
   conversationId: number,
   onChunk: (chunk: string) => void,
   onDone: (meta: { conversationId: number; messageId?: number; sources?: SourceCitation[] }) => void,
-  onError: (errorMsg: string, retryAfter?: number) => void
+  onError: (errorMsg: string, retryAfter?: number) => void,
+  signal?: AbortSignal
 ): Promise<void> {
   const url = `${apiBase.replace(/\/+$/, '')}/api/chat/widget`;
 
   try {
     const res = await fetch(url, {
       method: 'POST',
+      signal,
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${sessionToken}`,
@@ -193,39 +242,62 @@ export async function streamWidgetChat(
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder('utf-8');
-    let buffer = '';
+    const parser = new SseStreamParser();
 
     while (true) {
+      if (signal?.aborted) {
+        try {
+          await reader.cancel();
+        } catch {
+          // ignore cancel error
+        }
+        return;
+      }
+
       const { done, value } = await reader.read();
       if (done) break;
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n\n');
-      buffer = lines.pop() || '';
+      const chunkText = decoder.decode(value, { stream: true });
+      const events = parser.feed(chunkText);
 
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed.startsWith('data:')) {
-          const jsonStr = trimmed.slice(5).trim();
-          try {
-            const parsed = JSON.parse(jsonStr);
-            if (parsed.chunk) {
-              onChunk(parsed.chunk);
-            }
-            if (parsed.done) {
-              onDone({
-                conversationId: parsed.conversation_id || conversationId,
-                messageId: parsed.message_id,
-                sources: parsed.sources || [],
-              });
-            }
-          } catch {
-            // Malformed chunk ignored
-          }
+      for (const ev of events) {
+        if (ev.error) {
+          onError(ev.error);
+        }
+        if (ev.chunk) {
+          onChunk(ev.chunk);
+        }
+        if (ev.done) {
+          onDone({
+            conversationId: ev.conversation_id || conversationId,
+            messageId: ev.message_id,
+            sources: ev.sources || [],
+          });
         }
       }
     }
+
+    // Flush any remaining buffered event
+    const remaining = parser.flush();
+    for (const ev of remaining) {
+      if (ev.error) {
+        onError(ev.error);
+      }
+      if (ev.chunk) {
+        onChunk(ev.chunk);
+      }
+      if (ev.done) {
+        onDone({
+          conversationId: ev.conversation_id || conversationId,
+          messageId: ev.message_id,
+          sources: ev.sources || [],
+        });
+      }
+    }
   } catch (err: any) {
+    if (err.name === 'AbortError' || signal?.aborted) {
+      return;
+    }
     onError(err.message || 'Network connection error');
   }
 }

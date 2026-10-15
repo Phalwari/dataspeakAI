@@ -102,6 +102,7 @@ export function ChatPage() {
   const [expandedSources, setExpandedSources] = useState<Record<number, boolean>>({});
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const token = localStorage.getItem("token");
 
   // Scroll to bottom
@@ -112,6 +113,34 @@ export function ChatPage() {
   useEffect(() => {
     scrollToBottom();
   }, [messages, isLoading]);
+
+  // Clean up any in-flight stream on unmount
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
+
+  // Handle Stop Streaming
+  const handleStopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsLoading(false);
+    setMessages((prev) =>
+      prev.map((m, idx) =>
+        idx === prev.length - 1 && m.sender_role === "assistant"
+          ? {
+              ...m,
+              content: m.content
+                ? m.content + "\n\n*(Generation stopped by user)*"
+                : "*(Generation cancelled)*"
+            }
+          : m
+      )
+    );
+  };
 
   // Fetch Conversation List
   const fetchConversations = async () => {
@@ -161,12 +190,17 @@ export function ChatPage() {
 
   // Handle New Conversation
   const handleNewChat = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsLoading(false);
     setActiveConvId(null);
     setMessages([]);
     setInputText("");
   };
 
-  // Handle Send Message
+  // Handle Send Message with True Token Streaming
   const handleSendMessage = async (customPrompt?: string) => {
     const textToSend = customPrompt || inputText;
     if (!textToSend.trim() || isLoading) return;
@@ -182,60 +216,150 @@ export function ChatPage() {
       query_type: "user",
       created_at: new Date().toISOString()
     };
-    setMessages((prev) => [...prev, tempUserMsg]);
+
+    // Placeholder assistant message for incremental token streaming
+    const assistantPlaceholderId = Date.now() + 1;
+    const tempAssistantMsg: ChatMessage = {
+      id: assistantPlaceholderId,
+      sender_role: "assistant",
+      content: "",
+      created_at: new Date().toISOString()
+    };
+
+    setMessages((prev) => [...prev, tempUserMsg, tempAssistantMsg]);
     setIsLoading(true);
+
+    const abortCtrl = new AbortController();
+    abortControllerRef.current = abortCtrl;
 
     try {
       const res = await fetch(`${API_BASE_URL}/api/chat`, {
         method: "POST",
+        signal: abortCtrl.signal,
         headers: {
           "Content-Type": "application/json",
+          Accept: "text/event-stream",
           Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({
           conversation_id: activeConvId,
           query: userMessageContent,
-          source_preference: sourcePreference
+          source_preference: sourcePreference,
+          stream: true
         })
       });
 
       if (!res.ok) {
-        throw new Error("Failed to generate response");
+        let errDetail = "Failed to generate response";
+        try {
+          const errJson = await res.json();
+          if (errJson.detail) errDetail = errJson.detail;
+        } catch {}
+        throw new Error(errDetail);
       }
 
-      const data = await res.json();
-
-      // Assistant Message
-      const assistantMsg: ChatMessage = {
-        id: data.message_id,
-        sender_role: "assistant",
-        content: data.answer,
-        query_type: data.query_type,
-        metadata_json: {
-          sources: data.sources,
-          sql_data: data.sql_data
-        },
-        created_at: data.created_at
-      };
-
-      setMessages((prev) => [...prev, assistantMsg]);
-
-      // Set active conv if this was the first message
-      if (!activeConvId || activeConvId !== data.conversation_id) {
-        setActiveConvId(data.conversation_id);
+      if (!res.body) {
+        throw new Error("No response body received from server");
       }
-      fetchConversations();
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let buffer = "";
+
+      while (true) {
+        if (abortCtrl.signal.aborted) {
+          try {
+            await reader.cancel();
+          } catch {}
+          return;
+        }
+
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() || "";
+
+        for (const part of parts) {
+          const trimmed = part.trim();
+          if (!trimmed.startsWith("data:")) continue;
+          const jsonStr = trimmed.slice(5).trim();
+          if (!jsonStr || jsonStr === "[DONE]") continue;
+
+          try {
+            const parsed = JSON.parse(jsonStr);
+
+            if (parsed.error) {
+              toast.error(parsed.error);
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantPlaceholderId
+                    ? { ...m, content: m.content || `*(Error: ${parsed.error})*` }
+                    : m
+                )
+              );
+            }
+
+            if (parsed.chunk) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantPlaceholderId
+                    ? { ...m, content: m.content + parsed.chunk }
+                    : m
+                )
+              );
+            }
+
+            if (parsed.done) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantPlaceholderId
+                    ? {
+                        ...m,
+                        id: parsed.message_id || m.id,
+                        query_type: parsed.query_type || m.query_type,
+                        metadata_json: {
+                          sources: parsed.sources,
+                          sql_data: parsed.sql_data
+                        }
+                      }
+                    : m
+                )
+              );
+
+              if (
+                parsed.conversation_id &&
+                (!activeConvId || activeConvId !== parsed.conversation_id)
+              ) {
+                setActiveConvId(parsed.conversation_id);
+              }
+              fetchConversations();
+            }
+          } catch {
+            // Incomplete JSON chunk in buffer, will be completed in next frame
+          }
+        }
+      }
     } catch (err: any) {
+      if (err.name === "AbortError" || abortCtrl.signal.aborted) {
+        return;
+      }
       toast.error(err.message || "Failed to process chat query");
-      // Remove optimistic message on hard failure or append error
-      const errorMsg: ChatMessage = {
-        id: Date.now() + 1,
-        sender_role: "assistant",
-        content: "Sorry, I encountered an error connecting to the AI engine. Please try again.",
-        created_at: new Date().toISOString()
-      };
-      setMessages((prev) => [...prev, errorMsg]);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantPlaceholderId
+            ? {
+                ...m,
+                content:
+                  m.content ||
+                  "Sorry, I encountered an error connecting to the AI engine. Please try again."
+              }
+            : m
+        )
+      );
     } finally {
+      abortControllerRef.current = null;
       setIsLoading(false);
     }
   };
@@ -600,7 +724,16 @@ export function ChatPage() {
                       )}
 
                       {/* Natural Language Message Body */}
-                      <div className="whitespace-pre-wrap">{msg.content}</div>
+                      <div className="whitespace-pre-wrap">
+                        {msg.content || (!isUser && isLoading ? (
+                          <span className="inline-flex items-center gap-1.5 text-gray-400 py-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse [animation-delay:150ms]" />
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse [animation-delay:300ms]" />
+                            <span className="text-[11px] ml-1 text-gray-400">Thinking & streaming...</span>
+                          </span>
+                        ) : null)}
+                      </div>
                     </div>
 
                     {/* SQL Execution Card (if present) */}
@@ -740,14 +873,27 @@ export function ChatPage() {
               disabled={isLoading}
               className="pr-12 py-3 h-12 rounded-xl text-xs bg-gray-50 border-gray-200 focus:bg-white shadow-xs"
             />
-            <Button
-              type="submit"
-              size="sm"
-              disabled={!inputText.trim() || isLoading}
-              className="absolute right-1.5 top-1.5 bottom-1.5 h-9 w-9 p-0 rounded-lg bg-blue-600 hover:bg-blue-700 text-white shadow-xs"
-            >
-              <Send className="w-4 h-4" />
-            </Button>
+            {isLoading ? (
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleStopGeneration}
+                title="Stop generation"
+                className="absolute right-1.5 top-1.5 bottom-1.5 px-3 h-9 rounded-lg bg-red-600 hover:bg-red-700 text-white shadow-xs flex items-center gap-1.5 text-xs font-medium transition-all"
+              >
+                <div className="w-2.5 h-2.5 bg-white rounded-xs" />
+                <span>Stop</span>
+              </Button>
+            ) : (
+              <Button
+                type="submit"
+                size="sm"
+                disabled={!inputText.trim()}
+                className="absolute right-1.5 top-1.5 bottom-1.5 h-9 w-9 p-0 rounded-lg bg-blue-600 hover:bg-blue-700 text-white shadow-xs"
+              >
+                <Send className="w-4 h-4" />
+              </Button>
+            )}
           </form>
           <div className="text-center mt-2">
             <span className="text-[10px] text-gray-400">

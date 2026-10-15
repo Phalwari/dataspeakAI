@@ -43,11 +43,19 @@ def reciprocal_rank_fusion(
 
     return fused_results
 
+_cached_cross_encoder = None
+
+def get_cross_encoder():
+    global _cached_cross_encoder
+    if _cached_cross_encoder is None:
+        from sentence_transformers import CrossEncoder
+        _cached_cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+    return _cached_cross_encoder
+
 def cross_encoder_rerank(query: str, candidates: list, top_k: int = 5) -> list:
     if not candidates:
         return []
-    from sentence_transformers import CrossEncoder
-    model = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+    model = get_cross_encoder()
     pairs = [(query, c["content"]) for c in candidates]
     scores = model.predict(pairs)
     for i, c in enumerate(candidates):

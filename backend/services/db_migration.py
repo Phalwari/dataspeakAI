@@ -90,6 +90,9 @@ MIGRATION_COLUMNS = [
     ("table_metadata", "kind", "VARCHAR DEFAULT 'table'", "VARCHAR(50) DEFAULT 'table'"),
     ("column_metadata", "is_nullable", "BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT TRUE"),
     ("column_metadata", "is_unique", "BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE"),
+    # Phase 7: Task 7.1.4 Conversation Memory Management
+    ("conversations", "summary_text", "TEXT", "TEXT"),
+    ("conversations", "summary_turn_count", "INTEGER DEFAULT 0", "INTEGER DEFAULT 0"),
 ]
 
 

@@ -92,7 +92,7 @@ def mask_pii_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     for row in rows:
         masked_row = {}
         for k, v in row.items():
-            if any(s in str(k).lower() for s in sensitive_keys):
+            if any(s in k.lower() for s in sensitive_keys):
                 masked_row[k] = "[REDACTED]"
             else:
                 masked_row[k] = v
@@ -205,12 +205,13 @@ def create_widget_session(
         db.commit()
         db.refresh(conv)
 
+    conv_id = int(conv.id)
     expires_minutes = 60
     session_token = create_widget_session_token(
         tenant_id=widget_key.tenant_id,
         public_key=widget_key.public_key,
         origin=origin,
-        conversation_id=conv.id,
+        conversation_id=conv_id,
         allow_sql=bool(widget_key.allow_sql),
         expires_minutes=expires_minutes
     )
@@ -221,7 +222,7 @@ def create_widget_session(
         session_token=session_token,
         expires_in=expires_minutes * 60,
         tenant_id=widget_key.tenant_id,
-        conversation_id=conv.id
+        conversation_id=conv_id
     )
 
 
@@ -230,9 +231,9 @@ def create_widget_session(
 # -------------------------------------------------------------
 @router.get("/config", response_model=schemas.WidgetConfigResponse)
 def get_widget_config(
+    request: Request,
+    response: Response,
     key: Optional[str] = None,
-    request: Request = None,
-    response: Response = None,
     db: Session = Depends(get_db)
 ):
     """
@@ -401,8 +402,9 @@ def process_widget_chat(
         raise HTTPException(status_code=400, detail="Query cannot be empty")
 
     # Record user message
+    conv_id = int(conv.id)
     user_msg = models.Message(
-        conversation_id=conv.id,
+        conversation_id=conv_id,
         sender_role="user",
         content=user_query,
         sanitized_content=user_query,
@@ -415,7 +417,7 @@ def process_widget_chat(
     # Load conversation history for multi-turn context
     from routers.chat import retrieve_rag_chunks, build_conversation_history_text
     past_messages = db.query(models.Message).filter(
-        models.Message.conversation_id == conv.id,
+        models.Message.conversation_id == conv_id,
         models.Message.id != user_msg.id
     ).order_by(models.Message.created_at.asc()).all()
     history_text = build_conversation_history_text(past_messages, max_messages=8)
@@ -425,6 +427,9 @@ def process_widget_chat(
     route_type = "rag"
     start_time = time.time()
     gemini_api_key = os.getenv("GEMINI_API_KEY")
+    exec_res = None
+    rows_summary = ""
+    context_text = ""
 
     # 6. SQL Security Policy Evaluation
     allow_sql = bool(widget_key.allow_sql)
@@ -542,9 +547,116 @@ def process_widget_chat(
 
     exec_duration_ms = round((time.time() - start_time) * 1000, 2)
 
-    # 7. Record assistant message and query log
+    # 7. Prompt Preparation & Routing
+    prompt = ""
+    if route_type == "sql" and sql_executed:
+        prompt = (
+            "You are DataSpeakAI, a secure conversational assistant.\n"
+            f"{history_text}\n"
+            f"User Question: {user_query}\n"
+            f"Query Result ({exec_res.get('row_count', 0)} matching records):\n{rows_summary}\n\n"
+            "Summarize the key findings directly and clearly for the user. Do not expose internal database table names or raw queries."
+        )
+    elif route_type == "rag" and citations:
+        prompt = (
+            "You are DataSpeakAI, a helpful AI assistant for website visitors.\n"
+            f"{history_text}\n"
+            "Answer the visitor's question based strictly on the following knowledge base context.\n"
+            "Rules:\n"
+            "- Provide a clear, natural language explanation.\n"
+            "- Include inline citations like [Source: filename] where relevant.\n"
+            "- If the context does not contain the answer, politely say you don't have that information.\n\n"
+            f"Visitor Question: {user_query}\n\n"
+            f"Context:\n{context_text}"
+        )
+    else:
+        prompt = (
+            "You are DataSpeakAI, a helpful, secure, and professional conversational AI assistant embedded on a website.\n"
+            f"{history_text}\n"
+            f"Visitor Question: {user_query}\n\n"
+            "Instructions:\n"
+            "- Answer the visitor's question politely, clearly, and concisely.\n"
+            "- If the visitor is asking for specific private business records or internal documents that are not in your context, "
+            "politely let them know that no internal records were found on that topic, and provide helpful general guidance.\n"
+            "- Keep answers concise and suitable for a website chatbot widget."
+        )
+
+    # 8. Return SSE Streaming or JSON
+    is_stream = req.stream or (request.headers.get("accept") == "text/event-stream")
+    if is_stream:
+        # Check concurrent streams cap
+        if not widget_limiter.acquire_stream(public_key):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Maximum concurrent streams reached for this widget key",
+                headers={"Retry-After": "5"}
+            )
+
+        from services.chat_stream import stream_chat_response
+
+        def on_stream_complete(full_answer: str) -> int:
+            exec_duration_ms = round((time.time() - start_time) * 1000, 2)
+            assistant_msg = models.Message(
+                conversation_id=conv_id,
+                sender_role="assistant",
+                content=full_answer,
+                sanitized_content=full_answer,
+                query_type=route_type,
+                metadata_json={
+                    "source": "widget",
+                    "citations": [c.model_dump() for c in citations]
+                }
+            )
+            db.add(assistant_msg)
+            log_entry = models.QueryLog(
+                tenant_id=tenant_id,
+                widget_key_id=widget_key.id,
+                source="widget",
+                natural_query=user_query,
+                status="success",
+                execution_time_ms=exec_duration_ms,
+                rows_returned=len(citations) if route_type == "rag" else 1
+            )
+            db.add(log_entry)
+            conv.updated_at = datetime.now(timezone.utc)
+            db.commit()
+            db.refresh(assistant_msg)
+            return int(assistant_msg.id)
+
+        return StreamingResponse(
+            stream_chat_response(
+                request=request,
+                conversation_id=conv_id,
+                user_query=user_query,
+                prompt=prompt,
+                tenant_id=tenant_id,
+                public_key=public_key,
+                citations=citations,
+                sql_data=None,
+                query_type=route_type,
+                on_complete=on_stream_complete
+            ),
+            media_type="text/event-stream",
+            headers={"Vary": "Origin", "Cache-Control": "no-cache"}
+        )
+
+    # Non-streaming synchronous path
+    if gemini_api_key and prompt:
+        ans = call_gemini_api(prompt, gemini_api_key)
+        if ans:
+            assistant_answer = ans
+
+    if not assistant_answer:
+        if route_type == "sql" and sql_executed and exec_res:
+            assistant_answer = f"Found {exec_res.get('row_count', 0)} matching records for your question."
+        elif citations:
+            assistant_answer = f"Found relevant information across {len(citations)} document citation(s):\n\n" + "\n".join([f"- {c.snippet} [{c.document_name}]" for c in citations[:2]])
+        else:
+            assistant_answer = "I'm sorry, I couldn't find relevant information in our knowledge base. Please feel free to ask another question or contact support."
+
+    exec_duration_ms = round((time.time() - start_time) * 1000, 2)
     assistant_msg = models.Message(
-        conversation_id=conv.id,
+        conversation_id=conv_id,
         sender_role="assistant",
         content=assistant_answer,
         sanitized_content=assistant_answer,
@@ -555,7 +667,6 @@ def process_widget_chat(
         }
     )
     db.add(assistant_msg)
-
     log_entry = models.QueryLog(
         tenant_id=tenant_id,
         widget_key_id=widget_key.id,
@@ -570,46 +681,9 @@ def process_widget_chat(
     db.commit()
     db.refresh(assistant_msg)
 
-    # 8. Return SSE Streaming or JSON
-    is_stream = req.stream or (request.headers.get("accept") == "text/event-stream")
-    if is_stream:
-        # Check concurrent streams cap
-        if not widget_limiter.acquire_stream(public_key):
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Maximum concurrent streams reached for this widget key",
-                headers={"Retry-After": "5"}
-            )
-
-        def event_stream_generator():
-            try:
-                words = assistant_answer.split(" ")
-                for i, w in enumerate(words):
-                    chunk_text = w + (" " if i < len(words) - 1 else "")
-                    payload = json.dumps({"chunk": chunk_text, "done": False})
-                    yield f"data: {payload}\n\n"
-                    time.sleep(0.015)
-
-                final_payload = json.dumps({
-                    "chunk": "",
-                    "done": True,
-                    "conversation_id": conv.id,
-                    "message_id": assistant_msg.id,
-                    "sources": [c.model_dump() for c in citations]
-                })
-                yield f"data: {final_payload}\n\n"
-            finally:
-                widget_limiter.release_stream(public_key)
-
-        return StreamingResponse(
-            event_stream_generator(),
-            media_type="text/event-stream",
-            headers={"Vary": "Origin", "Cache-Control": "no-cache"}
-        )
-
     return schemas.WidgetChatResponse(
-        conversation_id=conv.id,
-        message_id=assistant_msg.id,
+        conversation_id=conv_id,
+        message_id=int(assistant_msg.id),
         query=user_query,
         answer=assistant_answer,
         query_type=route_type,

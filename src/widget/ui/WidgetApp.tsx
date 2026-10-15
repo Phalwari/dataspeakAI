@@ -1,4 +1,4 @@
-import { h, VNode } from 'preact';
+import { h, ComponentChild } from 'preact';
 import { useState, useEffect, useRef } from 'preact/hooks';
 import {
   WidgetConfig,
@@ -24,7 +24,7 @@ interface WidgetAppProps {
   onConfigUpdated?: (theme: string, position: string) => void;
 }
 
-export function WidgetApp({ initialConfig }: WidgetAppProps): VNode {
+export function WidgetApp({ initialConfig }: WidgetAppProps): ComponentChild {
   const [isOpen, setIsOpen] = useState(false);
   const [config, setConfig] = useState<WidgetConfig>(initialConfig);
   const [session, setSession] = useState<SessionData | null>(null);
@@ -37,6 +37,14 @@ export function WidgetApp({ initialConfig }: WidgetAppProps): VNode {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const launcherRef = useRef<HTMLButtonElement | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Cleanup active stream on unmount
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
 
   // Initialize session & greeting
   useEffect(() => {
@@ -97,7 +105,31 @@ export function WidgetApp({ initialConfig }: WidgetAppProps): VNode {
     setErrorMessage(null);
   };
 
+  const handleStopStreaming = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsStreaming(false);
+    setMessages((prev) =>
+      prev.map((m, idx) =>
+        idx === prev.length - 1 && m.role === 'assistant'
+          ? {
+              ...m,
+              isStreaming: false,
+              text: m.text ? m.text + '\n\n*(Generation stopped)*' : '*(Generation cancelled)*',
+            }
+          : m
+      )
+    );
+  };
+
   const handleNewChat = async () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsStreaming(false);
     clearStoredSession(config.publicKey);
     setSession(null);
     setMessages([
@@ -128,6 +160,9 @@ export function WidgetApp({ initialConfig }: WidgetAppProps): VNode {
     ]);
     setIsStreaming(true);
 
+    const abortCtrl = new AbortController();
+    abortControllerRef.current = abortCtrl;
+
     try {
       // 2. Ensure valid session token
       let currentSession = session;
@@ -154,6 +189,7 @@ export function WidgetApp({ initialConfig }: WidgetAppProps): VNode {
           );
         },
         (meta) => {
+          abortControllerRef.current = null;
           setIsStreaming(false);
           setMessages((prev) =>
             prev.map((m) =>
@@ -164,6 +200,7 @@ export function WidgetApp({ initialConfig }: WidgetAppProps): VNode {
           );
         },
         (errMsg, retrySec) => {
+          abortControllerRef.current = null;
           setIsStreaming(false);
           setErrorMessage(errMsg);
           if (retrySec) {
@@ -173,11 +210,15 @@ export function WidgetApp({ initialConfig }: WidgetAppProps): VNode {
           setMessages((prev) =>
             prev.filter((m) => !(m.id === assistantMsgId && !m.text))
           );
-        }
+        },
+        abortCtrl.signal
       );
     } catch (err: any) {
+      abortControllerRef.current = null;
       setIsStreaming(false);
-      setErrorMessage(err.message || 'Unable to establish secure connection');
+      if (err.name !== 'AbortError' && !abortCtrl.signal.aborted) {
+        setErrorMessage(err.message || 'Unable to establish secure connection');
+      }
       setMessages((prev) =>
         prev.filter((m) => !(m.id === assistantMsgId && !m.text))
       );
@@ -354,20 +395,35 @@ export function WidgetApp({ initialConfig }: WidgetAppProps): VNode {
                 onInput: (e: any) => setInputValue(e.target.value),
                 onKeyDown: handleKeyDown,
               }),
-              h(
-                'button',
-                {
-                  class: 'dataspeak-send-btn',
-                  onClick: handleSendMessage,
-                  disabled: !inputValue.trim() || isStreaming || retryCountdown !== null,
-                  'aria-label': 'Send message',
-                },
-                h(
-                  'svg',
-                  { width: '16', height: '16', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2.5' },
-                  h('path', { d: 'M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z' })
-                )
-              ),
+              isStreaming
+                ? h(
+                    'button',
+                    {
+                      class: 'dataspeak-stop-btn',
+                      onClick: handleStopStreaming,
+                      'aria-label': 'Stop generation',
+                      title: 'Stop generation',
+                    },
+                    h(
+                      'svg',
+                      { width: '14', height: '14', viewBox: '0 0 24 24', fill: 'currentColor' },
+                      h('rect', { x: '4', y: '4', width: '16', height: '16', rx: '2' })
+                    )
+                  )
+                : h(
+                    'button',
+                    {
+                      class: 'dataspeak-send-btn',
+                      onClick: handleSendMessage,
+                      disabled: !inputValue.trim() || retryCountdown !== null,
+                      'aria-label': 'Send message',
+                    },
+                    h(
+                      'svg',
+                      { width: '16', height: '16', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2.5' },
+                      h('path', { d: 'M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z' })
+                    )
+                  ),
             ]),
             h('div', { class: 'dataspeak-branding' }, [
               'Powered by ',
