@@ -73,6 +73,7 @@ Every AI agent working on this repository **MUST** adhere to this 4-step workflo
 - [x] **Task 7.2.2 — Hierarchical Document Chunking on Canonical DocumentChunk Model** (Completed: 2026-10-15; see Archived section)
 - [x] **Task 7.2.3 — Verifiable Source Citation & Grounding Engine** (Completed: 2026-10-15; see Archived section)
 - [x] **Task 7.2.4 — Versioned Vector Indexing & Safe Multi-Model Storage** (Completed: 2026-10-15; see Archived section)
+- [x] **Sprint 7.2 Post-Audit Remediation & Hardening** (Completed: 2026-10-15; see Archived section)
 
 ---
 
@@ -101,6 +102,20 @@ Every AI agent working on this repository **MUST** adhere to this 4-step workflo
 ---
 
 ## 📦 Archived / Completed Tasks
+
+- [x] **Phase 7: Sprint 7.2 Post-Audit Remediation & Hardening**
+  - *Completed:* 2026-10-15 | Antigravity AI Senior Engineer
+  - *Summary:* Remediated all findings from independent code review and regression audit:
+    - **SEC-03 Trusted Proxy IP Fallback (`backend/routers/widget.py`):** Fixed `os.getenv("TRUSTED_PROXIES") or "127.0.0.1,::1"` to prevent empty environment variable string from breaking loopback proxy trust. Passed `test_sec03_trusted_proxy_ip_validation`.
+    - **SQL Engine Logger Definition (`backend/services/sql_engine.py`):** Added `import logging` and `logger = logging.getLogger("dataspeak.sql_engine")`, resolving static analysis warnings.
+    - **Streaming Grounding & SQL Agent Telemetry (`backend/services/chat_stream.py`, `backend/routers/chat.py`, `src/app/pages/dashboard/ChatPage.tsx`):** Extended `stream_chat_response` and `on_stream_complete` to transmit `grounding` metrics and `sql_agent` self-correction data in the terminal SSE payload (`done: true`), updating React state without requiring page reload.
+    - **Unified LLM Gateway Adoption (`backend/routers/widget.py`, `backend/routers/chat.py`):** Replaced legacy synchronous `requests.post()` calls with `llm_gateway.generate_sync()` across widget chat and SQL/RAG/Hybrid static syntheses, enabling multi-key rotation and cooldown failover.
+    - **Vector Dimension Integrity Guard (`backend/routers/documents.py`):** Enforced explicit HTTP 400 Bad Request on embedding dimension mismatch against FAISS index dimension.
+    - **Path Traversal Sanitization (`backend/routers/documents.py`):** Sanitized `model_slug` with strict regex character whitelist (`[^a-zA-Z0-9_\-\.]`) to prevent backslash path escape on Windows and POSIX filesystems.
+    - **MySQL Dry-Run Statement Execution Timeout (`backend/services/sql_agent.py`):** Added `SET SESSION MAX_EXECUTION_TIME=6000` to `execute_dry_run_rollback` for MySQL and MariaDB connections.
+    - **Source Citation Grounding Attributes (`backend/services/citation_service.py`):** Explicitly populated `grounding_score` and `is_grounded` boolean flags on all instantiated `SourceCitation` schemas.
+    - **Standards & Documentation (`AGENTS.md`):** Added Section 4.10 "Agentic Self-Correcting SQL, Grounding Verification & Retrieval Precision Standard".
+    - **Verification & Test Coverage:** All 487 backend tests passing (100% pass rate); 0 pyright errors; 0-error Vite frontend production build.
 
 - [x] **Phase 7: Sprint 7.2 — Agentic Querying & Retrieval Precision (Tasks 7.2.1, 7.2.2, 7.2.3, 7.2.4)**
   - *Completed:* 2026-10-15 | Antigravity AI Senior Engineer
@@ -132,8 +147,29 @@ Every AI agent working on this repository **MUST** adhere to this 4-step workflo
       - Verified with 4/4 passing tests in `tests/test_phase7_2_4_vector_versioning.py`.
     - **Verification & Test Coverage:**
       - Targeted Backend Suites: 29/29 tests passing (100% pass rate).
-      - Full Backend Regression: 486 passing tests.
+      - Full Backend Regression: 487 passing tests (100% pass rate).
       - Frontend Build: `npm run build` completed with 0 errors across 2,772 modules (18.54s).
+
+- [x] **Phase 7: Sprint 7.1 Stage 2 — Real-Time Streaming, Conversation Memory & Dynamic Titles (Tasks 7.1.2, 7.1.4, 7.1.5)**
+  - *Completed:* 2026-10-15 | Antigravity AI Streaming & Memory Lead
+  - *Summary:* Implemented true token-level SSE streaming, sliding-window conversation memory with background summarization, and dynamic conversation titles:
+    - **Task 7.1.2 — True Token-Level SSE Streaming (`backend/services/chat_stream.py`, `backend/routers/chat.py`, `backend/routers/widget.py`, `src/widget/api.ts`, `src/widget/ui/WidgetApp.tsx`, `src/app/pages/dashboard/ChatPage.tsx`, `tests/test_phase7_1_2_streaming_backend.py`, `src/widget/__tests__/sseParser.test.ts`):**
+      - Built unified `stream_chat_response` generator yielding real-time tokens directly from `LLMGateway.generate_stream()` for both dashboard chat and standalone widget.
+      - Integrated client disconnect detection (`request.is_disconnected()`) with automatic generator termination and stream slot release.
+      - Deferred `Message` persistence and monthly quota deductions to the `on_complete` callback to protect tenant usage on aborted streams.
+      - Built client-side SSE parsers with typewriter effect, active thinking indicator, and Stop button wired to `AbortController`.
+      - Intercepted SQL errors cleanly to emit structured terminal error events without leaking table schemas or internal database connection strings.
+      - Verified with 9 backend tests and 11 Vitest frontend tests.
+    - **Task 7.1.4 — Conversation Memory Management (`backend/services/conversation_memory.py`, `backend/models.py`, `backend/services/db_migration.py`, `tests/test_phase7_1_4_memory.py`):**
+      - Implemented `ConversationMemoryManager` preserving last 10 messages verbatim and asynchronously summarizing older turns when history crosses 15 turns.
+      - Added `summary_text` and `summary_turn_count` to `Conversation` model with zero-dependency migration.
+      - Prevented concurrent overwrite via per-conversation locks and monotonically increasing versioning.
+      - Verified with 6 unit and concurrency tests in `test_phase7_1_4_memory.py`.
+    - **Task 7.1.5 — Dynamic Background Title Generation (`backend/services/conversation_title.py`, `tests/test_phase7_1_5_titles.py`):**
+      - Generates concise 3-6 word sanitized titles in a non-blocking background task following the initial assistant turn.
+      - Assigns fast 6-word heuristic title immediately at conversation creation and preserves manual user title edits.
+      - Verified with 5 unit tests in `test_phase7_1_5_titles.py`.
+    - **Verification & Test Coverage:** 467/467 backend tests passing, 20/20 frontend Vitest tests passing, 0-error production build.
 
 - [x] **Phase 7: Sprint 7.1 Stage 1 — Core AI Infrastructure & Safety Guards (Tasks 7.1.1 & 7.1.3)**
   - *Completed:* 2026-10-14 | Antigravity AI Infrastructure Lead
