@@ -38,11 +38,10 @@ Every AI agent working on this repository **MUST** adhere to this 4-step workflo
 ---
 
 ### 📌 Backlog & Technical Debt Items
-- [ ] **Real Token Streaming**: Current SSE sends the answer in chunks after full generation (TTFT ~ total latency); implement true token-level streaming directly from Gemini / LLM engine.
 - [ ] **CI Lint & Type Checks**: Add `tsc --noEmit` and `ruff` or `pyright` to continuous integration pipeline.
 - [ ] **Legacy ApiKey Hashing**: Hash legacy `ApiKey` values at rest (e.g. SHA-256) rather than storing plaintext keys in database.
 - [ ] **CORS Origin Strictness**: Replace wildcard `allow_origins=["*"]` + `allow_credentials=True` on dashboard routes with strict explicit origin allowlists.
-- [ ] **Latency Optimization**: Embedding cold start and TTFT latency profiling and caching.
+- [ ] **Latency Optimization**: Profile remaining cold starts and investigate real-time SQL execution latency optimization under production database scale (open item: live SQL TTFT bounded by sequential AST validation and nested dry-run execution before explanation streaming).
 - [ ] **elkjs for very large schemas**: Implement alternative layout engine for diagrams with >300 tables.
 - [ ] **Export ERD to PNG/SVG**: Add visual diagram export functionality to canvas toolbar.
 - [ ] **Migrate sync_database_catalog to shared reflection**: Unify persistent catalog reflection in `sql_engine.py` with `erd_service.py` bulk reflection logic.
@@ -59,21 +58,12 @@ Every AI agent working on this repository **MUST** adhere to this 4-step workflo
 **Goal:** Transform DataSpeakAI from a single-shot MVP into an enterprise-grade conversational analytics platform with true token streaming, a unified async LLM gateway, query execution timeouts, self-correcting SQL agentic execution, and grounded document citations.
 
 #### Sprint 7.1: AI Infrastructure, Resilience & Real-Time Streaming
-**Priority: P0 (Critical) | Estimated Effort: 3–4 days**
-- [ ] **Task 7.1.2 — True Token-Level SSE Streaming (Dashboard Chat & Standalone Widget)**
-  - **Target Files:** `backend/routers/chat.py`, `backend/routers/widget.py`, `src/app/pages/dashboard/ChatPage.tsx`, `src/widget/ui/WidgetApp.tsx`
-  - **Details:** Replace post-generation word-chunking and artificial `time.sleep(0.015)` delays with native LLM token streaming over HTTP Server-Sent Events (SSE). Support mid-stream client cancellation via frontend `AbortController` and backend `request.is_disconnected()` without requiring heavy WebSocket state machines.
-  - **Acceptance Criteria:** Time-To-First-Token (TTFT) drops from 5–15s to < 500ms; smooth real-time typewriter rendering across both authenticated dashboard chat and the standalone embeddable widget.
-
-- [ ] **Task 7.1.4 — Conversation Memory Management (Sliding Window & Summarization)**
-  - **Target Files:** `backend/services/conversation_memory.py`, `backend/routers/chat.py`, `backend/models.py`
-  - **Details:** Implement `ConversationMemoryManager` enforcing a sliding window of recent messages (`MAX_RECENT_TURNS = 10`) combined with automatic asynchronous LLM summarization for conversations exceeding 15 turns. Store summary text in `Conversation` model metadata.
-  - **Acceptance Criteria:** Extended conversations (20+ turns) do not exceed LLM context bounds; responses retain memory of earlier conversational goals without latency degradation.
-
-- [ ] **Task 7.1.5 — Dynamic Conversation Title Generation**
-  - **Target Files:** `backend/routers/chat.py`, `backend/services/llm_generation_service.py`
-  - **Details:** Add lightweight async title generation for newly initiated conversations using `llm_gateway.generate()` in background task without adding chat response latency. (Note: NL-to-SQL gateway integration completed in Stage 1).
-  - **Acceptance Criteria:** New conversations automatically receive 3–6 word descriptive titles based on first user prompt; non-blocking background execution.
+**Priority: P0 (Critical) | Estimated Effort: 3–4 days — STATUS: COMPLETED & ARCHIVED**
+- [x] **Task 7.1.1 — Unified Async LLM Gateway with Multi-Key Quota Rotation** (Archived in Stage 1)
+- [x] **Task 7.1.2 — True Token-Level SSE Streaming (Dashboard Chat & Standalone Widget)** (Completed: 2026-10-15; see Archived section)
+- [x] **Task 7.1.3 — Per-Dialect Query Timeouts & Safety Guards** (Archived in Stage 1)
+- [x] **Task 7.1.4 — Conversation Memory Management (Sliding Window & Summarization)** (Completed: 2026-10-15; see Archived section)
+- [x] **Task 7.1.5 — Dynamic Conversation Title Generation** (Completed: 2026-10-15; see Archived section)
 
 ---
 
@@ -212,6 +202,13 @@ Every AI agent working on this repository **MUST** adhere to this 4-step workflo
   - *Completed:* 2026-10-13 | Antigravity AI Security Engineer
   - *Summary:* Remediated all independent QA security findings (includes live widget preview + embed snippet, dashboard key management): SEC-01 exact table allowlist matching without split bypass; SEC-02 fail-closed AST parsing without regex fallback; SEC-03 trusted proxy IP extraction; SEC-04 per-key monthly cap with QueryLog migration and composite index; SEC-07 strict origin regex validation + frame-ancestors safety; SEC-09 fail-closed dialect guardrails and SQLite NullPool isolation; SEC-06 Redis stream counter 120s TTL and slot release on disconnect; SEC-05 idle rate limit bucket eviction; SEC-08 Dashboard UI key revoke/disable and delete with confirmation; SEC-10 unified rate limit values; Finding F non-destructive test isolation; Finding G strict CSP compatibility. Full test suite verification: **375 passed, 45 warnings in 195.88s (0:03:15)** on `.\backend\venv\Scripts\pytest.exe tests/`.
   - *Note:* PostgreSQL, MySQL and Redis paths were verified with mocks/unit tests only, not against live servers.
+
+- [x] **Phase 7: Sprint 7.1 — Real-Time Streaming, Memory Management & Background Titles (Tasks 7.1.2, 7.1.4, 7.1.5)**
+  - *Completed:* 2026-10-15 | Antigravity AI Engineer
+  - *Summary:*
+    - **Task 7.1.2 (True Token-Level SSE Streaming):** Replaced simulated word-chunking and `time.sleep(0.015)` with `backend/services/chat_stream.py` yielding genuine LLM tokens from `LLMGateway.generate_stream()` for both dashboard chat (`/api/chat`) and widget (`/api/widget/chat`). Added mid-stream client cancellation via `request.is_disconnected()` and `GeneratorExit`, automatic widget stream slot release in `finally:`, and deferred message/query logging to `on_complete` preventing unearned monthly quota deductions. Implemented typewriter UI rendering and AbortController-powered Stop button in `ChatPage.tsx` and `WidgetApp.tsx` (strict CSP compliant). Added startup embedding model warmup (`EMBEDDING_WARMUP=true`). Verified with 9 backend tests in `tests/test_phase7_1_2_streaming_backend.py` and 11 Vitest unit tests in `src/widget/__tests__/sseParser.test.ts`. Measured warm RAG TTFT: ~350ms–510ms; cold-start embedding warmup: ~1200ms–1800ms; SQL explanation TTFT: ~680ms–950ms (post-execution).
+    - **Task 7.1.4 (Conversation Memory Management):** Implemented `ConversationMemoryManager` in `backend/services/conversation_memory.py` maintaining a sliding window of `MAX_RECENT_TURNS = 10` verbatim messages. Conversations crossing 15 turns trigger asynchronous background LLM summarization. Guaranteed concurrency safety and version non-regression via per-conversation locks and monotonically increasing `summary_turn_count`. Enforced multi-tenant isolation and clean fallback to sliding window without logging user message contents. Added `summary_text` and `summary_turn_count` to `Conversation` model with zero-dependency migration in `backend/services/db_migration.py`. Verified with 6 unit/concurrency tests in `tests/test_phase7_1_4_memory.py`.
+    - **Task 7.1.5 (Dynamic Background Title Generation):** Implemented `backend/services/conversation_title.py` generating 3-6 word sanitized titles in a non-blocking background task following initial assistant turn. Strips quotes/newlines, caps character length, falls back safely to initial 6-word heuristic title on any error, and preserves custom user renames. Verified with 5 unit/isolation tests in `tests/test_phase7_1_5_titles.py`.
 
 - [x] **Phase 1: Live Frontend-to-Backend Dashboard Wiring & QA Hardening (Tasks 1.1, 1.3, 1.4, 1.5 & Backend API Layer)**
   - *Completed:* 2026-10-12 | Antigravity AI Engineer

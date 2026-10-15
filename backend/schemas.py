@@ -503,6 +503,7 @@ class ChatRequest(BaseModel):
     query: str
     source_preference: Optional[str] = "auto"
     database_id: Optional[int] = None
+    stream: Optional[bool] = False
 
 class SourceCitation(BaseModel):
     document_name: str
@@ -520,6 +521,7 @@ class ChatResponse(BaseModel):
     answer: str
     query_type: str
     sources: List[SourceCitation] = []
+    sql_data: Optional[Dict[str, Any]] = None
     created_at: datetime
 
 class WidgetChatRequest(BaseModel):

@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 import os
+import asyncio
 import requests
 import json
 import datetime
@@ -18,6 +20,11 @@ from services.sql_engine import (
 )
 from search.bm25_index import BM25IndexManager
 from search.hybrid import reciprocal_rank_fusion, cross_encoder_rerank
+from services.conversation_memory import ConversationMemoryManager
+from services.conversation_title import (
+    generate_heuristic_title,
+    generate_and_set_conversation_title_in_background
+)
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -33,6 +40,26 @@ def get_embeddings():
             from langchain_community.embeddings import HuggingFaceEmbeddings
         embeddings_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
     return embeddings_model
+
+
+def warmup_embeddings() -> bool:
+    """Warms up the HuggingFace embeddings model at startup if enabled (default true in prod, false in tests)."""
+    import sys
+    is_testing = bool(
+        os.getenv("PYTEST_CURRENT_TEST")
+        or "pytest" in sys.modules
+        or any("pytest" in arg.lower() for arg in sys.argv)
+    )
+    default_warmup = "false" if is_testing else "true"
+    warmup_cfg = os.getenv("EMBEDDING_WARMUP", default_warmup).strip().lower()
+    if warmup_cfg in ("1", "true", "yes", "on"):
+        try:
+            get_embeddings()
+            return True
+        except Exception as e:
+            print(f"[EMBEDDING WARMUP] Note: {e}")
+            return False
+    return False
 
 
 def retrieve_rag_chunks(query: str, tenant_id: int, db: Session, top_k: int = 5) -> List[Dict[str, Any]]:
@@ -63,9 +90,16 @@ def retrieve_rag_chunks(query: str, tenant_id: int, db: Session, top_k: int = 5)
         try:
             _id = vectorstore.index_to_docstore_id[int(i)]
             doc = vectorstore.docstore.search(_id)
-            meta = doc.metadata or {}
+            if hasattr(doc, "page_content"):
+                meta = getattr(doc, "metadata", {}) or {}
+                content_str = str(doc.page_content)
+            elif isinstance(doc, str):
+                meta = {}
+                content_str = doc
+            else:
+                continue
             dense_results.append({
-                "content": doc.page_content,
+                "content": content_str,
                 "metadata": meta,
                 "score": float(score)
             })
@@ -101,24 +135,12 @@ def retrieve_rag_chunks(query: str, tenant_id: int, db: Session, top_k: int = 5)
     return top_results
 
 
-def build_conversation_history_text(messages: List[models.Message], max_messages: int = 8) -> str:
+def build_conversation_history_text(messages: List[models.Message], max_messages: int = 10, conversation: Optional[models.Conversation] = None) -> str:
     """
-    Formats the recent message history for LLM multi-turn context.
+    Formats the conversation history for LLM multi-turn context.
+    Delegates to ConversationMemoryManager to maintain a single memory mechanism across the platform.
     """
-    if not messages:
-        return ""
-    
-    recent = messages[-max_messages:]
-    history_lines = ["--- RECENT CONVERSATION HISTORY ---"]
-    for msg in recent:
-        role_label = "User" if msg.sender_role == "user" else "Assistant"
-        snippet = msg.content.strip()
-        # Truncate very long historical messages to avoid context overflow
-        if len(snippet) > 600:
-            snippet = snippet[:600] + "..."
-        history_lines.append(f"{role_label}: {snippet}")
-    history_lines.append("----------------------------------\n")
-    return "\n".join(history_lines)
+    return ConversationMemoryManager.build_context(conversation, messages, max_recent_turns=max_messages)
 
 
 @router.get("/conversations", response_model=List[schemas.ConversationListItem])
@@ -247,6 +269,8 @@ def delete_conversation(
 @router.post("/chat", response_model=schemas.ChatResponse)
 def chat_endpoint(
     req: schemas.ChatRequest,
+    background_tasks: BackgroundTasks,
+    request: Request,
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -258,13 +282,17 @@ def chat_endpoint(
     if not current_user.tenant_id:
         raise HTTPException(status_code=404, detail="User has no associated tenant")
 
-    tenant_id = current_user.tenant_id
+    tenant_id: int = int(current_user.tenant_id)
     user_query = req.query.strip()
     if not user_query:
         raise HTTPException(status_code=400, detail="Query cannot be empty")
 
+    is_stream = bool(req.stream) or bool(request and request.headers.get("accept") == "text/event-stream")
+
     # 1. Manage Conversation Session
     conv = None
+    is_new_conversation = False
+    initial_title = None
     if req.conversation_id:
         conv = db.query(models.Conversation).filter(
             models.Conversation.id == req.conversation_id,
@@ -272,9 +300,9 @@ def chat_endpoint(
         ).first()
 
     if not conv:
-        # Generate initial title from query (first 6 words)
-        words = user_query.split()
-        auto_title = " ".join(words[:6]) + ("..." if len(words) > 6 else "")
+        is_new_conversation = True
+        auto_title = generate_heuristic_title(user_query)
+        initial_title = auto_title
         conv = models.Conversation(
             tenant_id=tenant_id,
             user_id=current_user.id,
@@ -284,10 +312,14 @@ def chat_endpoint(
         db.add(conv)
         db.commit()
         db.refresh(conv)
+    else:
+        initial_title = conv.title
+
+    conv_id: int = int(conv.id)
 
     # 2. Record User Message in DB
     user_msg = models.Message(
-        conversation_id=conv.id,
+        conversation_id=conv_id,
         sender_role="user",
         content=user_query,
         sanitized_content=user_query,
@@ -297,13 +329,34 @@ def chat_endpoint(
     db.commit()
     db.refresh(user_msg)
 
-    # 3. Load Recent Conversation History (for multi-turn context)
+    # 3. Load Recent Conversation History (ConversationMemoryManager: Task 7.1.4)
     past_messages = db.query(models.Message).filter(
-        models.Message.conversation_id == conv.id,
+        models.Message.conversation_id == conv_id,
         models.Message.id != user_msg.id
     ).order_by(models.Message.created_at.asc()).all()
 
-    history_text = build_conversation_history_text(past_messages, max_messages=8)
+    history_text = ConversationMemoryManager.build_context(conv, past_messages)
+
+    # Asynchronously trigger background summarization when threshold is crossed (> 15 turns)
+    current_summary_turns = int(conv.summary_turn_count or 0)
+    if ConversationMemoryManager.should_trigger_summary(len(past_messages), current_summary_turns):
+        if background_tasks is not None:
+            background_tasks.add_task(
+                ConversationMemoryManager.summarize_in_background,
+                conversation_id=conv_id,
+                tenant_id=tenant_id
+            )
+        else:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(
+                    ConversationMemoryManager.summarize_in_background(
+                        conversation_id=conv_id,
+                        tenant_id=tenant_id
+                    )
+                )
+            except RuntimeError:
+                pass
 
     # 4. Route Query (RAG vs SQL vs Hybrid)
     route_decision = classify_query_route(
@@ -319,6 +372,7 @@ def chat_endpoint(
     citations: List[schemas.SourceCitation] = []
     sql_response_obj = None
     assistant_answer = ""
+    synthesis_prompt = ""
     msg_metadata: Dict[str, Any] = {
         "route_decision": route_decision.to_dict(),
         "sources": []
@@ -368,21 +422,21 @@ def chat_endpoint(
                     )
 
                     # Synthesize natural response from table results
-                    if gemini_api_key:
+                    rows_preview = json.dumps(exec_res["rows"][:15], indent=2)
+                    synthesis_prompt = (
+                        "You are DataSpeakAI, an intelligent conversational Business Intelligence assistant.\n"
+                        f"{history_text}\n"
+                        f"User Question: {user_query}\n"
+                        f"Executed SQL: {gen_sql}\n"
+                        f"Execution Result Summary: {exec_res['row_count']} row(s) returned.\n"
+                        f"Data Rows (JSON sample):\n{rows_preview}\n\n"
+                        "Provide a clear, natural language answer summarizing the key findings directly answering the user's question. Highlight key figures, averages, top entities, or trends concisely."
+                    )
+                    if not is_stream and gemini_api_key:
                         try:
-                            rows_preview = json.dumps(exec_res["rows"][:15], indent=2)
-                            prompt = (
-                                "You are DataSpeakAI, an intelligent conversational Business Intelligence assistant.\n"
-                                f"{history_text}\n"
-                                f"User Question: {user_query}\n"
-                                f"Executed SQL: {gen_sql}\n"
-                                f"Execution Result Summary: {exec_res['row_count']} row(s) returned.\n"
-                                f"Data Rows (JSON sample):\n{rows_preview}\n\n"
-                                "Provide a clear, natural language answer summarizing the key findings directly answering the user's question. Highlight key figures, averages, top entities, or trends concisely."
-                            )
                             gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
                             gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_api_key}"
-                            payload = {"contents": [{"parts": [{"text": prompt}]}]}
+                            payload = {"contents": [{"parts": [{"text": synthesis_prompt}]}]}
                             headers = {"Content-Type": "application/json"}
                             res = requests.post(gemini_url, json=payload, headers=headers, timeout=25)
                             if res.status_code == 200:
@@ -394,13 +448,15 @@ def chat_endpoint(
                         assistant_answer = f"{nl_res['explanation']}\n\nReturned **{exec_res['row_count']}** matching record(s) from database `{db_conn.name}`."
 
                 except Exception as ex:
-                    assistant_answer = f"Error executing query on database `{db_conn.name}`: {str(ex)}"
+                    import logging
+                    logging.getLogger("dataspeak.chat").error(f"[SQL Execution Error] Database `{db_conn.name}`: {ex}")
+                    assistant_answer = "Unable to execute query on the database. An internal database error occurred."
                     sql_response_obj = schemas.NLQueryResponse(
                         query=user_query,
                         generated_sql=gen_sql,
                         explanation=nl_res.get("explanation", ""),
                         status="failed",
-                        error_detail=str(ex)
+                        error_detail="Internal query execution error"
                     )
 
             # Record in QueryLog
@@ -451,22 +507,22 @@ def chat_endpoint(
                 context_parts.append(f"[Document Chunk #{idx} - Source: {source_name}{page_tag}{type_tag}]\n{content}")
 
             context_text = "\n\n".join(context_parts)
+            synthesis_prompt = (
+                "You are DataSpeakAI, an expert Conversational AI Assistant grounded in enterprise knowledge base documents.\n"
+                f"{history_text}\n"
+                "Based strictly on the document context provided below, synthesize a concise, comprehensive, and clear natural language answer.\n"
+                "IMPORTANT CITATION RULES:\n"
+                "1. When stating facts, numbers, dates, or concepts, include inline citations in the format [Source: filename, p. X] or [Source: filename].\n"
+                "2. If the answer cannot be found in the context, clearly say so rather than hallucinating.\n\n"
+                f"User Question: {user_query}\n\n"
+                f"Retrieved Document Context:\n{context_text}"
+            )
 
-            if gemini_api_key:
+            if not is_stream and gemini_api_key:
                 try:
-                    prompt = (
-                        "You are DataSpeakAI, an expert Conversational AI Assistant grounded in enterprise knowledge base documents.\n"
-                        f"{history_text}\n"
-                        "Based strictly on the document context provided below, synthesize a concise, comprehensive, and clear natural language answer.\n"
-                        "IMPORTANT CITATION RULES:\n"
-                        "1. When stating facts, numbers, dates, or concepts, include inline citations in the format [Source: filename, p. X] or [Source: filename].\n"
-                        "2. If the answer cannot be found in the context, clearly say so rather than hallucinating.\n\n"
-                        f"User Question: {user_query}\n\n"
-                        f"Retrieved Document Context:\n{context_text}"
-                    )
                     gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
                     gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_api_key}"
-                    payload = {"contents": [{"parts": [{"text": prompt}]}]}
+                    payload = {"contents": [{"parts": [{"text": synthesis_prompt}]}]}
                     headers = {"Content-Type": "application/json"}
                     res = requests.post(gemini_url, json=payload, headers=headers, timeout=30)
                     if res.status_code == 200:
@@ -529,7 +585,7 @@ def chat_endpoint(
         # 3. Unified Synthesis
         if gemini_api_key:
             try:
-                prompt = (
+                synthesis_prompt = (
                     "You are DataSpeakAI, synthesizing an answer using BOTH structured database tables AND document knowledge base files.\n"
                     f"{history_text}\n"
                     f"User Question: {user_query}\n\n"
@@ -537,13 +593,14 @@ def chat_endpoint(
                     f"Database Table Results:\n{sql_rows_text}\n\n"
                     "Synthesize a unified, comprehensive answer combining both the numerical database findings and the qualitative document context. Cite document sources using [Source: filename]."
                 )
-                gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
-                gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_api_key}"
-                payload = {"contents": [{"parts": [{"text": prompt}]}]}
-                headers = {"Content-Type": "application/json"}
-                res = requests.post(gemini_url, json=payload, headers=headers, timeout=30)
-                if res.status_code == 200:
-                    assistant_answer = res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+                if not is_stream:
+                    gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+                    gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_api_key}"
+                    payload = {"contents": [{"parts": [{"text": synthesis_prompt}]}]}
+                    headers = {"Content-Type": "application/json"}
+                    res = requests.post(gemini_url, json=payload, headers=headers, timeout=30)
+                    if res.status_code == 200:
+                        assistant_answer = res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
             except Exception as err:
                 print(f"Hybrid synthesis error: {err}")
 
@@ -555,8 +612,60 @@ def chat_endpoint(
     if sql_response_obj:
         msg_metadata["sql_data"] = sql_response_obj.model_dump()
 
+    if is_stream:
+        from services.chat_stream import stream_chat_response
+
+        def on_stream_complete(full_answer: str) -> int:
+            assistant_msg = models.Message(
+                conversation_id=conv_id,
+                sender_role="assistant",
+                content=full_answer,
+                sanitized_content=full_answer,
+                query_type=route_type,
+                metadata_json=msg_metadata
+            )
+            db.add(assistant_msg)
+            conv.updated_at = datetime.datetime.now(datetime.timezone.utc)
+            db.commit()
+            db.refresh(assistant_msg)
+
+            # Task 7.1.5: Trigger dynamic background title generation on initial turn
+            if is_new_conversation:
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(
+                        generate_and_set_conversation_title_in_background(
+                            conversation_id=conv_id,
+                            tenant_id=tenant_id,
+                            user_query=user_query,
+                            assistant_answer=full_answer,
+                            initial_heuristic_title=initial_title
+                        )
+                    )
+                except RuntimeError:
+                    pass
+
+            return int(assistant_msg.id)
+
+        return StreamingResponse(
+            stream_chat_response(
+                request=request,
+                conversation_id=conv_id,
+                user_query=user_query,
+                prompt=synthesis_prompt,
+                tenant_id=tenant_id,
+                citations=citations,
+                sql_data=sql_response_obj,
+                query_type=route_type,
+                on_complete=on_stream_complete,
+                static_fallback=assistant_answer
+            ),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache"}
+        )
+
     assistant_msg = models.Message(
-        conversation_id=conv.id,
+        conversation_id=conv_id,
         sender_role="assistant",
         content=assistant_answer,
         sanitized_content=assistant_answer,
@@ -564,19 +673,45 @@ def chat_endpoint(
         metadata_json=msg_metadata
     )
     db.add(assistant_msg)
-    conv.updated_at = datetime.datetime.utcnow()
+    conv.updated_at = datetime.datetime.now(datetime.timezone.utc)
     db.commit()
     db.refresh(assistant_msg)
 
+    # Task 7.1.5: Trigger dynamic background title generation on initial turn
+    if is_new_conversation:
+        if background_tasks is not None:
+            background_tasks.add_task(
+                generate_and_set_conversation_title_in_background,
+                conversation_id=conv_id,
+                tenant_id=tenant_id,
+                user_query=user_query,
+                assistant_answer=assistant_answer,
+                initial_heuristic_title=initial_title
+            )
+        else:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(
+                    generate_and_set_conversation_title_in_background(
+                        conversation_id=conv_id,
+                        tenant_id=tenant_id,
+                        user_query=user_query,
+                        assistant_answer=assistant_answer,
+                        initial_heuristic_title=initial_title
+                    )
+                )
+            except RuntimeError:
+                pass
+
     return schemas.ChatResponse(
-        conversation_id=conv.id,
-        message_id=assistant_msg.id,
-        user_message_id=user_msg.id,
+        conversation_id=conv_id,
+        message_id=int(assistant_msg.id),
+        user_message_id=int(user_msg.id),
         query=user_query,
         answer=assistant_answer,
         query_type=route_type,
         sources=citations,
-        sql_data=sql_response_obj,
+        sql_data=sql_response_obj.model_dump() if sql_response_obj else None,
         created_at=assistant_msg.created_at
     )
 

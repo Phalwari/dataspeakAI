@@ -507,6 +507,8 @@ class Conversation(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     title = Column(String, default="New Conversation")
     platform = Column(String, default="web")
+    summary_text = Column(Text, nullable=True)
+    summary_turn_count = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 

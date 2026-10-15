@@ -365,6 +365,26 @@ export function getWidgetStyles(themeColor: string = "#3b82f6", position: string
   transform: scale(1.05);
 }
 
+.dataspeak-stop-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 18px;
+  background-color: #ef4444;
+  color: #ffffff;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background-color 0.15s, transform 0.15s;
+}
+
+.dataspeak-stop-btn:hover {
+  background-color: #dc2626;
+  transform: scale(1.05);
+}
+
 .dataspeak-branding {
   text-align: center;
   font-size: 11px;

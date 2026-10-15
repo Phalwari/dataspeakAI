@@ -281,6 +281,13 @@ backend/
   1. *Engine-level statement timeouts:* PostgreSQL (`options="-c statement_timeout=10000"`), MySQL (`SET SESSION max_execution_time=10000`), SQLite (`timeout=10.0`, `PRAGMA busy_timeout = 10000;`).
   2. *Fail-safe watchdog ceiling:* 12.0s caller watchdog using `concurrent.futures.ThreadPoolExecutor` with manual lifecycle management (`shutdown(wait=False, cancel_futures=True)`) ensuring the caller is released immediately upon timeout without thread deadlock.
 
+### 4.9 Conversation Streaming, Memory Management & Background Titles Standard
+
+* **True Token-Level Streaming:** Dashboard chat (`/api/chat`) and standalone widget (`/api/widget/chat`) stream real tokens directly from `LLMGateway.generate_stream()` via `stream_chat_response` (`backend/services/chat_stream.py`). Artificial word-splitting and sleeps are eliminated. SQL execution remains deterministic and atomic; only post-execution explanations and RAG syntheses stream.
+* **Stream Disconnect & Slot Reclaim:** Generators poll `request.is_disconnected()` between tokens. Any client disconnect immediately halts upstream generation and releases widget concurrency slots in `finally:`. Tenant metered quotas are deducted only upon full completion.
+* **Conversation Memory Management (`ConversationMemoryManager`):** The last `MAX_RECENT_TURNS = 10` messages are preserved verbatim in context. Conversations crossing 15 turns trigger asynchronous background summarization of older turns. Monotonically increasing versioning (`summary_turn_count`) and per-conversation locks prevent concurrent overwrite or regression. Failures fall back cleanly to sliding window without logging message text.
+* **Dynamic Background Title Generation (`services/conversation_title.py`):** Initial conversation creation assigns a fast 6-word heuristic title. Following the first assistant answer, an async task generates a concise 3-6 word sanitized title via LLM Gateway. If the user has already manually renamed the conversation, the custom title is preserved.
+
 ---
 
 

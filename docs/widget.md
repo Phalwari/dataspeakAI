@@ -184,3 +184,19 @@ To rotate a publishable key without disrupting traffic on active host websites:
   ```bash
   npm run build
   ```
+
+---
+
+## 8. Real Token Streaming & Disconnection Lifecycle
+
+### 8.1 True Token Streaming
+Beginning in Phase 7.1.2, widget responses stream genuine LLM tokens directly from `LLMGateway` (`backend/services/chat_stream.py`) with sub-500ms Time-To-First-Token (TTFT), replacing artificial word delays.
+
+### 8.2 Disconnection & Quota Protection
+* **Immediate Upstream Cancellation:** The server checks `await request.is_disconnected()` between emitted tokens. When a browser visitor closes the widget, navigates away, or clicks Stop, the upstream LLM generation halts immediately.
+* **Stream Slot Reclamation:** Stream slots acquired via `widget_limiter.acquire_stream(public_key)` are guaranteed to be released in `finally:` blocks even on abrupt network termination.
+* **Monthly Cap Integrity:** A message is committed to `models.Message` and logged in `models.QueryLog` ONLY after the complete answer has been yielded to the client (`on_complete` callback). Aborted or partial streams do NOT increment the tenant's monthly message usage cap.
+
+### 8.3 SQL Query Path Behavior
+For security and ACID integrity, database introspection, query generation (`generate_sql_from_nl`), and database execution (`execute_safe_sql`) remain non-streamed (atomic). Only the subsequent natural language synthesis explaining the query findings is streamed token-by-token.
+

@@ -51,6 +51,13 @@ try:
 except Exception as e:
     print(f"[STARTUP] Superadmin seed note: {e}")
 
+# Startup embedding model warm-up (controlled by EMBEDDING_WARMUP, default true in non-test)
+try:
+    from routers.chat import warmup_embeddings
+    warmup_embeddings()
+except Exception as e:
+    print(f"[EMBEDDING WARMUP] Note: {e}")
+
 app = FastAPI(title="DataSpeakAI Platform API")
 
 # Configure CORS so the React frontend can communicate with the backend
