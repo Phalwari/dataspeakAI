@@ -16,12 +16,14 @@ DEFAULT_ADMIN_NAME = os.getenv("DEFAULT_ADMIN_NAME", "Super Admin")
 DEFAULT_ORG_NAME = os.getenv("DEFAULT_ORG_NAME", "DataSpeak Enterprise")
 
 def seed_superadmin():
-    Base.metadata.create_all(bind=engine)
-    try:
-        from services.db_migration import run_schema_migrations
-        run_schema_migrations(engine)
-    except Exception as err:
-        print(f"[MIGRATION] Note during seed: {err}")
+    # Only run DDL if explicitly in non-production development mode
+    if os.getenv("ENVIRONMENT", "development").lower() != "production" and os.getenv("ENABLE_DEV_STARTUP_DDL", "true").lower() == "true":
+        Base.metadata.create_all(bind=engine)
+        try:
+            from services.db_migration import run_schema_migrations
+            run_schema_migrations(engine)
+        except Exception as err:
+            print(f"[MIGRATION] Note during seed: {err}")
     db = SessionLocal()
     try:
         # 1. Ensure default tenant exists
@@ -63,8 +65,6 @@ def seed_superadmin():
             admin_user.is_verified = True
             if not admin_user.tenant_id:
                 admin_user.tenant_id = tenant.id
-            # Reset password to default if specified
-            admin_user.hashed_password = get_password_hash(DEFAULT_ADMIN_PASSWORD)
             db.commit()
             print(f"[SEED] Superadmin User '{DEFAULT_ADMIN_EMAIL}' already exists. Status verified & active.")
 

@@ -34,22 +34,32 @@ SECRET_KEY = os.getenv("SECRET_KEY", "dataspeakai-default-encryption-secret-key-
 if not SECRET_KEY:
     print("[WARNING] SECRET_KEY environment variable not set. Using fallback for development.")
 
-# Create all tables in the database
-models.Base.metadata.create_all(bind=engine)
+# Startup database check and lifecycle control
+env_mode = os.getenv("ENVIRONMENT", "development").lower()
 
-# Automatically sync newly added model columns for SQLite / PostgreSQL
-try:
-    from services.db_migration import run_schema_migrations
-    run_schema_migrations(engine)
-except Exception as e:
-    print(f"[MIGRATION] Startup schema sync note: {e}")
-
-# Automatically ensure default Superadmin user and tenant exist for fresh environments
-try:
-    from scripts.seed_admin import seed_superadmin
-    seed_superadmin()
-except Exception as e:
-    print(f"[STARTUP] Superadmin seed note: {e}")
+if env_mode == "production":
+    from scripts.schema_preflight import inspect_database_layout
+    report = inspect_database_layout(engine)
+    if report["layout"] != "LAYOUT_CURRENT":
+        raise RuntimeError(
+            f"Database schema preflight failed on startup: Layout '{report['layout']}' is not ready for production serving. "
+            f"Details: {report.get('details', '')}. Explicitly run 'python backend/scripts/migrate.py upgrade' before starting the application."
+        )
+    print(f"[STARTUP] Production database preflight OK (Layout: {report['layout']}, Rev: {report['alembic_revision']})")
+else:
+    # Development / Test mode convenience
+    if os.getenv("ENABLE_DEV_STARTUP_DDL", "true").lower() == "true":
+        models.Base.metadata.create_all(bind=engine)
+        try:
+            from services.db_migration import run_schema_migrations
+            run_schema_migrations(engine)
+        except Exception as e:
+            print(f"[MIGRATION] Dev startup schema sync note: {e}")
+        try:
+            from scripts.seed_admin import seed_superadmin
+            seed_superadmin()
+        except Exception as e:
+            print(f"[STARTUP] Superadmin seed note: {e}")
 
 # Startup embedding model warm-up (controlled by EMBEDDING_WARMUP, default true in non-test)
 try:
