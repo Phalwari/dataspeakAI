@@ -9,7 +9,15 @@ import { WidgetApp } from './ui/WidgetApp';
  */
 const currentScript = (document.currentScript as HTMLScriptElement) || null;
 
-function parseScriptConfig(): WidgetConfig {
+interface ParsedScriptResult {
+  config: WidgetConfig;
+  hasExplicitTheme: boolean;
+  hasExplicitTitle: boolean;
+  hasExplicitGreeting: boolean;
+  hasExplicitPosition: boolean;
+}
+
+function parseScriptConfig(): ParsedScriptResult {
   let publicKey = '';
   let apiBase = window.location.origin;
   let themeColor = '#3b82f6';
@@ -18,6 +26,11 @@ function parseScriptConfig(): WidgetConfig {
   let position = 'bottom-right';
   let welcomeDelay = 1;
   let soundEnabled = false;
+
+  let hasExplicitTheme = false;
+  let hasExplicitTitle = false;
+  let hasExplicitGreeting = false;
+  let hasExplicitPosition = false;
 
   if (currentScript) {
     publicKey = currentScript.getAttribute('data-key') || '';
@@ -36,33 +49,50 @@ function parseScriptConfig(): WidgetConfig {
 
     if (currentScript.getAttribute('data-theme')) {
       themeColor = currentScript.getAttribute('data-theme')!;
+      hasExplicitTheme = true;
     }
     if (currentScript.getAttribute('data-title')) {
       widgetTitle = currentScript.getAttribute('data-title')!;
+      hasExplicitTitle = true;
     }
     if (currentScript.getAttribute('data-position')) {
       position = currentScript.getAttribute('data-position')!;
+      hasExplicitPosition = true;
     }
     if (currentScript.getAttribute('data-welcome')) {
       greetingMessage = currentScript.getAttribute('data-welcome')!;
+      hasExplicitGreeting = true;
     }
   }
 
   return {
-    publicKey,
-    apiBase,
-    themeColor,
-    widgetTitle,
-    greetingMessage,
-    position,
-    welcomeDelay,
-    soundEnabled,
+    config: {
+      publicKey,
+      apiBase,
+      themeColor,
+      widgetTitle,
+      greetingMessage,
+      position,
+      welcomeDelay,
+      soundEnabled,
+    },
+    hasExplicitTheme,
+    hasExplicitTitle,
+    hasExplicitGreeting,
+    hasExplicitPosition,
   };
 }
 
 // Top-level bootstrap
 export function initWidget(overrideConfig?: Partial<WidgetConfig>) {
-  const baseConfig = parseScriptConfig();
+  const {
+    config: baseConfig,
+    hasExplicitTheme,
+    hasExplicitTitle,
+    hasExplicitGreeting,
+    hasExplicitPosition,
+  } = parseScriptConfig();
+
   const config: WidgetConfig = {
     ...baseConfig,
     ...overrideConfig,
@@ -86,11 +116,29 @@ export function initWidget(overrideConfig?: Partial<WidgetConfig>) {
   // Asynchronously enrich with server branding config
   fetchWidgetConfig(config.apiBase, config.publicKey)
     .then((serverCfg) => {
-      if (serverCfg.themeColor || serverCfg.position) {
-        const updatedTheme = config.themeColor || serverCfg.themeColor || '#3b82f6';
-        const updatedPos = config.position || serverCfg.position || 'bottom-right';
-        hostInstance.updateStyles(updatedTheme, updatedPos);
-      }
+      // Script attribute or explicit JS override takes precedence over server database config;
+      // otherwise server database config takes precedence over hardcoded fallback defaults.
+      const resolvedTheme = overrideConfig?.themeColor || (hasExplicitTheme ? config.themeColor : (serverCfg.themeColor || config.themeColor || '#3b82f6'));
+      const resolvedPos = overrideConfig?.position || (hasExplicitPosition ? config.position : (serverCfg.position || config.position || 'bottom-right'));
+      const resolvedTitle = overrideConfig?.widgetTitle || (hasExplicitTitle ? config.widgetTitle : (serverCfg.widgetTitle || config.widgetTitle || 'AI Assistant'));
+      const resolvedGreeting = overrideConfig?.greetingMessage || (hasExplicitGreeting ? config.greetingMessage : (serverCfg.greetingMessage || config.greetingMessage || 'Hello! How can I help you today?'));
+      const resolvedSound = overrideConfig?.soundEnabled ?? (serverCfg.soundEnabled ?? config.soundEnabled);
+      const resolvedDelay = overrideConfig?.welcomeDelay ?? (serverCfg.welcomeDelay ?? config.welcomeDelay);
+
+      // Re-apply styles with resolved theme and position
+      hostInstance.updateStyles(resolvedTheme, resolvedPos);
+
+      // Re-render Preact app with updated server branding
+      const updatedConfig: WidgetConfig = {
+        ...config,
+        themeColor: resolvedTheme,
+        position: resolvedPos,
+        widgetTitle: resolvedTitle,
+        greetingMessage: resolvedGreeting,
+        soundEnabled: resolvedSound,
+        welcomeDelay: resolvedDelay,
+      };
+      render(h(WidgetApp, { initialConfig: updatedConfig }), hostInstance.mountContainer);
     })
     .catch(() => {
       // Offline / network failure graceful fallback

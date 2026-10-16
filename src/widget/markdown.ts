@@ -1,156 +1,132 @@
-import { h, VNode } from 'preact';
+import { h, ComponentChild } from 'preact';
 
-/**
- * Validates link URL to only allow strict http: or https: schemes.
- * Rejects javascript:, data:, vbscript:, and relative malicious protocols.
- */
 function isSafeUrl(url: string): boolean {
   try {
-    const parsed = new URL(url, 'https://dummy-base-domain.internal');
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    const u = new URL(url, 'https://dummy-base-domain.internal');
+    return u.protocol === 'http:' || u.protocol === 'https:';
   } catch {
     return false;
   }
 }
 
-/**
- * Tokenizes and parses inline text into safe Preact VNodes without ever touching innerHTML.
- */
-function parseInline(text: string): (string | VNode)[] {
-  const elements: (string | VNode)[] = [];
-  let remaining = text;
-  let keyIndex = 0;
+function parseInline(text: string): ComponentChild[] {
+  const out: ComponentChild[] = [];
+  let rest = text;
+  let k = 0;
 
-  while (remaining.length > 0) {
-    // 1. Markdown Links [text](url)
-    const linkMatch = remaining.match(/^\[([^\]]+)\]\(([^)]+)\)/);
-    if (linkMatch) {
-      const linkText = linkMatch[1];
-      const linkHref = linkMatch[2].trim();
-      if (isSafeUrl(linkHref)) {
-        elements.push(
-          h(
-            'a',
-            {
-              key: `lnk-${keyIndex++}`,
-              href: linkHref,
-              target: '_blank',
-              rel: 'noopener noreferrer',
-            },
-            linkText
-          )
-        );
-      } else {
-        elements.push(linkText);
-      }
-      remaining = remaining.slice(linkMatch[0].length);
-      continue;
-    }
-
-    // 2. Bold text **text** or __text__
-    const boldMatch = remaining.match(/^(\*\*|__)(.*?)\1/);
-    if (boldMatch && boldMatch[2]) {
-      elements.push(
-        h('strong', { key: `b-${keyIndex++}` }, parseInline(boldMatch[2]))
+  while (rest.length > 0) {
+    const link = rest.match(/^\[([^\]]+)\]\(([^)]+)\)/);
+    if (link) {
+      const url = link[2].trim();
+      out.push(
+        isSafeUrl(url)
+          ? h('a', { key: `l${k++}`, href: url, target: '_blank', rel: 'noopener noreferrer' }, link[1])
+          : link[1]
       );
-      remaining = remaining.slice(boldMatch[0].length);
+      rest = rest.slice(link[0].length);
       continue;
     }
 
-    // 3. Inline code `text`
-    const codeMatch = remaining.match(/^`([^`]+)`/);
-    if (codeMatch && codeMatch[1]) {
-      elements.push(
-        h('code', { key: `code-${keyIndex++}` }, codeMatch[1])
-      );
-      remaining = remaining.slice(codeMatch[0].length);
+    const cite = rest.match(/^\[Source:\s*([^\]]+)\]/);
+    if (cite) {
+      out.push(h('span', { key: `c${k++}`, class: 'dataspeak-source-badge' }, `📄 ${cite[1]}`));
+      rest = rest.slice(cite[0].length);
       continue;
     }
 
-    // 4. Italic text *text* or _text_
-    const italicMatch = remaining.match(/^(\*|_)(.*?)\1/);
-    if (italicMatch && italicMatch[2]) {
-      elements.push(
-        h('em', { key: `em-${keyIndex++}` }, parseInline(italicMatch[2]))
-      );
-      remaining = remaining.slice(italicMatch[0].length);
+    const bold = rest.match(/^(\*\*|__)(.+?)\1/);
+    if (bold) {
+      out.push(h('strong', { key: `b${k++}` }, parseInline(bold[2])));
+      rest = rest.slice(bold[0].length);
       continue;
     }
 
-    // 5. Source Citations [Source: filename]
-    const citationMatch = remaining.match(/^\[Source:\s*([^\]]+)\]/);
-    if (citationMatch && citationMatch[1]) {
-      elements.push(
-        h(
-          'span',
-          { key: `cit-${keyIndex++}`, class: 'dataspeak-source-badge' },
-          `📄 ${citationMatch[1]}`
-        )
-      );
-      remaining = remaining.slice(citationMatch[0].length);
+    const code = rest.match(/^`([^`]+)`/);
+    if (code) {
+      out.push(h('code', { key: `k${k++}` }, code[1]));
+      rest = rest.slice(code[0].length);
       continue;
     }
 
-    // Regular character consumption
-    const nextSpecial = remaining.search(/(\[|\*\*|__|`|\*|_)/);
-    if (nextSpecial === -1) {
-      elements.push(remaining);
+    const em = rest.match(/^(\*|_)(.+?)\1/);
+    if (em) {
+      out.push(h('em', { key: `e${k++}` }, parseInline(em[2])));
+      rest = rest.slice(em[0].length);
+      continue;
+    }
+
+    const next = rest.slice(1).search(/(\[|\*\*|__|`|\*|_)/);
+    if (next === -1) {
+      out.push(rest);
       break;
-    } else if (nextSpecial === 0) {
-      elements.push(remaining[0]);
-      remaining = remaining.slice(1);
-    } else {
-      elements.push(remaining.slice(0, nextSpecial));
-      remaining = remaining.slice(nextSpecial);
     }
+    out.push(rest.slice(0, next + 1));
+    rest = rest.slice(next + 1);
   }
-
-  return elements;
+  return out;
 }
 
-/**
- * Safe, zero-innerHTML markdown renderer component for untrusted LLM assistant messages.
- */
-export function SafeMarkdown({ content }: { content: string }): VNode {
-  if (!content) {
-    return h('span', null, '');
-  }
+export function SafeMarkdown({ content }: { content: string }): ComponentChild {
+  if (!content) return h('span', null, '');
 
   const lines = content.split('\n');
-  const blocks: VNode[] = [];
-  let currentListItems: VNode[] = [];
-  let blockIndex = 0;
+  const blocks: ComponentChild[] = [];
+  let ul: ComponentChild[] = [];
+  let ol: ComponentChild[] = [];
+  let codeBuf: string[] | null = null;
+  let k = 0;
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trim();
+  const flushLists = () => {
+    if (ul.length) { blocks.push(h('ul', { key: `ul${k++}` }, ul)); ul = []; }
+    if (ol.length) { blocks.push(h('ol', { key: `ol${k++}` }, ol)); ol = []; }
+  };
 
-    // List item (- or *)
-    const listMatch = trimmed.match(/^[-*]\s+(.*)$/);
-    if (listMatch) {
-      currentListItems.push(
-        h('li', { key: `li-${blockIndex}-${currentListItems.length}` }, parseInline(listMatch[1]))
-      );
+  for (const raw of lines) {
+    const line = raw.trim();
+
+    // fenced code block
+    if (line.startsWith('```')) {
+      if (codeBuf === null) {
+        flushLists();
+        codeBuf = [];
+      } else {
+        blocks.push(h('pre', { key: `pre${k++}` }, h('code', null, codeBuf.join('\n'))));
+        codeBuf = null;
+      }
+      continue;
+    }
+    if (codeBuf !== null) { codeBuf.push(raw); continue; }
+
+    const bullet = line.match(/^[-*]\s+(.*)$/);
+    if (bullet) {
+      if (ol.length) flushLists();
+      ul.push(h('li', { key: `li${k++}` }, parseInline(bullet[1])));
       continue;
     }
 
-    // If previous lines were a list and current line is not
-    if (currentListItems.length > 0) {
-      blocks.push(h('ul', { key: `ul-${blockIndex++}` }, currentListItems));
-      currentListItems = [];
-    }
-
-    if (trimmed.length === 0) {
+    const numbered = line.match(/^\d+[.)]\s+(.*)$/);
+    if (numbered) {
+      if (ul.length) flushLists();
+      ol.push(h('li', { key: `li${k++}` }, parseInline(numbered[1])));
       continue;
     }
 
-    // Standard paragraph
-    blocks.push(h('p', { key: `p-${blockIndex++}` }, parseInline(line)));
+    flushLists();
+    if (!line) continue;
+
+    const heading = line.match(/^(#{1,3})\s+(.*)$/);
+    if (heading) {
+      blocks.push(h(`h${heading[1].length}`, { key: `h${k++}` }, parseInline(heading[2])));
+      continue;
+    }
+
+    blocks.push(h('p', { key: `p${k++}` }, parseInline(raw)));
   }
 
-  if (currentListItems.length > 0) {
-    blocks.push(h('ul', { key: `ul-${blockIndex++}` }, currentListItems));
+  if (codeBuf !== null) {
+    blocks.push(h('pre', { key: `pre${k++}` }, h('code', null, codeBuf.join('\n'))));
   }
+  flushLists();
 
   return h('div', { class: 'dataspeak-markdown-body' }, blocks);
 }

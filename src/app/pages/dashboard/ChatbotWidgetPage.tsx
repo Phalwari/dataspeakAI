@@ -505,6 +505,8 @@ export function ChatbotWidgetPage() {
   // Sandbox HTML for the Real /widget.js Live Preview
   const sandboxSrcDoc = useMemo(() => {
     const pubKey = widgetKey ? widgetKey.public_key : "";
+    const escapedGreeting = greetingMessage.replace(/"/g, '&quot;');
+    const escapedTitle = widgetTitle.replace(/"/g, '&quot;');
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -575,10 +577,19 @@ export function ChatbotWidgetPage() {
   </div>
 
   <!-- Real Standalone Chatbot Script -->
-  <script src="${API_BASE_URL}/widget.js" data-key="${pubKey}" data-api="${API_BASE_URL}" async></script>
+  <script 
+    src="${API_BASE_URL}/widget.js" 
+    data-key="${pubKey}" 
+    data-api="${API_BASE_URL}"
+    data-theme="${themeColor}"
+    data-title="${escapedTitle}"
+    data-welcome="${escapedGreeting}"
+    data-position="${position}"
+    async
+  ></script>
 </body>
 </html>`;
-  }, [widgetKey, previewReloadKey]);
+  }, [widgetKey, previewReloadKey, themeColor, widgetTitle, greetingMessage, position]);
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
@@ -1067,6 +1078,9 @@ export function ChatbotWidgetPage() {
                         onChange={(e) => setMaxHistory(Number(e.target.value))}
                         className="text-xs"
                       />
+                      <p className="text-[11px] text-slate-500">
+                        AI Context Memory Window — how many recent messages are sent to the AI for conversation memory. (For monthly visitor message limits, see Monthly Cap in API Keys).
+                      </p>
                     </div>
                   </div>
 

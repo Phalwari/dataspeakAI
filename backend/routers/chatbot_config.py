@@ -41,10 +41,12 @@ def update_chatbot_config(
         db.add(config)
         
     config.theme_color = config_update.theme_color
+    config.widget_title = config_update.widget_title
     config.greeting_message = config_update.greeting_message
     config.position = config_update.position
     config.welcome_delay = config_update.welcome_delay
     config.max_history = config_update.max_history
+    config.sound_enabled = config_update.sound_enabled
     
     db.commit()
     db.refresh(config)

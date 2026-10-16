@@ -406,11 +406,13 @@ def process_widget_chat(
 
     # Load conversation history for multi-turn context
     from routers.chat import retrieve_rag_chunks, build_conversation_history_text
+    cfg = db.query(models.ChatbotConfig).filter(models.ChatbotConfig.tenant_id == tenant_id).first()
+    max_history_msgs = int(cfg.max_history) if (cfg and cfg.max_history) else 10
     past_messages = db.query(models.Message).filter(
         models.Message.conversation_id == conv_id,
         models.Message.id != user_msg.id
     ).order_by(models.Message.created_at.asc()).all()
-    history_text = build_conversation_history_text(past_messages, max_messages=8)
+    history_text = build_conversation_history_text(past_messages, max_messages=max_history_msgs)
 
     citations: List[schemas.SourceCitation] = []
     assistant_answer = ""

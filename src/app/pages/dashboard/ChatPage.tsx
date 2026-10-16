@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { API_BASE_URL } from "../../config/api";
 import {
   MessageSquare,
@@ -14,14 +14,16 @@ import {
   Layers,
   ChevronDown,
   ChevronUp,
+  ChevronRight,
   Copy,
   ExternalLink,
   Bot,
   User,
   Search,
   Clock,
-  ArrowRight,
   RefreshCw,
+  PanelLeftClose,
+  PanelLeftOpen,
   Table as TableIcon
 } from "lucide-react";
 import { Button } from "../../components/ui/button";
@@ -102,14 +104,72 @@ interface ConversationItem {
   message_count: number;
 }
 
+type SourcePreference = "auto" | "documents" | "database";
+
+/* ---------- constants & helpers ---------- */
+
+// Slim scrollbar, no arrow buttons. Self-contained (no global CSS needed).
+const THIN_SCROLL =
+  "[scrollbar-width:thin] [scrollbar-color:#cbd5e1_transparent] " +
+  "[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:h-1.5 " +
+  "[&::-webkit-scrollbar-button]:hidden " +
+  "[&::-webkit-scrollbar-track]:bg-transparent " +
+  "[&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-thumb]:rounded-full " +
+  "[&::-webkit-scrollbar-thumb:hover]:bg-slate-400";
+
+const SOURCE_OPTIONS: {
+  key: SourcePreference;
+  icon: any;
+  iconClass: string;
+  full: string;
+  short: string;
+}[] = [
+    { key: "auto", icon: Sparkles, iconClass: "text-blue-600", full: "Auto", short: "Auto" },
+    { key: "documents", icon: FileText, iconClass: "text-emerald-600", full: "Knowledge Base (RAG)", short: "KB" },
+    { key: "database", icon: Database, iconClass: "text-purple-600", full: "Database (SQL)", short: "SQL" }
+  ];
+
+const GROUP_ORDER = ["Today", "Yesterday", "Previous 7 days", "Older"];
+const GENERIC_TITLE = /^(widget chat|new chat|new conversation|untitled.*)$/i;
+const LONG_MESSAGE_CHARS = 600;
+const LONG_MESSAGE_LINES = 10;
+const SQL_PREVIEW_ROWS = 5;
+
+const getGroupLabel = (iso: string) => {
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diffDays = Math.round((startOfDay(new Date()) - startOfDay(new Date(iso))) / 86400000);
+  if (diffDays <= 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays <= 7) return "Previous 7 days";
+  return "Older";
+};
+
+// Generic titles like "Widget Chat" are replaced by the last message preview
+const getDisplayTitle = (c: ConversationItem) => {
+  if (GENERIC_TITLE.test((c.title || "").trim()) && c.last_message) {
+    const t = c.last_message.replace(/\s+/g, " ").trim();
+    return t.length > 40 ? t.slice(0, 40) + "…" : t;
+  }
+  return c.title;
+};
+
+const isMobileViewport = () => typeof window !== "undefined" && window.innerWidth < 768;
+
 export function ChatPage() {
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [activeConvId, setActiveConvId] = useState<number | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [sourcePreference, setSourcePreference] = useState<"auto" | "documents" | "database">("auto");
+  const [sourcePreference, setSourcePreference] = useState<SourcePreference>("auto");
   const [searchFilter, setSearchFilter] = useState("");
+
+  // Layout / collapse state
+  const [listOpen, setListOpen] = useState<boolean>(() => !isMobileViewport());
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({ Older: true });
+  const [expandedMsgs, setExpandedMsgs] = useState<Record<number, boolean>>({});
+  const [expandedSql, setExpandedSql] = useState<Record<number, boolean>>({});
+  const [showAllRows, setShowAllRows] = useState<Record<number, boolean>>({});
 
   // Editing Title
   const [editingConvId, setEditingConvId] = useState<number | null>(null);
@@ -119,17 +179,15 @@ export function ChatPage() {
   const [selectedCitation, setSelectedCitation] = useState<SourceCitation | null>(null);
   const [expandedSources, setExpandedSources] = useState<Record<number, boolean>>({});
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const token = localStorage.getItem("token");
 
-  // Scroll to bottom
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-
+  // Scroll only the message container (never the page)
   useEffect(() => {
-    scrollToBottom();
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: isLoading ? "auto" : "smooth" });
   }, [messages, isLoading]);
 
   // Clean up any in-flight stream on unmount
@@ -138,6 +196,15 @@ export function ChatPage() {
       abortControllerRef.current?.abort();
     };
   }, []);
+
+  const closeListOnMobile = () => {
+    if (isMobileViewport()) setListOpen(false);
+  };
+
+  const toggleMap = (
+    setter: React.Dispatch<React.SetStateAction<Record<number, boolean>>>,
+    id: number
+  ) => setter((prev) => ({ ...prev, [id]: !prev[id] }));
 
   // Handle Stop Streaming
   const handleStopGeneration = () => {
@@ -150,11 +217,11 @@ export function ChatPage() {
       prev.map((m, idx) =>
         idx === prev.length - 1 && m.sender_role === "assistant"
           ? {
-              ...m,
-              content: m.content
-                ? m.content + "\n\n*(Generation stopped by user)*"
-                : "*(Generation cancelled)*"
-            }
+            ...m,
+            content: m.content
+              ? m.content + "\n\n*(Generation stopped by user)*"
+              : "*(Generation cancelled)*"
+          }
           : m
       )
     );
@@ -216,6 +283,7 @@ export function ChatPage() {
     setActiveConvId(null);
     setMessages([]);
     setInputText("");
+    closeListOnMobile();
   };
 
   // Handle Send Message with True Token Streaming
@@ -272,7 +340,7 @@ export function ChatPage() {
         try {
           const errJson = await res.json();
           if (errJson.detail) errDetail = errJson.detail;
-        } catch {}
+        } catch { }
         throw new Error(errDetail);
       }
 
@@ -288,7 +356,7 @@ export function ChatPage() {
         if (abortCtrl.signal.aborted) {
           try {
             await reader.cancel();
-          } catch {}
+          } catch { }
           return;
         }
 
@@ -334,16 +402,16 @@ export function ChatPage() {
                 prev.map((m) =>
                   m.id === assistantPlaceholderId
                     ? {
-                        ...m,
-                        id: parsed.message_id || m.id,
-                        query_type: parsed.query_type || m.query_type,
-                        metadata_json: {
-                          sources: parsed.sources,
-                          sql_data: parsed.sql_data,
-                          grounding: parsed.grounding,
-                          sql_agent: parsed.sql_agent
-                        }
+                      ...m,
+                      id: parsed.message_id || m.id,
+                      query_type: parsed.query_type || m.query_type,
+                      metadata_json: {
+                        sources: parsed.sources,
+                        sql_data: parsed.sql_data,
+                        grounding: parsed.grounding,
+                        sql_agent: parsed.sql_agent
                       }
+                    }
                     : m
                 )
               );
@@ -370,11 +438,11 @@ export function ChatPage() {
         prev.map((m) =>
           m.id === assistantPlaceholderId
             ? {
-                ...m,
-                content:
-                  m.content ||
-                  "Sorry, I encountered an error connecting to the AI engine. Please try again."
-              }
+              ...m,
+              content:
+                m.content ||
+                "Sorry, I encountered an error connecting to the AI engine. Please try again."
+            }
             : m
         )
       );
@@ -440,16 +508,25 @@ export function ChatPage() {
     toast.success("Copied to clipboard");
   };
 
-  const toggleSourceExpand = (msgId: number) => {
-    setExpandedSources((prev) => ({
-      ...prev,
-      [msgId]: !prev[msgId]
-    }));
-  };
-
-  const filteredConversations = conversations.filter((c) =>
-    c.title.toLowerCase().includes(searchFilter.toLowerCase())
+  const filteredConversations = useMemo(
+    () =>
+      conversations.filter((c) =>
+        `${c.title} ${c.last_message || ""}`.toLowerCase().includes(searchFilter.toLowerCase())
+      ),
+    [conversations, searchFilter]
   );
+
+  const groupedConversations = useMemo(() => {
+    const groups: Record<string, ConversationItem[]> = {};
+    filteredConversations.forEach((c) => {
+      const label = getGroupLabel(c.updated_at || c.created_at);
+      if (!groups[label]) groups[label] = [];
+      groups[label].push(c);
+    });
+    return groups;
+  }, [filteredConversations]);
+
+  const activeConversation = conversations.find((c) => c.id === activeConvId);
 
   const samplePrompts = [
     { text: "Summarize key findings from our latest uploaded document", icon: FileText, pref: "documents" },
@@ -458,18 +535,135 @@ export function ChatPage() {
     { text: "What are the key guidelines and compliance rules mentioned in the handbook?", icon: FileText, pref: "documents" }
   ];
 
+  const renderConversation = (conv: ConversationItem) => {
+    const isActive = conv.id === activeConvId;
+    const isEditing = conv.id === editingConvId;
+    const displayTitle = getDisplayTitle(conv);
+    const titleIsDerived = displayTitle !== conv.title;
+
+    return (
+      <div
+        key={conv.id}
+        onClick={() => {
+          if (isEditing) return;
+          setActiveConvId(conv.id);
+          closeListOnMobile();
+        }}
+        className={`group relative flex flex-col gap-1 p-3 rounded-lg cursor-pointer transition-all border text-left ${isActive
+            ? "bg-white border-blue-200 shadow-sm ring-1 ring-blue-500/20"
+            : "border-transparent hover:bg-gray-100/80 hover:border-gray-200"
+          }`}
+      >
+        <div className="flex items-center justify-between gap-1">
+          {isEditing ? (
+            <div className="flex items-center gap-1 w-full" onClick={(e) => e.stopPropagation()}>
+              <Input
+                value={editTitleText}
+                onChange={(e) => setEditTitleText(e.target.value)}
+                className="h-7 text-xs"
+                autoFocus
+              />
+              <button
+                onClick={(e) => handleSaveRename(e, conv.id)}
+                className="p-1 hover:bg-blue-100 text-blue-600 rounded"
+              >
+                <Check className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => setEditingConvId(null)}
+                className="p-1 hover:bg-gray-200 text-gray-500 rounded"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 min-w-0">
+                <MessageSquare
+                  className={`w-3.5 h-3.5 flex-shrink-0 ${isActive ? "text-blue-600" : "text-gray-400"}`}
+                />
+                <span className="text-xs font-semibold text-gray-800 truncate">{displayTitle}</span>
+              </div>
+              <div className="opacity-100 md:opacity-0 md:group-hover:opacity-100 flex items-center gap-0.5 transition-opacity flex-shrink-0">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setEditingConvId(conv.id);
+                    setEditTitleText(conv.title);
+                  }}
+                  className="p-1 hover:bg-gray-200 text-gray-500 rounded"
+                  title="Rename"
+                >
+                  <Edit2 className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={(e) => handleDeleteConversation(e, conv.id)}
+                  className="p-1 hover:bg-red-100 text-red-500 rounded"
+                  title="Delete"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+
+        {conv.last_message && !isEditing && !titleIsDerived && (
+          <p className="text-[11px] text-gray-500 truncate pl-5">{conv.last_message}</p>
+        )}
+
+        <div className="flex items-center gap-2 pl-5 pt-0.5 text-[10px] text-gray-400">
+          <Clock className="w-2.5 h-2.5" />
+          <span>
+            {new Date(conv.updated_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+          </span>
+          <span>•</span>
+          <span>{conv.message_count} msgs</span>
+          {conv.platform && (
+            <Badge
+              variant="outline"
+              className="ml-auto bg-gray-100 text-gray-600 border-gray-200 text-[9px] px-1.5 py-0 h-4 capitalize"
+            >
+              {conv.platform}
+            </Badge>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
-    <div className="flex h-[calc(100vh-4rem)] bg-white overflow-hidden">
-      {/* 1. Left Conversation Sidebar */}
-      <aside className="w-80 border-r border-gray-200 bg-gray-50 flex flex-col flex-shrink-0">
-        <div className="p-4 border-b border-gray-200 space-y-3">
-          <Button
-            onClick={handleNewChat}
-            className="w-full justify-start gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-sm font-medium"
-          >
-            <Plus className="w-4 h-4" />
-            New Conversation
-          </Button>
+    <div className="relative flex h-full min-h-0 bg-white overflow-hidden">
+      {/* Mobile backdrop for the conversation drawer */}
+      {listOpen && (
+        <div
+          className="md:hidden absolute inset-0 z-20 bg-black/30"
+          onClick={() => setListOpen(false)}
+        />
+      )}
+
+      {/* 1. Left Conversation Sidebar (drawer on mobile, collapsible panel on desktop) */}
+      <aside
+        className={`${listOpen ? "flex" : "hidden"} absolute inset-y-0 left-0 z-30 w-[85%] max-w-xs md:static md:z-auto md:w-72 lg:w-80 md:max-w-none border-r border-gray-200 bg-gray-50 flex-col flex-shrink-0 min-h-0 shadow-xl md:shadow-none`}
+      >
+        <div className="p-3 sm:p-4 border-b border-gray-200 space-y-3 flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={handleNewChat}
+              className="flex-1 justify-start gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-sm font-medium"
+            >
+              <Plus className="w-4 h-4" />
+              New Conversation
+            </Button>
+            <button
+              type="button"
+              onClick={() => setListOpen(false)}
+              aria-label="Close conversation list"
+              className="md:hidden p-2 rounded-lg text-gray-500 hover:bg-gray-200"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
 
           <div className="relative">
             <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
@@ -482,96 +676,36 @@ export function ChatPage() {
           </div>
         </div>
 
-        {/* Conversation List */}
-        <div className="flex-1 overflow-y-auto p-2 space-y-1">
+        {/* Conversation List (grouped by date, each group collapsible) */}
+        <div className={`flex-1 min-h-0 overflow-y-auto p-2 space-y-2 ${THIN_SCROLL}`}>
           {filteredConversations.length === 0 ? (
             <div className="text-center py-10 px-4 text-gray-400 text-xs">
               <MessageSquare className="w-8 h-8 mx-auto mb-2 opacity-40" />
               No conversations found. Start a new chat!
             </div>
           ) : (
-            filteredConversations.map((conv) => {
-              const isActive = conv.id === activeConvId;
-              const isEditing = conv.id === editingConvId;
+            GROUP_ORDER.filter((g) => groupedConversations[g]?.length).map((group) => {
+              const items = groupedConversations[group];
+              const isCollapsed = !searchFilter && !!collapsedGroups[group];
 
               return (
-                <div
-                  key={conv.id}
-                  onClick={() => {
-                    if (!isEditing) setActiveConvId(conv.id);
-                  }}
-                  className={`group relative flex flex-col gap-1 p-3 rounded-lg cursor-pointer transition-all border text-left ${
-                    isActive
-                      ? "bg-white border-blue-200 shadow-sm ring-1 ring-blue-500/20"
-                      : "border-transparent hover:bg-gray-100/80 hover:border-gray-200"
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-1">
-                    {isEditing ? (
-                      <div className="flex items-center gap-1 w-full" onClick={(e) => e.stopPropagation()}>
-                        <Input
-                          value={editTitleText}
-                          onChange={(e) => setEditTitleText(e.target.value)}
-                          className="h-7 text-xs"
-                          autoFocus
-                        />
-                        <button
-                          onClick={(e) => handleSaveRename(e, conv.id)}
-                          className="p-1 hover:bg-blue-100 text-blue-600 rounded"
-                        >
-                          <Check className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => setEditingConvId(null)}
-                          className="p-1 hover:bg-gray-200 text-gray-500 rounded"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                <div key={group} className="space-y-1">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCollapsedGroups((prev) => ({ ...prev, [group]: !prev[group] }))
+                    }
+                    className="w-full flex items-center gap-1 px-2 py-1.5 text-[11px] font-semibold text-gray-500 hover:text-gray-800 transition-colors select-none"
+                  >
+                    {isCollapsed ? (
+                      <ChevronRight className="w-3.5 h-3.5" />
                     ) : (
-                      <>
-                        <div className="flex items-center gap-2 min-w-0">
-                          <MessageSquare className={`w-3.5 h-3.5 flex-shrink-0 ${isActive ? "text-blue-600" : "text-gray-400"}`} />
-                          <span className="text-xs font-semibold text-gray-800 truncate">
-                            {conv.title}
-                          </span>
-                        </div>
-                        <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setEditingConvId(conv.id);
-                              setEditTitleText(conv.title);
-                            }}
-                            className="p-1 hover:bg-gray-200 text-gray-500 rounded"
-                            title="Rename"
-                          >
-                            <Edit2 className="w-3 h-3" />
-                          </button>
-                          <button
-                            onClick={(e) => handleDeleteConversation(e, conv.id)}
-                            className="p-1 hover:bg-red-100 text-red-500 rounded"
-                            title="Delete"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        </div>
-                      </>
+                      <ChevronDown className="w-3.5 h-3.5" />
                     )}
-                  </div>
-
-                  {conv.last_message && !isEditing && (
-                    <p className="text-[11px] text-gray-500 truncate pl-5">
-                      {conv.last_message}
-                    </p>
-                  )}
-
-                  <div className="flex items-center gap-2 pl-5 pt-0.5 text-[10px] text-gray-400">
-                    <Clock className="w-2.5 h-2.5" />
-                    <span>{new Date(conv.updated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
-                    <span>•</span>
-                    <span>{conv.message_count} msgs</span>
-                  </div>
+                    <span>{group}</span>
+                    <span className="text-gray-400 font-normal">({items.length})</span>
+                  </button>
+                  {!isCollapsed && items.map(renderConversation)}
                 </div>
               );
             })
@@ -580,76 +714,74 @@ export function ChatPage() {
       </aside>
 
       {/* 2. Main Chat Thread Panel */}
-      <main className="flex-1 flex flex-col bg-white overflow-hidden">
+      <main className="flex-1 min-w-0 min-h-0 flex flex-col bg-white overflow-hidden">
         {/* Chat Header */}
-        <header className="h-14 border-b border-gray-200 px-6 flex items-center justify-between bg-white flex-shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600">
+        <header className="min-h-14 border-b border-gray-200 px-3 sm:px-4 lg:px-6 py-2 flex items-center justify-between gap-2 bg-white flex-shrink-0">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <button
+              type="button"
+              onClick={() => setListOpen((prev) => !prev)}
+              aria-label={listOpen ? "Hide conversations" : "Show conversations"}
+              title={listOpen ? "Hide conversations" : "Show conversations"}
+              className="p-1.5 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition-colors flex-shrink-0"
+            >
+              {listOpen ? <PanelLeftClose className="w-5 h-5" /> : <PanelLeftOpen className="w-5 h-5" />}
+            </button>
+            <div className="hidden sm:flex w-8 h-8 rounded-full bg-blue-50 border border-blue-200 items-center justify-center text-blue-600 flex-shrink-0">
               <Bot className="w-4 h-4" />
             </div>
-            <div>
-              <h2 className="text-sm font-bold text-gray-900 flex items-center gap-2">
-                {conversations.find((c) => c.id === activeConvId)?.title || "Unified Conversational Assistant"}
+            <div className="min-w-0">
+              <h2 className="text-sm font-bold text-gray-900 truncate">
+                {activeConversation ? getDisplayTitle(activeConversation) : "Unified Conversational Assistant"}
               </h2>
-              <p className="text-[11px] text-gray-500">
+              <p className="hidden lg:block text-[11px] text-gray-500 truncate">
                 Grounded Multi-Modal RAG &amp; NL-to-SQL Query Engine
               </p>
             </div>
           </div>
 
           {/* Source Preference Selector */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-500 font-medium hidden sm:inline">Source Engine:</span>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <span className="text-xs text-gray-500 font-medium hidden xl:inline">Source Engine:</span>
             <div className="inline-flex rounded-lg border border-gray-200 p-0.5 bg-gray-50 text-xs">
-              <button
-                type="button"
-                onClick={() => setSourcePreference("auto")}
-                className={`px-2.5 py-1 rounded-md font-medium transition-colors flex items-center gap-1.5 ${
-                  sourcePreference === "auto"
-                    ? "bg-white text-blue-700 shadow-xs border border-gray-200"
-                    : "text-gray-600 hover:text-gray-900"
-                }`}
-              >
-                <Sparkles className="w-3 h-3 text-blue-600" />
-                Auto
-              </button>
-              <button
-                type="button"
-                onClick={() => setSourcePreference("documents")}
-                className={`px-2.5 py-1 rounded-md font-medium transition-colors flex items-center gap-1.5 ${
-                  sourcePreference === "documents"
-                    ? "bg-white text-blue-700 shadow-xs border border-gray-200"
-                    : "text-gray-600 hover:text-gray-900"
-                }`}
-              >
-                <FileText className="w-3 h-3 text-emerald-600" />
-                Knowledge Base (RAG)
-              </button>
-              <button
-                type="button"
-                onClick={() => setSourcePreference("database")}
-                className={`px-2.5 py-1 rounded-md font-medium transition-colors flex items-center gap-1.5 ${
-                  sourcePreference === "database"
-                    ? "bg-white text-blue-700 shadow-xs border border-gray-200"
-                    : "text-gray-600 hover:text-gray-900"
-                }`}
-              >
-                <Database className="w-3 h-3 text-purple-600" />
-                Database (SQL)
-              </button>
+              {SOURCE_OPTIONS.map((opt) => {
+                const Icon = opt.icon;
+                const active = sourcePreference === opt.key;
+                return (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    onClick={() => setSourcePreference(opt.key)}
+                    title={opt.full}
+                    className={`px-2 sm:px-2.5 py-1 rounded-md font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap ${active
+                        ? "bg-white text-blue-700 shadow-xs border border-gray-200"
+                        : "text-gray-600 hover:text-gray-900"
+                      }`}
+                  >
+                    <Icon className={`w-3 h-3 ${opt.iconClass}`} />
+                    <span className="hidden xl:inline">{opt.full}</span>
+                    <span className="xl:hidden">{opt.short}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         </header>
 
         {/* Message Thread Scroll Area */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div
+          ref={scrollRef}
+          className={`flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-6 space-y-5 sm:space-y-6 ${THIN_SCROLL}`}
+        >
           {messages.length === 0 ? (
-            <div className="max-w-2xl mx-auto py-12 text-center space-y-6">
+            <div className="max-w-2xl mx-auto py-6 sm:py-12 text-center space-y-6">
               <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center mx-auto text-white shadow-md">
                 <Sparkles className="w-7 h-7" />
               </div>
               <div className="space-y-2">
-                <h3 className="text-xl font-bold text-gray-900">How can I assist with your data today?</h3>
+                <h3 className="text-lg sm:text-xl font-bold text-gray-900">
+                  How can I assist with your data today?
+                </h3>
                 <p className="text-xs text-gray-500 max-w-md mx-auto">
                   Ask natural language questions across your uploaded PDF documents, knowledge base manuals, or connected SQL databases.
                 </p>
@@ -662,7 +794,7 @@ export function ChatPage() {
                     <button
                       key={idx}
                       onClick={() => {
-                        setSourcePreference(p.pref as any);
+                        setSourcePreference(p.pref as SourcePreference);
                         handleSendMessage(p.text);
                       }}
                       className="p-3.5 rounded-xl border border-gray-200 hover:border-blue-300 hover:bg-blue-50/40 transition-all text-left group bg-white shadow-xs"
@@ -678,42 +810,61 @@ export function ChatPage() {
               </div>
             </div>
           ) : (
-            messages.map((msg) => {
+            messages.map((msg, idx) => {
               const isUser = msg.sender_role === "user";
               const sources = msg.metadata_json?.sources || [];
               const sqlData = msg.metadata_json?.sql_data;
               const routeType = msg.query_type || "rag";
               const isSourcesExpanded = !!expandedSources[msg.id];
 
+              // Long answers collapse (never while that answer is still streaming)
+              const isStreamingThis = isLoading && idx === messages.length - 1 && !isUser;
+              const isLong =
+                !isUser &&
+                !isStreamingThis &&
+                (msg.content.length > LONG_MESSAGE_CHARS ||
+                  msg.content.split("\n").length > LONG_MESSAGE_LINES);
+              const isMsgExpanded = !!expandedMsgs[msg.id];
+              const clampMsg = isLong && !isMsgExpanded;
+
+              // SQL card state
+              const sqlOpen = !!expandedSql[msg.id];
+              const rowsExpanded = !!showAllRows[msg.id];
+              const visibleRows = sqlData
+                ? rowsExpanded
+                  ? sqlData.rows
+                  : sqlData.rows.slice(0, SQL_PREVIEW_ROWS)
+                : [];
+
               return (
                 <div
                   key={msg.id}
-                  className={`flex gap-3 max-w-3xl ${isUser ? "ml-auto flex-row-reverse" : "mr-auto"}`}
+                  className={`flex gap-2 sm:gap-3 w-full max-w-3xl ${isUser ? "ml-auto flex-row-reverse" : "mr-auto"}`}
                 >
                   {/* Avatar */}
                   <div
-                    className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-xs ${
-                      isUser
+                    className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-xs ${isUser
                         ? "bg-blue-600 text-white font-semibold"
                         : "bg-gradient-to-tr from-blue-500 to-indigo-600 text-white shadow-xs"
-                    }`}
+                      }`}
                   >
                     {isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
                   </div>
 
                   {/* Bubble Content */}
-                  <div className={`space-y-3 max-w-[85%] ${isUser ? "items-end" : "items-start"}`}>
+                  <div
+                    className={`min-w-0 space-y-3 max-w-[88%] sm:max-w-[85%] ${isUser ? "items-end" : "items-start"}`}
+                  >
                     <div
-                      className={`p-4 rounded-2xl text-xs leading-relaxed ${
-                        isUser
+                      className={`p-3 sm:p-4 rounded-2xl text-xs leading-relaxed ${isUser
                           ? "bg-blue-600 text-white rounded-tr-xs"
                           : "bg-gray-50 border border-gray-200 text-gray-800 rounded-tl-xs shadow-xs"
-                      }`}
+                        }`}
                     >
                       {/* Engine Tag for Assistant */}
                       {!isUser && (
                         <div className="flex items-center justify-between gap-2 mb-2 pb-2 border-b border-gray-200">
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 flex-wrap min-w-0">
                             {routeType === "rag" && (
                               <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px]">
                                 <FileText className="w-2.5 h-2.5 mr-1" />
@@ -741,7 +892,7 @@ export function ChatPage() {
                           </div>
                           <button
                             onClick={() => copyToClipboard(msg.content)}
-                            className="text-gray-400 hover:text-gray-600 p-1 rounded transition-colors"
+                            className="text-gray-400 hover:text-gray-600 p-1 rounded transition-colors flex-shrink-0"
                             title="Copy response"
                           >
                             <Copy className="w-3 h-3" />
@@ -750,7 +901,7 @@ export function ChatPage() {
                       )}
 
                       {/* Natural Language Message Body */}
-                      <div className="whitespace-pre-wrap">
+                      <div className={`whitespace-pre-wrap break-words ${clampMsg ? "line-clamp-6" : ""}`}>
                         {msg.content || (!isUser && isLoading ? (
                           <span className="inline-flex items-center gap-1.5 text-gray-400 py-1">
                             <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
@@ -761,6 +912,24 @@ export function ChatPage() {
                         ) : null)}
                       </div>
 
+                      {isLong && (
+                        <button
+                          type="button"
+                          onClick={() => toggleMap(setExpandedMsgs, msg.id)}
+                          className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-blue-600 hover:text-blue-800"
+                        >
+                          {isMsgExpanded ? (
+                            <>
+                              Show less <ChevronUp className="w-3 h-3" />
+                            </>
+                          ) : (
+                            <>
+                              Show more <ChevronDown className="w-3 h-3" />
+                            </>
+                          )}
+                        </button>
+                      )}
+
                       {/* Hallucination / Low Grounding Disclaimer */}
                       {msg.metadata_json?.grounding?.disclaimer && (
                         <div className="mt-2.5 p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-[11px] flex items-start gap-2">
@@ -770,52 +939,90 @@ export function ChatPage() {
                       )}
                     </div>
 
-                    {/* SQL Execution Card (if present) */}
+                    {/* SQL Execution Card (collapsed by default) */}
                     {sqlData && sqlData.status === "success" && (
                       <div className="bg-white border border-purple-200 rounded-xl p-3 shadow-xs space-y-2 text-xs">
-                        <div className="flex items-center justify-between border-b border-gray-100 pb-2">
-                          <div className="flex items-center gap-1.5 font-semibold text-purple-900">
-                            <TableIcon className="w-3.5 h-3.5 text-purple-600" />
-                            <span>Executed SQL ({sqlData.row_count} rows • {sqlData.execution_time_ms}ms)</span>
+                        <div
+                          onClick={() => toggleMap(setExpandedSql, msg.id)}
+                          className="flex items-center justify-between gap-2 cursor-pointer select-none"
+                        >
+                          <div className="flex items-center gap-1.5 font-semibold text-purple-900 min-w-0">
+                            {sqlOpen ? (
+                              <ChevronDown className="w-3.5 h-3.5 text-purple-600 flex-shrink-0" />
+                            ) : (
+                              <ChevronRight className="w-3.5 h-3.5 text-purple-600 flex-shrink-0" />
+                            )}
+                            <TableIcon className="w-3.5 h-3.5 text-purple-600 flex-shrink-0" />
+                            <span className="truncate">
+                              Executed SQL ({sqlData.row_count} rows • {sqlData.execution_time_ms}ms)
+                            </span>
                           </div>
                           <button
-                            onClick={() => copyToClipboard(sqlData.generated_sql)}
-                            className="text-xs text-purple-600 hover:text-purple-800 flex items-center gap-1 font-medium"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              copyToClipboard(sqlData.generated_sql);
+                            }}
+                            className="text-xs text-purple-600 hover:text-purple-800 flex items-center gap-1 font-medium flex-shrink-0"
                           >
                             <Copy className="w-3 h-3" />
-                            Copy SQL
+                            <span className="hidden sm:inline">Copy SQL</span>
                           </button>
                         </div>
 
-                        <pre className="p-2.5 rounded-lg bg-gray-900 text-gray-100 font-mono text-[11px] overflow-x-auto">
-                          {sqlData.generated_sql}
-                        </pre>
+                        {sqlOpen && (
+                          <div className="space-y-2 pt-2 border-t border-gray-100">
+                            <pre className={`p-2.5 rounded-lg bg-gray-900 text-gray-100 font-mono text-[11px] overflow-x-auto ${THIN_SCROLL}`}>
+                              {sqlData.generated_sql}
+                            </pre>
 
-                        {/* Interactive Data Table Preview */}
-                        {sqlData.rows.length > 0 && (
-                          <div className="overflow-x-auto max-h-56 border border-gray-200 rounded-lg">
-                            <table className="w-full text-left text-[11px] border-collapse">
-                              <thead className="bg-gray-50 border-b border-gray-200 text-gray-700 font-semibold sticky top-0">
-                                <tr>
-                                  {sqlData.columns.map((col, cIdx) => (
-                                    <th key={cIdx} className="p-2 border-r border-gray-200 last:border-r-0 whitespace-nowrap">
-                                      {col}
-                                    </th>
-                                  ))}
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-gray-100">
-                                {sqlData.rows.slice(0, 15).map((row, rIdx) => (
-                                  <tr key={rIdx} className="hover:bg-gray-50/80">
-                                    {sqlData.columns.map((col, cIdx) => (
-                                      <td key={cIdx} className="p-2 border-r border-gray-100 last:border-r-0 text-gray-600 whitespace-nowrap">
-                                        {row[col] !== null ? String(row[col]) : <span className="text-gray-300">NULL</span>}
-                                      </td>
-                                    ))}
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
+                            {/* Interactive Data Table Preview */}
+                            {sqlData.rows.length > 0 && (
+                              <>
+                                <div
+                                  className={`overflow-auto max-h-56 border border-gray-200 rounded-lg ${THIN_SCROLL}`}
+                                >
+                                  <table className="w-full text-left text-[11px] border-collapse">
+                                    <thead className="bg-gray-50 border-b border-gray-200 text-gray-700 font-semibold sticky top-0">
+                                      <tr>
+                                        {sqlData.columns.map((col, cIdx) => (
+                                          <th
+                                            key={cIdx}
+                                            className="p-2 border-r border-gray-200 last:border-r-0 whitespace-nowrap"
+                                          >
+                                            {col}
+                                          </th>
+                                        ))}
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100">
+                                      {visibleRows.map((row, rIdx) => (
+                                        <tr key={rIdx} className="hover:bg-gray-50/80">
+                                          {sqlData.columns.map((col, cIdx) => (
+                                            <td
+                                              key={cIdx}
+                                              className="p-2 border-r border-gray-100 last:border-r-0 text-gray-600 whitespace-nowrap"
+                                            >
+                                              {row[col] !== null ? String(row[col]) : <span className="text-gray-300">NULL</span>}
+                                            </td>
+                                          ))}
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                                {sqlData.rows.length > SQL_PREVIEW_ROWS && (
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleMap(setShowAllRows, msg.id)}
+                                    className="text-[11px] font-medium text-purple-600 hover:text-purple-800"
+                                  >
+                                    {rowsExpanded
+                                      ? "Show fewer rows"
+                                      : `Show all ${sqlData.rows.length} rows`}
+                                  </button>
+                                )}
+                              </>
+                            )}
                           </div>
                         )}
                       </div>
@@ -825,29 +1032,30 @@ export function ChatPage() {
                     {sources.length > 0 && (
                       <div className="bg-white border border-gray-200 rounded-xl p-3 shadow-xs space-y-2">
                         <div
-                          onClick={() => toggleSourceExpand(msg.id)}
-                          className="flex items-center justify-between cursor-pointer text-xs font-semibold text-gray-700 hover:text-blue-600 transition-colors select-none"
+                          onClick={() => toggleMap(setExpandedSources, msg.id)}
+                          className="flex items-center justify-between gap-2 cursor-pointer text-xs font-semibold text-gray-700 hover:text-blue-600 transition-colors select-none"
                         >
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <FileText className="w-3.5 h-3.5 text-blue-600" />
-                            <span>Grounding Sources ({sources.length} Citation{sources.length > 1 ? "s" : ""})</span>
+                            <span>
+                              Grounding Sources ({sources.length} Citation{sources.length > 1 ? "s" : ""})
+                            </span>
                             {msg.metadata_json?.grounding?.confidence !== undefined && (
                               <Badge
                                 variant="outline"
-                                className={`text-[9px] px-1.5 py-0 h-4 ${
-                                  msg.metadata_json.grounding.has_low_confidence
+                                className={`text-[9px] px-1.5 py-0 h-4 ${msg.metadata_json.grounding.has_low_confidence
                                     ? "bg-amber-50 text-amber-700 border-amber-200"
                                     : "bg-emerald-50 text-emerald-700 border-emerald-200"
-                                }`}
+                                  }`}
                               >
                                 {msg.metadata_json.grounding.has_low_confidence ? "Low Grounding" : "Verified Grounding"} ({Math.round(msg.metadata_json.grounding.confidence * 100)}%)
                               </Badge>
                             )}
                           </div>
                           {isSourcesExpanded ? (
-                            <ChevronUp className="w-3.5 h-3.5 text-gray-400" />
+                            <ChevronUp className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
                           ) : (
-                            <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+                            <ChevronDown className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
                           )}
                         </div>
 
@@ -858,11 +1066,11 @@ export function ChatPage() {
                               <div
                                 key={sIdx}
                                 onClick={() => setSelectedCitation(src)}
-                                className="p-2.5 rounded-lg border border-gray-200 hover:border-blue-400 bg-gray-50/50 hover:bg-blue-50/30 cursor-pointer transition-all space-y-1 text-left"
+                                className="p-2.5 rounded-lg border border-gray-200 hover:border-blue-400 bg-gray-50/50 hover:bg-blue-50/30 cursor-pointer transition-all space-y-1 text-left min-w-0"
                               >
-                                <div className="flex items-center justify-between text-[11px] font-semibold text-gray-800">
-                                  <span className="truncate max-w-[140px]">{src.document_name}</span>
-                                  <div className="flex items-center gap-1">
+                                <div className="flex items-center justify-between gap-2 text-[11px] font-semibold text-gray-800">
+                                  <span className="truncate min-w-0">{src.document_name}</span>
+                                  <div className="flex items-center gap-1 flex-shrink-0">
                                     {src.page_number && (
                                       <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-4">
                                         p. {src.page_number}
@@ -871,11 +1079,10 @@ export function ChatPage() {
                                     {(src.score !== undefined || src.grounding_score !== undefined) && (
                                       <Badge
                                         variant="outline"
-                                        className={`text-[9px] px-1.5 py-0 h-4 ${
-                                          (src.grounding_score ?? src.score ?? 0) >= 0.65
+                                        className={`text-[9px] px-1.5 py-0 h-4 ${(src.grounding_score ?? src.score ?? 0) >= 0.65
                                             ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                                             : "bg-gray-100 text-gray-600 border-gray-200"
-                                        }`}
+                                          }`}
                                       >
                                         {Math.round((src.grounding_score ?? src.score ?? 0) * 100)}%
                                       </Badge>
@@ -904,7 +1111,7 @@ export function ChatPage() {
           {/* Loading Typing Indicator */}
           {isLoading && (
             <div className="flex gap-3 max-w-2xl mr-auto items-center">
-              <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-500 to-indigo-600 text-white flex items-center justify-center shadow-xs">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-500 to-indigo-600 text-white flex items-center justify-center shadow-xs flex-shrink-0">
                 <Bot className="w-4 h-4 animate-spin" />
               </div>
               <div className="p-3.5 rounded-2xl bg-gray-50 border border-gray-200 rounded-tl-xs shadow-xs flex items-center gap-2">
@@ -913,12 +1120,10 @@ export function ChatPage() {
               </div>
             </div>
           )}
-
-          <div ref={messagesEndRef} />
         </div>
 
         {/* 3. Bottom Chat Input Box */}
-        <div className="p-4 border-t border-gray-200 bg-white flex-shrink-0">
+        <div className="p-3 sm:p-4 border-t border-gray-200 bg-white flex-shrink-0">
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -929,9 +1134,9 @@ export function ChatPage() {
             <Input
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              placeholder="Ask anything about your documents or databases... (Press Enter to send)"
+              placeholder="Ask anything about your documents or databases..."
               disabled={isLoading}
-              className="pr-12 py-3 h-12 rounded-xl text-xs bg-gray-50 border-gray-200 focus:bg-white shadow-xs"
+              className="pr-24 sm:pr-12 py-3 h-12 rounded-xl text-xs bg-gray-50 border-gray-200 focus:bg-white shadow-xs"
             />
             {isLoading ? (
               <Button
@@ -955,7 +1160,7 @@ export function ChatPage() {
               </Button>
             )}
           </form>
-          <div className="text-center mt-2">
+          <div className="hidden sm:block text-center mt-2">
             <span className="text-[10px] text-gray-400">
               Answers are generated with Google Gemini 2.5 Flash grounded on your tenant's indexed data.
             </span>
@@ -978,10 +1183,10 @@ export function ChatPage() {
 
           {selectedCitation && (
             <div className="space-y-3 pt-2 text-xs">
-              <div className="grid grid-cols-2 gap-2 p-2.5 rounded-lg bg-gray-50 border border-gray-200 text-[11px]">
-                <div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-2.5 rounded-lg bg-gray-50 border border-gray-200 text-[11px]">
+                <div className="min-w-0">
                   <span className="text-gray-500">Document:</span>
-                  <p className="font-semibold text-gray-800">{selectedCitation.document_name}</p>
+                  <p className="font-semibold text-gray-800 break-words">{selectedCitation.document_name}</p>
                 </div>
                 <div>
                   <span className="text-gray-500">Page Number:</span>
@@ -1001,17 +1206,15 @@ export function ChatPage() {
 
               <div>
                 <span className="text-gray-500 block mb-1 font-medium">Extracted Text Content:</span>
-                <div className="p-3 bg-gray-900 text-gray-100 rounded-lg max-h-60 overflow-y-auto font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
+                <div
+                  className={`p-3 bg-gray-900 text-gray-100 rounded-lg max-h-60 overflow-y-auto font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words ${THIN_SCROLL}`}
+                >
                   {selectedCitation.snippet}
                 </div>
               </div>
 
               <div className="flex justify-end pt-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setSelectedCitation(null)}
-                >
+                <Button size="sm" variant="outline" onClick={() => setSelectedCitation(null)}>
                   Close
                 </Button>
               </div>
