@@ -132,25 +132,27 @@ export function LoginPage() {
               </div>
             </div>
 
-            {/* Quick Demo Superadmin Button */}
-            <div className="mb-4 p-3 bg-blue-50/80 border border-blue-200 rounded-xl flex items-center justify-between gap-2">
-              <div className="text-left">
-                <div className="text-xs font-semibold text-blue-900 flex items-center gap-1.5">
-                  <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
-                  Default Admin User
+            {/* Quick Demo Superadmin Button (Development Mode Only) */}
+            {import.meta.env.DEV && (
+              <div className="mb-4 p-3 bg-blue-50/80 border border-blue-200 rounded-xl flex items-center justify-between gap-2">
+                <div className="text-left">
+                  <div className="text-xs font-semibold text-blue-900 flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
+                    Default Admin User
+                  </div>
+                  <div className="text-[11px] text-blue-700">admin@dataspeak.ai</div>
                 </div>
-                <div className="text-[11px] text-blue-700">admin@dataspeak.ai</div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={fillAdminCredentials}
+                  className="h-7 text-xs bg-white hover:bg-blue-100 border-blue-300 text-blue-700 font-medium"
+                >
+                  Auto-fill
+                </Button>
               </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={fillAdminCredentials}
-                className="h-7 text-xs bg-white hover:bg-blue-100 border-blue-300 text-blue-700 font-medium"
-              >
-                Auto-fill
-              </Button>
-            </div>
+            )}
 
             <form className="space-y-4" onSubmit={handleLogin}>
               {error && <div className="text-red-500 text-sm text-center">{error}</div>}

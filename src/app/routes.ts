@@ -70,6 +70,10 @@ export const router = createBrowserRouter([
         Component: KnowledgeBasePage,
       },
       {
+        path: "knowledge",
+        Component: KnowledgeBasePage,
+      },
+      {
         path: "upload-documents",
         Component: UploadDocumentsPage,
       },
@@ -95,6 +99,10 @@ export const router = createBrowserRouter([
       },
       {
         path: "chatbot",
+        Component: ChatbotWidgetPage,
+      },
+      {
+        path: "widget",
         Component: ChatbotWidgetPage,
       },
       {

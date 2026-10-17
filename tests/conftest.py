@@ -46,9 +46,18 @@ from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 from fastapi.testclient import TestClient
 
-import models
-from database import Base, get_db
+from database import Base, get_db, engine as global_db_engine
+from scripts.seed_admin import seed_superadmin
 from fixtures.nr0.synthetic_data import build_nr0_synthetic_scenario
+
+
+@pytest.fixture(scope="session", autouse=True)
+def setup_global_test_db():
+    """Initializes in-memory database schema and seeds initial dev superadmin for tests."""
+    Base.metadata.create_all(bind=global_db_engine)
+    seed_superadmin()
+    yield
+
 
 
 @pytest.fixture(scope="function")

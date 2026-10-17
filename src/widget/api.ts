@@ -14,6 +14,7 @@ export interface SessionData {
   expiresAt: number;
   tenantId: number;
   conversationId: number;
+  continuityToken?: string;
 }
 
 export interface SourceCitation {
@@ -63,12 +64,25 @@ export function clearStoredSession(publicKey: string): void {
 }
 
 /**
+ * Returns true if the session is nearing its expiration.
+ * Default threshold is 10 minutes (600,000 ms), representing the 50-minute mark of a 60-minute token.
+ */
+export function isSessionNearingExpiry(
+  session: SessionData,
+  thresholdMs: number = 10 * 60 * 1000
+): boolean {
+  return Date.now() > session.expiresAt - thresholdMs;
+}
+
+/**
  * Performs public handshake to obtain a short-lived HMAC session token.
+ * If resuming, passes conversation_id and continuity_token to prove visitor ownership.
  */
 export async function createWidgetSession(
   apiBase: string,
   publicKey: string,
-  conversationId?: number
+  conversationId?: number,
+  continuityToken?: string
 ): Promise<SessionData> {
   const url = `${apiBase.replace(/\/+$/, '')}/api/widget/session`;
   const res = await fetch(url, {
@@ -79,6 +93,7 @@ export async function createWidgetSession(
     body: JSON.stringify({
       public_key: publicKey,
       conversation_id: conversationId,
+      continuity_token: continuityToken,
     }),
   });
 
@@ -99,10 +114,44 @@ export async function createWidgetSession(
     expiresAt: Date.now() + data.expires_in * 1000,
     tenantId: data.tenant_id,
     conversationId: data.conversation_id,
+    continuityToken: data.continuity_token,
   };
 
   saveStoredSession(publicKey, sessionData);
   return sessionData;
+}
+
+/**
+ * Ensures an active session, proactively renewing at the 50-minute mark before 60-minute HMAC expiration.
+ */
+export async function ensureActiveWidgetSession(
+  apiBase: string,
+  publicKey: string,
+  existingSession?: SessionData | null
+): Promise<SessionData> {
+  const current = existingSession || getStoredSession(publicKey);
+  if (!current) {
+    return await createWidgetSession(apiBase, publicKey);
+  }
+
+  if (isSessionNearingExpiry(current)) {
+    try {
+      return await createWidgetSession(
+        apiBase,
+        publicKey,
+        current.conversationId,
+        current.continuityToken
+      );
+    } catch (err) {
+      console.warn('[Widget] Proactive session renewal failed, attempting existing session:', err);
+      if (Date.now() < current.expiresAt - 30000) {
+        return current;
+      }
+      return await createWidgetSession(apiBase, publicKey);
+    }
+  }
+
+  return current;
 }
 
 /**

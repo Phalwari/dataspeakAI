@@ -79,10 +79,10 @@ def apply_migration(database_url: str) -> int:
         if report["alembic_revision"] == "none":
             logger.info("[MIGRATE] Current 46-table schema detected without revision tracking. Stamping 001_initial_baseline.")
             command.stamp(alembic_cfg, "001_initial_baseline")
-            logger.info("[MIGRATE] Schema successfully stamped into version control.")
+            logger.info("[MIGRATE] Schema successfully stamped into version control. Upgrading to head.")
         else:
             logger.info(f"[MIGRATE] Schema already under revision control (rev: {report['alembic_revision']}). Running upgrade head.")
-            command.upgrade(alembic_cfg, "head")
+        command.upgrade(alembic_cfg, "head")
         return 0
 
     # Path 4: Known Legacy Database -> Upgrade columns then stamp
@@ -97,8 +97,9 @@ def apply_migration(database_url: str) -> int:
         finally:
             eng.dispose()
             
-        logger.info("[MIGRATE] Transitional sync complete. Stamping baseline revision.")
+        logger.info("[MIGRATE] Transitional sync complete. Stamping baseline revision and upgrading to head.")
         command.stamp(alembic_cfg, "001_initial_baseline")
+        command.upgrade(alembic_cfg, "head")
         logger.info("[MIGRATE] Legacy database successfully upgraded and brought into version control.")
         return 0
 

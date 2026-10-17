@@ -6,6 +6,8 @@ import {
   SourceCitation,
   getStoredSession,
   createWidgetSession,
+  ensureActiveWidgetSession,
+  isSessionNearingExpiry,
   clearStoredSession,
   streamWidgetChat,
 } from '../api';
@@ -63,6 +65,26 @@ export function WidgetApp({ initialConfig }: WidgetAppProps): ComponentChild {
       },
     ]);
   }, [config.publicKey]);
+
+  // Proactively renew session every 5 minutes if nearing 60-min expiry (at 50 min mark)
+  useEffect(() => {
+    const checkRenewal = async () => {
+      if (session && isSessionNearingExpiry(session)) {
+        try {
+          const renewed = await ensureActiveWidgetSession(
+            config.apiBase,
+            config.publicKey,
+            session
+          );
+          setSession(renewed);
+        } catch {
+          // Gracefully try again on next check
+        }
+      }
+    };
+    const interval = setInterval(checkRenewal, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [config.apiBase, config.publicKey, session]);
 
   // Auto-scroll when messages change or stream updates
   useEffect(() => {
@@ -164,16 +186,13 @@ export function WidgetApp({ initialConfig }: WidgetAppProps): ComponentChild {
     abortControllerRef.current = abortCtrl;
 
     try {
-      // 2. Ensure valid session token
-      let currentSession = session;
-      if (!currentSession || Date.now() > currentSession.expiresAt - 60000) {
-        currentSession = await createWidgetSession(
-          config.apiBase,
-          config.publicKey,
-          currentSession?.conversationId
-        );
-        setSession(currentSession);
-      }
+      // 2. Ensure valid session token (proactively renews at 50 min mark before 60 min expiry)
+      const currentSession = await ensureActiveWidgetSession(
+        config.apiBase,
+        config.publicKey,
+        session
+      );
+      setSession(currentSession);
 
       // 3. Stream assistant response
       await streamWidgetChat(

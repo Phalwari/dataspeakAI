@@ -42,10 +42,6 @@ def test_probe_i01_control_tenant_admin_own_tenant_access(nr0_scenario, isolated
     assert tenant_record.name == "Acme Corp"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Issue I-01: Tenant admin can list all platform tenants via /api/admin/tenants; owned by NR-1.1-A"
-)
 def test_probe_i01_tenant_admin_cannot_list_all_platform_tenants(nr0_scenario, isolated_db: Session):
     """
     Defect Assertion: Calling global get_admin_tenants with a Tenant Admin user
@@ -63,6 +59,18 @@ def test_probe_i01_tenant_admin_cannot_list_all_platform_tenants(nr0_scenario, i
         f"Security Breach (I-01): Tenant Admin of Tenant {t1.id} received Tenant {t2.id} data!"
     )
     assert t1.id in returned_tenant_ids
+
+
+def test_probe_i01_platform_superadmin_can_list_all_tenants(nr0_scenario, isolated_db: Session):
+    """Platform superadmin with is_platform_admin=True can view all platform tenants."""
+    superadmin = nr0_scenario["users"]["u0_superadmin"]
+    t1 = nr0_scenario["tenants"]["t1"]
+    t2 = nr0_scenario["tenants"]["t2"]
+
+    result = get_admin_tenants(current_user=superadmin, db=isolated_db)
+    returned_tenant_ids = [t["id"] for t in result]
+    assert t1.id in returned_tenant_ids
+    assert t2.id in returned_tenant_ids
 
 
 # ===========================================================================
@@ -83,10 +91,6 @@ def test_probe_i02_control_widget_generates_visitor_conversation(isolated_app, n
     assert data["conversation_id"] is not None
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Issue I-02: Widget session allows adopting private dashboard chat; owned by NR-1.1-B"
-)
 def test_probe_i02_widget_cannot_adopt_private_dashboard_conversation(isolated_app, nr0_scenario):
     """
     Defect Assertion: Passing a private dashboard conversation ID to widget handshake

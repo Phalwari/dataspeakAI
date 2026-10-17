@@ -52,12 +52,24 @@ def build_nr0_synthetic_scenario(db: Session) -> Dict[str, Any]:
     db.flush()
     
     # 2. Users for Tenant 1
+    u0_superadmin = models.User(
+        id=99,
+        email="superadmin@dataspeak.ai",
+        full_name="Platform Superadmin",
+        hashed_password=get_password_hash("SuperAdminPassword123!"),
+        role="Admin",
+        is_platform_admin=True,
+        is_active=True,
+        is_verified=True,
+        tenant_id=None
+    )
     u1_admin = models.User(
         id=1,
         email="admin@acme.com",
         full_name="Acme Admin",
         hashed_password=get_password_hash("AcmePassword123!"),
         role="Admin",
+        is_platform_admin=False,
         is_active=True,
         is_verified=True,
         tenant_id=t1.id
@@ -68,6 +80,7 @@ def build_nr0_synthetic_scenario(db: Session) -> Dict[str, Any]:
         full_name="Acme Analyst",
         hashed_password=get_password_hash("AnalystPassword123!"),
         role="Developer",
+        is_platform_admin=False,
         is_active=True,
         is_verified=True,
         tenant_id=t1.id
@@ -78,6 +91,7 @@ def build_nr0_synthetic_scenario(db: Session) -> Dict[str, Any]:
         full_name="Acme Inactive",
         hashed_password=get_password_hash("InactivePassword123!"),
         role="Business Owner",
+        is_platform_admin=False,
         is_active=False,
         is_verified=True,
         tenant_id=t1.id
@@ -88,6 +102,7 @@ def build_nr0_synthetic_scenario(db: Session) -> Dict[str, Any]:
         full_name="Acme Unverified",
         hashed_password=get_password_hash("UnverifiedPassword123!"),
         role="Developer",
+        is_platform_admin=False,
         is_active=True,
         is_verified=False,
         tenant_id=t1.id
@@ -100,6 +115,7 @@ def build_nr0_synthetic_scenario(db: Session) -> Dict[str, Any]:
         full_name="Globex Admin",
         hashed_password=get_password_hash("GlobexPassword123!"),
         role="Admin",
+        is_platform_admin=False,
         is_active=True,
         is_verified=True,
         tenant_id=t2.id
@@ -110,11 +126,12 @@ def build_nr0_synthetic_scenario(db: Session) -> Dict[str, Any]:
         full_name="Globex Member",
         hashed_password=get_password_hash("MemberPassword123!"),
         role="Developer",
+        is_platform_admin=False,
         is_active=True,
         is_verified=True,
         tenant_id=t2.id
     )
-    db.add_all([u1_admin, u2_analyst, u3_inactive, u4_unverified, u5_globex_admin, u6_globex_member])
+    db.add_all([u0_superadmin, u1_admin, u2_analyst, u3_inactive, u4_unverified, u5_globex_admin, u6_globex_member])
     db.flush()
     
     # 3. Conversations
@@ -289,6 +306,7 @@ def build_nr0_synthetic_scenario(db: Session) -> Dict[str, Any]:
     return {
         "tenants": {"t1": t1, "t2": t2},
         "users": {
+            "u0_superadmin": u0_superadmin,
             "u1_admin": u1_admin,
             "u2_analyst": u2_analyst,
             "u3_inactive": u3_inactive,

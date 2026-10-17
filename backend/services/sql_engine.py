@@ -151,24 +151,35 @@ def sync_database_catalog(db_conn: models.DatabaseConnection, db_session) -> Opt
         return None
 
 
-def get_db_schema_context(db_conn: models.DatabaseConnection, db_session=None) -> str:
+def get_db_schema_context(
+    db_conn: models.DatabaseConnection,
+    db_session=None,
+    allowed_tables: Optional[List[str]] = None
+) -> str:
     """
     Introspects the connected database schema and formats tables, columns,
     data types, primary keys, and foreign keys into a clean text prompt context.
     Checks persistent catalog cache (DatabaseSchema) if db_session is provided.
+    Filters tables strictly to allowed_tables if specified (NR-1.1-B-T07).
     """
+    allowed_set = {t.lower().strip() for t in allowed_tables} if allowed_tables else None
+
     if db_session:
         cached_schema = db_session.query(models.DatabaseSchema).filter(
             models.DatabaseSchema.connection_id == db_conn.id
         ).first()
         if cached_schema and cached_schema.tables:
+            tables_to_format = [
+                tbl for tbl in cached_schema.tables
+                if not allowed_set or tbl.table_name.lower().strip() in allowed_set
+            ]
             schema_lines = [
                 f"Database Name: {db_conn.database}",
                 f"Database Type: {db_conn.db_type}",
-                f"Total Tables: {len(cached_schema.tables)}",
+                f"Total Tables: {len(tables_to_format)}",
                 "--- SCHEMA DETAILS (PERSISTENT CATALOG) ---"
             ]
-            for tbl in cached_schema.tables:
+            for tbl in tables_to_format:
                 schema_lines.append(f"\nTable: {tbl.table_name}")
                 for col in tbl.columns:
                     flags = []
@@ -189,6 +200,8 @@ def get_db_schema_context(db_conn: models.DatabaseConnection, db_session=None) -
             engine = create_engine(connection_url, poolclass=NullPool)
             inspector = inspect(engine)
             table_names = inspector.get_table_names()
+            if allowed_set:
+                table_names = [t for t in table_names if t.lower().strip() in allowed_set]
             
             schema_lines = [
                 f"Database Name: {db_conn.database}",
@@ -239,30 +252,40 @@ def get_db_schema_context(db_conn: models.DatabaseConnection, db_session=None) -
             print(f"Database introspection warning for {db_conn.name}: {err}")
 
     # Fallback simulated schema for demo / non-relational / unreachable DBs
-    return (
-        f"Database Name: {db_conn.database}\n"
-        f"Database Type: {db_conn.db_type}\n"
-        "--- SIMULATED SCHEMA DETAILS ---\n"
-        "\nTable: users\n"
-        "  - id (INTEGER) [PRIMARY KEY]\n"
-        "  - email (VARCHAR)\n"
-        "  - full_name (VARCHAR)\n"
-        "  - role (VARCHAR)\n"
-        "  - is_active (BOOLEAN)\n"
-        "  - created_at (TIMESTAMP)\n"
-        "\nTable: orders\n"
-        "  - id (INTEGER) [PRIMARY KEY]\n"
-        "  - user_id (INTEGER) [FOREIGN KEY -> users.id]\n"
-        "  - total_amount (DECIMAL)\n"
-        "  - status (VARCHAR)\n"
-        "  - created_at (TIMESTAMP)\n"
-        "\nTable: products\n"
-        "  - id (INTEGER) [PRIMARY KEY]\n"
-        "  - name (VARCHAR)\n"
-        "  - category (VARCHAR)\n"
-        "  - price (DECIMAL)\n"
-        "  - stock_quantity (INTEGER)\n"
-    )
+    simulated_tables = {
+        "users": [
+            "  - id (INTEGER) [PRIMARY KEY]",
+            "  - email (VARCHAR)",
+            "  - full_name (VARCHAR)",
+            "  - role (VARCHAR)",
+            "  - is_active (BOOLEAN)",
+            "  - created_at (TIMESTAMP)"
+        ],
+        "orders": [
+            "  - id (INTEGER) [PRIMARY KEY]",
+            "  - user_id (INTEGER) [FOREIGN KEY -> users.id]",
+            "  - total_amount (DECIMAL)",
+            "  - status (VARCHAR)",
+            "  - created_at (TIMESTAMP)"
+        ],
+        "products": [
+            "  - id (INTEGER) [PRIMARY KEY]",
+            "  - name (VARCHAR)",
+            "  - category (VARCHAR)",
+            "  - price (DECIMAL)",
+            "  - stock_quantity (INTEGER)"
+        ]
+    }
+    schema_lines = [
+        f"Database Name: {db_conn.database}",
+        f"Database Type: {db_conn.db_type}",
+        "--- SIMULATED SCHEMA DETAILS ---"
+    ]
+    for tbl_name, cols in simulated_tables.items():
+        if not allowed_set or tbl_name.lower().strip() in allowed_set:
+            schema_lines.append(f"\nTable: {tbl_name}")
+            schema_lines.extend(cols)
+    return "\n".join(schema_lines)
 
 
 def validate_read_only_sql(sql_query: str) -> Tuple[bool, str]:
@@ -412,10 +435,17 @@ def validate_widget_sql(sql_query: str, allowed_tables: Optional[List[str]] = No
     return True, ""
 
 
-def generate_sql_from_nl(db_conn: models.DatabaseConnection, user_question: str, db_session=None, tenant_id: Optional[int] = None) -> Dict[str, Any]:
+def generate_sql_from_nl(
+    db_conn: models.DatabaseConnection,
+    user_question: str,
+    db_session=None,
+    tenant_id: Optional[int] = None,
+    allowed_tables: Optional[List[str]] = None
+) -> Dict[str, Any]:
     """
     Uses SQLAgent (with AST schema validation, SAVEPOINT rollback dry-runs,
     and automatic in-flight retry loop) to generate a verified, read-only SQL query.
+    Enforces allowed_tables restriction if provided (NR-1.1-B-T07).
     """
     try:
         from services.sql_agent import sql_agent
@@ -423,13 +453,16 @@ def generate_sql_from_nl(db_conn: models.DatabaseConnection, user_question: str,
             db_conn=db_conn,
             user_question=user_question,
             db_session=db_session,
-            tenant_id=tenant_id
+            tenant_id=tenant_id,
+            allowed_tables=allowed_tables
         )
     except Exception as agent_err:
         logger.error(f"[SQL Engine] SQLAgent run failed, using standard fallback: {agent_err}")
-        schema_ctx = get_db_schema_context(db_conn, db_session)
+        schema_ctx = get_db_schema_context(db_conn, db_session, allowed_tables=allowed_tables)
         fallback_table = "users"
-        if "Table: " in schema_ctx:
+        if allowed_tables:
+            fallback_table = allowed_tables[0]
+        elif "Table: " in schema_ctx:
             tables = re.findall(r'Table:\s*(\w+)', schema_ctx)
             if tables:
                 fallback_table = tables[0]

@@ -80,8 +80,36 @@ class UserCreate(UserBase):
 
 class InviteCreate(BaseModel):
     email: EmailStr
-    role: str = "Team Member"
+    role: str = "Viewer"
     database_ids: Optional[list[int]] = None
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def validate_role(cls, v):
+        if not v:
+            return "Viewer"
+        valid_roles = {"Admin", "Developer", "Business Owner", "Viewer"}
+        if v == "Team Member":
+            return "Viewer"
+        if v not in valid_roles:
+            raise ValueError(f"Invalid role '{v}'. Allowed roles: {sorted(list(valid_roles))}")
+        return v
+
+class TenantMemberUpdate(BaseModel):
+    role: Optional[str] = None
+    database_ids: Optional[list[int]] = None
+    is_active: Optional[bool] = None
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def validate_role(cls, v):
+        if v is not None:
+            valid_roles = {"Admin", "Developer", "Business Owner", "Viewer"}
+            if v == "Team Member":
+                return "Viewer"
+            if v not in valid_roles:
+                raise ValueError(f"Invalid role '{v}'. Allowed roles: {sorted(list(valid_roles))}")
+        return v
 
 class InviteResponse(BaseModel):
     invite_link: str
@@ -98,6 +126,8 @@ class UserChangePassword(BaseModel):
 class UserResponse(UserBase):
     id: int
     role: str
+    is_platform_admin: bool = False
+    token_version: int = 1
     is_active: bool
     is_verified: bool
     tenant_id: Optional[int] = None
@@ -274,15 +304,27 @@ class WidgetKeyRotateResponse(BaseModel):
     previous_key_expires_at: Optional[datetime] = None
     message: str
 
+class WidgetKeyDocumentAssignRequest(BaseModel):
+    document_ids: Optional[List[int]] = None
+    document_id: Optional[int] = None
+
+class WidgetKeyDocumentResponse(BaseModel):
+    widget_key_id: int
+    published_document_ids: List[int]
+
 class WidgetSessionRequest(BaseModel):
     public_key: str
     conversation_id: Optional[int] = None
+    visitor_id: Optional[str] = None
+    continuity_token: Optional[str] = None
 
 class WidgetSessionResponse(BaseModel):
     session_token: str
     expires_in: int
     tenant_id: int
     conversation_id: int
+    visitor_id: Optional[str] = None
+    continuity_token: Optional[str] = None
 
 class ChatbotConfigBase(BaseModel):
     theme_color: str
@@ -473,6 +515,19 @@ class MessageResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class ConversationShareRequest(BaseModel):
+    user_id: int
+
+class ConversationShareResponse(BaseModel):
+    id: int
+    conversation_id: int
+    shared_with_user_id: int
+    granted_by_user_id: Optional[int] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
 class ConversationResponse(BaseModel):
     id: int
     tenant_id: int
@@ -481,6 +536,9 @@ class ConversationResponse(BaseModel):
     platform: str
     created_at: datetime
     updated_at: datetime
+    is_owner: Optional[bool] = True
+    is_shared: Optional[bool] = False
+    shares: Optional[List[ConversationShareResponse]] = []
     messages: Optional[List[MessageResponse]] = []
 
     class Config:
@@ -494,9 +552,16 @@ class ConversationListItem(BaseModel):
     updated_at: datetime
     last_message: Optional[str] = None
     message_count: int = 0
+    user_id: Optional[int] = None
+    is_owner: Optional[bool] = True
+    is_shared: Optional[bool] = False
+
+    class Config:
+        from_attributes = True
 
 class ConversationUpdate(BaseModel):
-    title: str
+    title: Optional[str] = None
+    user_id: Optional[int] = None
 
 class ChatRequest(BaseModel):
     conversation_id: Optional[int] = None

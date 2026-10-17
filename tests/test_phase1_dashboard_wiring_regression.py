@@ -72,6 +72,7 @@ def test_environment():
             hashed_password="hash",
             full_name="Acme Admin",
             role="Admin",
+            is_platform_admin=True,
             tenant_id=1,
             is_active=True,
             is_verified=True,

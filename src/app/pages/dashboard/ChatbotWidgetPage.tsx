@@ -16,7 +16,8 @@ import {
   Code2,
   Sliders,
   CheckCircle2,
-  Lock
+  Lock,
+  FileText
 } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../../components/ui/card";
@@ -72,6 +73,12 @@ export function ChatbotWidgetPage() {
   const [allowSql, setAllowSql] = useState(false);
   const [allowedDbIds, setAllowedDbIds] = useState<number[]>([]);
   const [connectedDatabases, setConnectedDatabases] = useState<DatabaseConnection[]>([]);
+
+  // Knowledge & Documents publication state
+  const [documents, setDocuments] = useState<any[]>([]);
+  const [publishedDocIds, setPublishedDocIds] = useState<number[]>([]);
+  const [isLoadingDocs, setIsLoadingDocs] = useState(false);
+  const [togglingDocId, setTogglingDocId] = useState<number | null>(null);
 
   // UI States
   const [isSavingConfig, setIsSavingConfig] = useState(false);
@@ -138,6 +145,7 @@ export function ChatbotWidgetPage() {
           setOriginsList(activeKey.allowed_origins || []);
           setAllowSql(activeKey.allow_sql || false);
           setAllowedDbIds(activeKey.allowed_database_ids || []);
+          await loadDocuments(activeKey.id, token);
         } else {
           // Auto-create initial publishable widget key with current browser origin
           const currentOrigin = window.location.origin;
@@ -161,6 +169,7 @@ export function ChatbotWidgetPage() {
             setOriginsList(createdKey.allowed_origins || []);
             setAllowSql(createdKey.allow_sql || false);
             setAllowedDbIds(createdKey.allowed_database_ids || []);
+            await loadDocuments(createdKey.id, token);
           }
         }
       }
@@ -169,6 +178,153 @@ export function ChatbotWidgetPage() {
       toast.error("Could not load chatbot configuration");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Load all tenant documents and published documents for widget key
+  const loadDocuments = async (keyId: number, authToken?: string) => {
+    const token = authToken || localStorage.getItem("token");
+    if (!token) return;
+    setIsLoadingDocs(true);
+    try {
+      const [docsRes, pubRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/documents`, {
+          headers: { Authorization: `Bearer ${token}` }
+        }),
+        fetch(`${API_BASE_URL}/api/keys/widget/${keyId}/documents`, {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+      ]);
+
+      if (docsRes.ok) {
+        const allDocs = await docsRes.json();
+        setDocuments(allDocs || []);
+      }
+      if (pubRes.ok) {
+        const pubData = await pubRes.json();
+        const pubIds = Array.isArray(pubData)
+          ? pubData.map((d: any) => (typeof d === "number" ? d : d.id))
+          : (pubData?.published_document_ids || []);
+        setPublishedDocIds(pubIds);
+      }
+    } catch (err) {
+      console.error("Failed to load documents for widget:", err);
+    } finally {
+      setIsLoadingDocs(false);
+    }
+  };
+
+  // Toggle individual document publication
+  const handleToggleDocument = async (docId: number) => {
+    if (!widgetKey) return;
+    const isCurrentlyPublished = publishedDocIds.includes(docId);
+    setTogglingDocId(docId);
+    const token = localStorage.getItem("token");
+    if (!token) {
+      setTogglingDocId(null);
+      return;
+    }
+
+    try {
+      if (isCurrentlyPublished) {
+        const res = await fetch(`${API_BASE_URL}/api/keys/widget/${widgetKey.id}/documents/${docId}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => null);
+          throw new Error(errData?.detail || "Failed to unpublish document");
+        }
+        setPublishedDocIds((prev) => prev.filter((id) => id !== docId));
+        toast.success("Document removed from widget knowledge base");
+      } else {
+        const res = await fetch(`${API_BASE_URL}/api/keys/widget/${widgetKey.id}/documents`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({ document_ids: [docId] })
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => null);
+          throw new Error(errData?.detail || "Failed to publish document");
+        }
+        setPublishedDocIds((prev) => Array.from(new Set([...prev, docId])));
+        toast.success("Document published to widget knowledge base");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Failed to update document publication status");
+    } finally {
+      setTogglingDocId(null);
+    }
+  };
+
+  // Bulk publish all eligible completed documents
+  const handlePublishAll = async () => {
+    if (!widgetKey || documents.length === 0) return;
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    const unpublished = documents.filter(
+      (d) => d.status === "Completed" && !publishedDocIds.includes(d.id)
+    );
+    if (unpublished.length === 0) {
+      toast.info("All eligible completed documents are already published.");
+      return;
+    }
+
+    setIsLoadingDocs(true);
+    try {
+      const idsToPublish = unpublished.map((d) => d.id);
+      const res = await fetch(`${API_BASE_URL}/api/keys/widget/${widgetKey.id}/documents`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ document_ids: idsToPublish })
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => null);
+        throw new Error(errData?.detail || "Failed to publish documents");
+      }
+      setPublishedDocIds((prev) => Array.from(new Set([...prev, ...idsToPublish])));
+      toast.success(`Published ${idsToPublish.length} document(s) to widget`);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to publish documents");
+    } finally {
+      setIsLoadingDocs(false);
+    }
+  };
+
+  // Bulk unpublish all documents
+  const handleUnpublishAll = async () => {
+    if (!widgetKey || publishedDocIds.length === 0) return;
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    setIsLoadingDocs(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/keys/widget/${widgetKey.id}/documents`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        // Fallback to sequential deletion if needed
+        for (const docId of publishedDocIds) {
+          await fetch(`${API_BASE_URL}/api/keys/widget/${widgetKey.id}/documents/${docId}`, {
+            method: "DELETE",
+            headers: { Authorization: `Bearer ${token}` }
+          });
+        }
+      }
+      setPublishedDocIds([]);
+      toast.success("All documents unpublished from widget");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to unpublish documents");
+    } finally {
+      setIsLoadingDocs(false);
     }
   };
 
@@ -367,6 +523,7 @@ export function ChatbotWidgetPage() {
       setOriginsList([]);
       setAllowSql(false);
       setAllowedDbIds([]);
+      setPublishedDocIds([]);
       toast.success("Widget key deleted successfully.");
       setPreviewReloadKey((k) => k + 1);
     } catch (err: any) {
@@ -410,6 +567,7 @@ export function ChatbotWidgetPage() {
       setOriginsList(createdKey.allowed_origins || []);
       setAllowSql(createdKey.allow_sql || false);
       setAllowedDbIds(createdKey.allowed_database_ids || []);
+      await loadDocuments(createdKey.id, token);
       toast.success("New publishable widget key generated!");
       setPreviewReloadKey((k) => k + 1);
     } catch (err: any) {
@@ -710,7 +868,7 @@ export function ChatbotWidgetPage() {
         {/* Left Side: Configuration Tabs (7 cols) */}
         <div className="lg:col-span-7 space-y-6">
           <Tabs defaultValue="snippet" className="w-full">
-            <TabsList className="grid grid-cols-4 w-full">
+            <TabsList className="grid grid-cols-5 w-full">
               <TabsTrigger value="snippet" className="text-xs gap-1.5">
                 <Code2 className="w-3.5 h-3.5" /> Embed Code
               </TabsTrigger>
@@ -719,6 +877,9 @@ export function ChatbotWidgetPage() {
               </TabsTrigger>
               <TabsTrigger value="security" className="text-xs gap-1.5">
                 <Database className="w-3.5 h-3.5" /> Data & SQL
+              </TabsTrigger>
+              <TabsTrigger value="knowledge" className="text-xs gap-1.5">
+                <FileText className="w-3.5 h-3.5" /> Knowledge
               </TabsTrigger>
               <TabsTrigger value="appearance" className="text-xs gap-1.5">
                 <Sliders className="w-3.5 h-3.5" /> Appearance
@@ -954,7 +1115,121 @@ export function ChatbotWidgetPage() {
               </Card>
             </TabsContent>
 
-            {/* TAB 4: Appearance & Behavior */}
+            {/* TAB 4: Published Knowledge & Document Isolation */}
+            <TabsContent value="knowledge" className="space-y-4 mt-4">
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-base font-semibold">Published Knowledge Base</CardTitle>
+                    <Badge variant="outline" className="text-xs">
+                      {publishedDocIds.length} / {documents.length} Published
+                    </Badge>
+                  </div>
+                  <CardDescription className="text-xs">
+                    Granular document publication controls. Anonymous visitors can only query documents explicitly enabled here. Private internal documents remain strictly isolated.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {/* Bulk Action Controls */}
+                  <div className="flex items-center justify-between gap-2 border-b pb-3">
+                    <div className="text-xs text-slate-500">
+                      Toggle individual documents or bulk publish to this widget key.
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs"
+                        onClick={handlePublishAll}
+                        disabled={isLoadingDocs || documents.length === 0}
+                      >
+                        Publish All
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50"
+                        onClick={handleUnpublishAll}
+                        disabled={isLoadingDocs || publishedDocIds.length === 0}
+                      >
+                        Unpublish All
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Documents List */}
+                  {isLoadingDocs ? (
+                    <div className="p-8 text-center text-xs text-slate-400">
+                      Loading documents...
+                    </div>
+                  ) : documents.length === 0 ? (
+                    <div className="p-8 text-center text-xs text-slate-400">
+                      No documents found in knowledge base. Upload documents in Knowledge Base first.
+                    </div>
+                  ) : (
+                    <div className="border rounded-xl divide-y bg-slate-50/50 max-h-72 overflow-y-auto">
+                      {documents.map((doc) => {
+                        const isPublished = publishedDocIds.includes(doc.id);
+                        const isReady = doc.status === "Completed";
+                        return (
+                          <div key={doc.id} className="flex items-center justify-between p-3 text-xs">
+                            <div className="flex items-center gap-3 min-w-0 pr-2">
+                              <FileText className={`w-4 h-4 shrink-0 ${isPublished ? "text-blue-500" : "text-slate-400"}`} />
+                              <div className="min-w-0">
+                                <div className="font-medium text-slate-800 truncate" title={doc.name}>
+                                  {doc.name}
+                                </div>
+                                <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
+                                  <span>{(doc.size / 1024).toFixed(1)} KB</span>
+                                  <span>•</span>
+                                  <span>{doc.embeddings_count || 0} chunks</span>
+                                  <span>•</span>
+                                  <Badge
+                                    variant="outline"
+                                    className={`text-[9px] py-0 px-1 ${
+                                      isReady ? "text-emerald-700 bg-emerald-50 border-emerald-200" : "text-amber-700 bg-amber-50 border-amber-200"
+                                    }`}
+                                  >
+                                    {doc.status}
+                                  </Badge>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-3 shrink-0">
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] ${
+                                  isPublished
+                                    ? "bg-blue-50 text-blue-700 border-blue-200"
+                                    : "bg-slate-100 text-slate-500 border-slate-200"
+                                }`}
+                              >
+                                {isPublished ? "Published" : "Private"}
+                              </Badge>
+                              <Switch
+                                checked={isPublished}
+                                disabled={!isReady || togglingDocId === doc.id}
+                                onCheckedChange={() => handleToggleDocument(doc.id)}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <div className="p-3 bg-blue-50/60 border border-blue-100 rounded-lg text-[11px] text-blue-800 flex items-start gap-2">
+                    <Shield className="w-3.5 h-3.5 text-blue-600 shrink-0 mt-0.5" />
+                    <span>
+                      <strong>Strict Knowledge Isolation:</strong> Documents marked as <em>Private</em> will be filtered out before context reaches the LLM. Visitors cannot access internal memos, proprietary files, or unpublished documents.
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* TAB 5: Appearance & Behavior */}
             <TabsContent value="appearance" className="space-y-4 mt-4">
               <Card>
                 <CardHeader className="pb-3">

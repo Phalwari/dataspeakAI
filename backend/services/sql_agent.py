@@ -115,10 +115,12 @@ class SQLAgent:
         self,
         sql_query: str,
         db_conn: models.DatabaseConnection,
-        db_session: Optional[Session] = None
+        db_session: Optional[Session] = None,
+        allowed_tables: Optional[List[str]] = None
     ) -> Tuple[bool, Optional[str]]:
         """
-        Validates table and column names using sqlglot AST parsing against known database schema.
+        Validates table and column names using sqlglot AST parsing against known database schema
+        and restricts to allowed_tables if specified (NR-1.1-B-T07).
         Returns (is_valid, error_message).
         """
         import sqlglot
@@ -140,12 +142,9 @@ class SQLAgent:
         if parsed is None:
             return False, "Failed to parse SQL AST deterministically."
 
+        allowed_set = {t.lower().strip() for t in allowed_tables} if allowed_tables else None
         known_schema = self.get_known_schema(db_conn, db_session)
-        if not known_schema:
-            # If no schema information could be extracted, cannot validate identifiers
-            return True, None
-
-        known_tables = set(known_schema.keys())
+        known_tables = set(known_schema.keys()) if known_schema else set()
 
         # Collect CTEs and table aliases
         ctes: Set[str] = set()
@@ -169,7 +168,12 @@ class SQLAgent:
 
             # Strip schema prefix if present e.g. public.users -> users
             simple_name = raw_name.split(".")[-1]
-            if simple_name not in known_tables and raw_name not in known_tables:
+
+            if allowed_set is not None:
+                if simple_name not in allowed_set and raw_name not in allowed_set:
+                    return False, f"Access to table '{raw_name}' is not permitted for this widget key. Allowed tables: {sorted(list(allowed_set))}"
+
+            if known_tables and simple_name not in known_tables and raw_name not in known_tables:
                 sorted_tables = sorted(list(known_tables))
                 return False, f"Table '{raw_name}' does not exist in the database schema. Available tables: {sorted_tables}"
 
@@ -198,13 +202,25 @@ class SQLAgent:
     def execute_dry_run_rollback(
         self,
         db_conn: models.DatabaseConnection,
-        sql_query: str
+        sql_query: str,
+        allowed_tables: Optional[List[str]] = None
     ) -> Tuple[bool, Optional[str]]:
         """
         Executes a dialect-safe dry-run inside an isolated nested transaction
         (SAVEPOINT with immediate rollback) to catch dialect syntax or execution errors.
         Guarantees zero persistent database mutations.
+        Enforces allowed_tables restriction if provided (NR-1.1-B-T07).
         """
+        if allowed_tables:
+            allowed_set = {t.lower().strip() for t in allowed_tables}
+            try:
+                ref_tables = extract_sql_referenced_tables(sql_query)
+                for tbl in ref_tables:
+                    if tbl.lower().strip() not in allowed_set:
+                        return False, f"Access to table '{tbl}' is not permitted for this widget key."
+            except Exception as parse_err:
+                return False, f"Dry-run table validation failed: {parse_err}"
+
         conn_url = get_connection_url(db_conn)
         if not conn_url:
             return True, None
@@ -249,7 +265,8 @@ class SQLAgent:
         db_conn: models.DatabaseConnection,
         user_question: str,
         db_session: Optional[Session] = None,
-        tenant_id: Optional[int] = None
+        tenant_id: Optional[int] = None,
+        allowed_tables: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
         Runs the self-correcting agent execution loop.
@@ -264,7 +281,7 @@ class SQLAgent:
             "error": Optional[str]
         }
         """
-        schema_ctx = get_db_schema_context(db_conn, db_session)
+        schema_ctx = get_db_schema_context(db_conn, db_session, allowed_tables=allowed_tables)
         t_id = tenant_id or getattr(db_conn, "tenant_id", None)
         dialect = getattr(db_conn, "db_type", "SQL")
 
@@ -345,7 +362,7 @@ class SQLAgent:
                 }
 
             # 2. AST Identifier Validation
-            ast_valid, ast_err = self.validate_ast_identifiers(candidate_sql, db_conn, db_session)
+            ast_valid, ast_err = self.validate_ast_identifiers(candidate_sql, db_conn, db_session, allowed_tables=allowed_tables)
             if not ast_valid:
                 logger.info(f"[SQLAgent] AST check failed on attempt {attempt}: {ast_err}")
                 last_error = ast_err
@@ -355,7 +372,7 @@ class SQLAgent:
                 continue
 
             # 3. SAVEPOINT Rollback Dry-Run
-            dry_run_ok, dry_err = self.execute_dry_run_rollback(db_conn, candidate_sql)
+            dry_run_ok, dry_err = self.execute_dry_run_rollback(db_conn, candidate_sql, allowed_tables=allowed_tables)
             if not dry_run_ok:
                 logger.info(f"[SQLAgent] SAVEPOINT dry-run failed on attempt {attempt}: {dry_err}")
                 last_error = dry_err

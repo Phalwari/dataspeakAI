@@ -247,12 +247,13 @@ backend/
 
 ### 4.5 Development Superadmin Seeding & Production Hardening Checklist
 
-> 🔒 **PRODUCTION DEPLOYMENT NOTICE:** For multi-developer local workflow ease, a pre-verified development superadmin account (`admin@dataspeak.ai` / `AdminPassword123!`) auto-seeds on backend startup via `backend/scripts/seed_admin.py` and has a quick-fill button on `LoginPage.tsx`.
+> 🔒 **PRODUCTION DEPLOYMENT NOTICE:** For multi-developer local workflow ease, a pre-verified development superadmin account (`admin@dataspeak.ai` / `AdminPassword123!`) auto-seeds on backend startup in development mode via `backend/scripts/seed_admin.py` and has a quick-fill button on `LoginPage.tsx` (gated by `import.meta.env.DEV`).
 >
-> **When preparing for production deployment, you MUST execute the following steps:**
-> 1. **Disable Auto-Seeding on Startup:** In [`backend/main.py`](file:///d:/dataspeak/backend/main.py), remove or comment out the `seed_superadmin()` block (or gate it behind `ENVIRONMENT != "production"`).
-> 2. **Remove Quick-Fill Button on UI:** In [`src/app/pages/LoginPage.tsx`](file:///d:/dataspeak/src/app/pages/LoginPage.tsx), remove the `<div className="mb-4 p-3 bg-blue-50/80...">` Default Admin auto-fill card.
-> 3. **Delete/Update Default DB Credentials:** In the production database, either delete the user `admin@dataspeak.ai` or change its password to a cryptographically secure value via your secrets manager.
+> **Production Hardening Safeguards:**
+> 1. **Auto-Seeding Strictly Disabled in Production:** In [`backend/main.py`](file:///d:/dataspeak/backend/main.py) and [`backend/scripts/seed_admin.py`](file:///d:/dataspeak/backend/scripts/seed_admin.py), `seed_superadmin()` is strictly gated behind `ENVIRONMENT != "production"`. Attempting to run it in production raises a `RuntimeError`.
+> 2. **No Startup Password Overwrite:** Existing administrator passwords are never reset or modified on startup.
+> 3. **Quick-Fill Button Hidden in Production:** In [`src/app/pages/LoginPage.tsx`](file:///d:/dataspeak/src/app/pages/LoginPage.tsx), the auto-fill card is strictly gated behind `import.meta.env.DEV` and stripped from production builds.
+> 4. **No Plaintext Credential/OTP Logging:** Plaintext passwords and OTP codes are strictly suppressed from production logs and console output.
 
 ### 4.6 Standalone Chatbot Widget Security & Authentication Standard
 

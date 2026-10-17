@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 import models, schemas
 from database import get_db
-from dependencies import get_current_user
+from dependencies import get_current_user, require_source_manager, require_query_executor
 import time
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import SQLAlchemyError
@@ -11,6 +11,37 @@ from services.db_utils import get_connection_url, encrypt_password, decrypt_pass
 from services.db_pool import get_engine
 
 router = APIRouter(prefix="/api/databases", tags=["databases"])
+
+
+def get_accessible_connection(
+    db_id: int, 
+    current_user: models.User, 
+    db: Session
+) -> models.DatabaseConnection:
+    """
+    Ensures the requested database connection exists, belongs to the current user's tenant,
+    and is accessible to the user (direct tenant access for Admins/Developers, explicit grant
+    via UserDatabaseAccess for Business Owners/Viewers).
+    Returns uniform HTTP 404 on missing, unassigned, or cross-tenant resources without disclosure.
+    """
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=404, detail="User has no associated tenant")
+
+    query = db.query(models.DatabaseConnection).filter(
+        models.DatabaseConnection.id == db_id,
+        models.DatabaseConnection.tenant_id == current_user.tenant_id
+    )
+
+    if not (current_user.role in ("Admin", "Developer") or getattr(current_user, "is_platform_admin", False)):
+        query = query.join(
+            models.UserDatabaseAccess,
+            models.DatabaseConnection.id == models.UserDatabaseAccess.database_id
+        ).filter(models.UserDatabaseAccess.user_id == current_user.id)
+
+    conn = query.first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Database connection not found")
+    return conn
 
 
 @router.get("", response_model=List[schemas.DatabaseConnectionResponse])
@@ -21,7 +52,7 @@ def get_databases(
     if not current_user.tenant_id:
         raise HTTPException(status_code=404, detail="User has no associated tenant")
         
-    if current_user.role == "Admin":
+    if current_user.role in ("Admin", "Developer") or getattr(current_user, "is_platform_admin", False):
         databases = db.query(models.DatabaseConnection).filter(models.DatabaseConnection.tenant_id == current_user.tenant_id).all()
     else:
         # Filter by UserDatabaseAccess
@@ -39,7 +70,7 @@ def get_databases(
 @router.post("", response_model=schemas.DatabaseConnectionResponse)
 def add_database(
     db_conn: schemas.DatabaseConnectionCreate,
-    current_user: models.User = Depends(get_current_user), 
+    current_user: models.User = Depends(require_source_manager), 
     db: Session = Depends(get_db)
 ):
     if not current_user.tenant_id:
@@ -67,7 +98,7 @@ def add_database(
 @router.delete("/{db_id}")
 def delete_database(
     db_id: int,
-    current_user: models.User = Depends(get_current_user), 
+    current_user: models.User = Depends(require_source_manager), 
     db: Session = Depends(get_db)
 ):
     if not current_user.tenant_id:
@@ -92,13 +123,7 @@ def get_database_tables(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    db_conn = db.query(models.DatabaseConnection).filter(
-        models.DatabaseConnection.id == db_id,
-        models.DatabaseConnection.tenant_id == current_user.tenant_id
-    ).first()
-
-    if not db_conn:
-        raise HTTPException(status_code=404, detail="Database connection not found")
+    db_conn = get_accessible_connection(db_id, current_user, db)
 
     connection_url = get_connection_url(db_conn)
     if not connection_url:
@@ -116,16 +141,10 @@ def get_database_tables(
 def get_table_data(
     db_id: int,
     table_name: str,
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_query_executor),
     db: Session = Depends(get_db)
 ):
-    db_conn = db.query(models.DatabaseConnection).filter(
-        models.DatabaseConnection.id == db_id,
-        models.DatabaseConnection.tenant_id == current_user.tenant_id
-    ).first()
-
-    if not db_conn:
-        raise HTTPException(status_code=404, detail="Database connection not found")
+    db_conn = get_accessible_connection(db_id, current_user, db)
 
     connection_url = get_connection_url(db_conn)
     if not connection_url:
@@ -159,13 +178,7 @@ def get_database_stats(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    db_conn = db.query(models.DatabaseConnection).filter(
-        models.DatabaseConnection.id == db_id,
-        models.DatabaseConnection.tenant_id == current_user.tenant_id
-    ).first()
-
-    if not db_conn:
-        raise HTTPException(status_code=404, detail="Database connection not found")
+    db_conn = get_accessible_connection(db_id, current_user, db)
 
     connection_url = get_connection_url(db_conn)
     if not connection_url:
@@ -209,13 +222,7 @@ def get_table_stats(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    db_conn = db.query(models.DatabaseConnection).filter(
-        models.DatabaseConnection.id == db_id,
-        models.DatabaseConnection.tenant_id == current_user.tenant_id
-    ).first()
-
-    if not db_conn:
-        raise HTTPException(status_code=404, detail="Database connection not found")
+    db_conn = get_accessible_connection(db_id, current_user, db)
 
     connection_url = get_connection_url(db_conn)
     if not connection_url:
@@ -245,7 +252,7 @@ def get_table_stats(
 @router.post("/test")
 def test_database_connection(
     db_conn: schemas.DatabaseConnectionCreate,
-    current_user: models.User = Depends(get_current_user)
+    current_user: models.User = Depends(require_source_manager)
 ):
     if not current_user.tenant_id:
         raise HTTPException(status_code=404, detail="User has no associated tenant")

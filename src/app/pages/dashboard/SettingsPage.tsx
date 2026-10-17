@@ -22,6 +22,7 @@ export function SettingsPage() {
   
   const [members, setMembers] = useState<any[]>([]);
   const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState("Viewer");
   const [inviteLink, setInviteLink] = useState("");
   const [isInviting, setIsInviting] = useState(false);
   
@@ -129,7 +130,7 @@ export function SettingsPage() {
         },
         body: JSON.stringify({ 
           email: inviteEmail, 
-          role: "Team Member",
+          role: inviteRole,
           database_ids: selectedDatabases
         })
       });
@@ -380,7 +381,7 @@ export function SettingsPage() {
                 <CardTitle>Invite New Member</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="flex items-end gap-4">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-4">
                   <div className="space-y-2 flex-1">
                     <Label htmlFor="inviteEmail">Email Address</Label>
                     <Input 
@@ -390,6 +391,20 @@ export function SettingsPage() {
                       value={inviteEmail}
                       onChange={(e) => setInviteEmail(e.target.value)}
                     />
+                  </div>
+                  <div className="space-y-2 w-full sm:w-44">
+                    <Label htmlFor="inviteRole">Role</Label>
+                    <select
+                      id="inviteRole"
+                      value={inviteRole}
+                      onChange={(e) => setInviteRole(e.target.value)}
+                      className="w-full h-10 px-3 py-2 border rounded-md text-sm border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="Viewer">Viewer</option>
+                      <option value="Business Owner">Business Owner</option>
+                      <option value="Developer">Developer</option>
+                      <option value="Admin">Admin</option>
+                    </select>
                   </div>
                   <Button onClick={handleInviteMember} disabled={isInviting || !inviteEmail}>
                     {isInviting ? "Generating..." : "Generate Invite Link"}
