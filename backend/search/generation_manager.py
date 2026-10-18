@@ -11,6 +11,55 @@ from search.bm25_index import BM25IndexManager
 _generation_locks: Dict[Tuple[int, str], threading.Lock] = {}
 _registry_lock = threading.Lock()
 
+class ProcessTenantLock:
+    """
+    Cross-process file lock ensuring mutual exclusion for multi-worker (Uvicorn/Celery) deployments.
+    """
+    def __init__(self, lock_path: str, timeout: float = 60.0):
+        self.lock_path = lock_path
+        self.timeout = timeout
+        self.fd = None
+
+    def __enter__(self):
+        start = time.time()
+        os.makedirs(os.path.dirname(self.lock_path), exist_ok=True)
+        while True:
+            try:
+                self.fd = os.open(self.lock_path, os.O_CREAT | os.O_RDWR)
+                if os.name == 'nt':
+                    import msvcrt
+                    msvcrt.locking(self.fd, msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return self
+            except (BlockingIOError, PermissionError, OSError):
+                if self.fd is not None:
+                    try:
+                        os.close(self.fd)
+                    except OSError:
+                        pass
+                    self.fd = None
+                if time.time() - start > self.timeout:
+                    # Timeout reached; continue under thread lock fallback
+                    break
+                time.sleep(0.05)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.fd is not None:
+            try:
+                if os.name == 'nt':
+                    import msvcrt
+                    msvcrt.locking(self.fd, msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(self.fd, fcntl.LOCK_UN)
+                os.close(self.fd)
+            except OSError:
+                pass
+            self.fd = None
+
 def get_tenant_generation_lock(tenant_id: int, model_slug: str) -> threading.Lock:
     key = (tenant_id, model_slug)
     with _registry_lock:
@@ -32,6 +81,7 @@ class IndexGenerationManager:
         self.tenant_dir = os.path.join(self.base_dir, f"tenant_{tenant_id}_{self.model_slug}")
         self.legacy_dir = os.path.join(self.base_dir, f"tenant_{tenant_id}")
         self.pointer_file = os.path.join(self.tenant_dir, "active_generation.json")
+        self.lock_file = os.path.join(self.tenant_dir, ".generation.lock")
 
     def get_active_generation_path(self) -> Tuple[str, bool]:
         """
@@ -71,8 +121,8 @@ class IndexGenerationManager:
         """
         from langchain_community.vectorstores import FAISS
 
-        lock = get_tenant_generation_lock(self.tenant_id, self.model_slug)
-        with lock:
+        thread_lock = get_tenant_generation_lock(self.tenant_id, self.model_slug)
+        with thread_lock, ProcessTenantLock(self.lock_file):
             os.makedirs(self.tenant_dir, exist_ok=True)
             staging_root = os.path.join(self.tenant_dir, ".staging")
             os.makedirs(staging_root, exist_ok=True)
@@ -96,6 +146,17 @@ class IndexGenerationManager:
                                 f"Vector dimension mismatch: query embedding has dimension {len(test_vec)} "
                                 f"but index expects {vectorstore.index.d}. Please re-index documents with the matching model."
                             )
+
+                    # Prune pre-existing vectors for incoming document IDs to prevent duplicate vectors (F03)
+                    doc_ids_to_purge = {m.get("document_id") for m in new_metadatas if m.get("document_id") is not None}
+                    if hasattr(vectorstore, "docstore") and hasattr(vectorstore.docstore, "_dict"):
+                        existing_ids = [
+                            uid for uid, doc_entry in vectorstore.docstore._dict.items()
+                            if getattr(doc_entry, "metadata", {}).get("document_id") in doc_ids_to_purge
+                        ]
+                        if existing_ids:
+                            vectorstore.delete(existing_ids)
+
                     if new_chunks:
                         vectorstore.add_texts(texts=new_chunks, metadatas=new_metadatas)
                 else:
@@ -107,15 +168,10 @@ class IndexGenerationManager:
 
                 vectorstore.save_local(staging_gen_dir)
 
-                # 2. BM25 Build
+                # 2. BM25 Build strictly inside staging generation directory (F04: never mutate live in-place!)
                 bm25_path = os.path.join(staging_gen_dir, "bm25.pkl")
-                bm25_manager = BM25IndexManager(tenant_id=self.tenant_id)
-                bm25_manager.index_file = bm25_path
+                bm25_manager = BM25IndexManager(tenant_id=self.tenant_id, index_dir=staging_gen_dir)
                 bm25_manager.build_index(all_bm25_chunks)
-
-                # Also maintain backwards compatible legacy bm25.pkl
-                legacy_bm25_manager = BM25IndexManager(tenant_id=self.tenant_id)
-                legacy_bm25_manager.build_index(all_bm25_chunks)
 
                 # 3. Integrity Probe
                 probe_store = FAISS.load_local(staging_gen_dir, embeddings_model, allow_dangerous_deserialization=True)
@@ -141,11 +197,18 @@ class IndexGenerationManager:
                 os.replace(temp_pointer, self.pointer_file)
 
                 # Sync index files into tenant_dir directly for backwards compatibility
-                for fname in ["index.faiss", "index.pkl"]:
+                for fname in ["index.faiss", "index.pkl", "bm25.pkl"]:
                     src_f = os.path.join(target_gen_dir, fname)
                     dst_f = os.path.join(self.tenant_dir, fname)
                     if os.path.exists(src_f):
                         shutil.copy2(src_f, dst_f)
+
+                # Also sync bm25.pkl to legacy_dir for non-slugged backwards compatibility
+                legacy_bm25 = os.path.join(self.legacy_dir, "bm25.pkl")
+                src_bm25 = os.path.join(target_gen_dir, "bm25.pkl")
+                if os.path.exists(src_bm25):
+                    os.makedirs(self.legacy_dir, exist_ok=True)
+                    shutil.copy2(src_bm25, legacy_bm25)
 
                 # 5. Clean up old generations (keep newest 3)
                 self._prune_old_generations(keep=3, active_gen=gen_id)

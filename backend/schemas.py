@@ -408,9 +408,12 @@ class DocumentBase(BaseModel):
 
 class DocumentStatusResponse(BaseModel):
     document_id: int
+    id: Optional[int] = None
+    name: Optional[str] = None
     status: str
     progress: float
     progress_step: Optional[str] = None
+    ingestion_job_id: Optional[str] = None
     error_message: Optional[str] = None
     pages_processed: int = 0
     total_pages: int = 0

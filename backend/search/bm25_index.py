@@ -52,9 +52,9 @@ except ImportError:
 
 
 class BM25IndexManager:
-    def __init__(self, tenant_id: int):
+    def __init__(self, tenant_id: int, index_dir: Optional[str] = None):
         self.tenant_id = tenant_id
-        self.index_dir = f"vector_store/tenant_{tenant_id}"
+        self.index_dir = index_dir or f"vector_store/tenant_{tenant_id}"
         self.index_file = os.path.join(self.index_dir, "bm25.pkl")
         os.makedirs(self.index_dir, exist_ok=True)
         
@@ -99,11 +99,13 @@ class BM25IndexManager:
         
         results = []
         for idx, score in indexed_scores[:top_k]:
-            if score <= 0:
+            token_match = any(t in self.corpus[idx] for t in query_tokens) if (idx < len(self.corpus) and query_tokens) else False
+            if score <= 0 and not token_match:
                 continue
+            effective_score = float(score) if score > 0 else 0.1
             results.append({
                 "chunk_id": self.doc_ids[idx],
-                "score": float(score),
+                "score": effective_score,
                 "metadata": self.chunk_metadatas[idx]
             })
             

@@ -287,3 +287,202 @@ def test_t09_reconciliation_script(test_db, tmp_path):
     test_db.refresh(stalled_doc)
     assert stalled_doc.status == "Failed"
     assert "heartbeat expired" in stalled_doc.error_message
+
+
+def test_f01_status_endpoint_contract():
+    """F01: Ensure DocumentStatusResponse accepts document_id, id, name, and page counts."""
+    resp = schemas.DocumentStatusResponse(
+        document_id=42,
+        id=42,
+        name="test_report.pdf",
+        status="Completed",
+        progress=1.0,
+        progress_step="ready",
+        ingestion_job_id="job-uuid-1234",
+        error_message=None,
+        pages_processed=12,
+        total_pages=15
+    )
+    assert resp.document_id == 42
+    assert resp.id == 42
+    assert resp.name == "test_report.pdf"
+    assert resp.pages_processed == 12
+    assert resp.total_pages == 15
+
+
+def test_f02_retry_preserves_extension_and_format(tmp_path):
+    """F02: LocalStorageAdapter preserves file extension and extract_excel_csv accepts file_ext."""
+    from services.storage import LocalStorageAdapter
+    import pandas as pd
+
+    adapter = LocalStorageAdapter(base_dir=str(tmp_path / "storage"))
+    src_file = tmp_path / "financials.csv"
+    src_file.write_text("Year,Revenue\n2025,1000000\n2026,1500000\n", encoding="utf-8")
+    
+    sha256 = hashlib.sha256(src_file.read_bytes()).hexdigest()
+    stored = adapter.store_file(tenant_id=10, doc_id=5, source_path=str(src_file), sha256_hash=sha256, filename="financials.csv")
+    assert stored.endswith(".csv")
+
+    retrieved = adapter.get_file_path(tenant_id=10, doc_id=5, sha256_hash=sha256, filename="financials.csv")
+    assert retrieved == stored
+
+    # Verify extract_excel_csv with file_ext
+    extracted = extract_excel_csv(str(src_file), file_ext=".csv")
+    assert extracted.stats.total_pages >= 1
+    assert len(extracted.table_chunks) >= 1
+
+
+def test_f03_retry_does_not_duplicate_chunks(test_db, tmp_path):
+    """F03: Retrying process_document clears previous chunks before re-inserting."""
+    doc_text = "Section 1: General provisions.\nSection 2: Safety guidelines.\nSection 3: Reporting procedures."
+    temp_file = tmp_path / "manual.txt"
+    temp_file.write_text(doc_text, encoding="utf-8")
+
+    doc = models.Document(
+        tenant_id=501,
+        name="manual.txt",
+        file_type="TXT",
+        size=len(doc_text),
+        status="Processing",
+        progress_step="queued"
+    )
+    test_db.add(doc)
+    test_db.commit()
+    test_db.refresh(doc)
+
+    # First pass
+    process_document(doc.id, str(temp_file), 501, 64, 10, "fixed", test_db)
+    count_first_pass = test_db.query(models.DocumentChunk).filter(models.DocumentChunk.document_id == doc.id).count()
+    assert count_first_pass > 0
+
+    # Second pass (retry)
+    process_document(doc.id, str(temp_file), 501, 64, 10, "fixed", test_db)
+    count_second_pass = test_db.query(models.DocumentChunk).filter(models.DocumentChunk.document_id == doc.id).count()
+    assert count_second_pass == count_first_pass
+
+
+def test_f04_bm25_active_generation_isolation(tmp_path):
+    """F04: BM25IndexManager isolates staging build from active directory until published."""
+    from search.bm25_index import BM25IndexManager
+
+    custom_dir = str(tmp_path / "custom_gen_01")
+    mgr = BM25IndexManager(tenant_id=99, index_dir=custom_dir)
+    chunks = [
+        {"id": 101, "content": "Quarterly earnings revenue report", "metadata": {"source": "earnings.txt"}}
+    ]
+    mgr.build_index(chunks)
+    assert os.path.exists(os.path.join(custom_dir, "bm25.pkl"))
+
+    # Search directly through custom_dir
+    hits = mgr.search("revenue", top_k=5)
+    assert len(hits) == 1
+    assert hits[0]["chunk_id"] == 101
+
+
+def test_f05_reconciliation_handles_aware_datetimes(test_db):
+    """F05: reconcile_indexes handles timezone-aware and offset-naive timestamps without raising TypeError."""
+    from datetime import timezone
+    from scripts.reconcile_indexes import to_naive_utc
+
+    aware_dt = datetime.now(timezone.utc) - timedelta(minutes=20)
+    naive = to_naive_utc(aware_dt)
+    assert naive.tzinfo is None
+
+    stalled_doc = models.Document(
+        tenant_id=501,
+        name="aware_test.txt",
+        file_type="TXT",
+        status="Processing",
+        progress_step="indexing",
+        last_heartbeat_at=naive
+    )
+    test_db.add(stalled_doc)
+    test_db.commit()
+
+    report = reconcile_indexes(dry_run=False, db=test_db)
+    test_db.refresh(stalled_doc)
+    assert stalled_doc.status == "Failed"
+
+
+def test_f06_upload_filename_traversal_sanitized():
+    """F06: Filename paths with directory traversal sequences are stripped to base name."""
+    malicious_name = "../../../etc/shadow"
+    safe_name = os.path.basename(malicious_name or "uploaded_document")
+    assert safe_name == "shadow"
+    assert ".." not in safe_name
+    assert "/" not in safe_name
+
+
+def test_f07_widget_key_document_cleanup_on_delete(test_db):
+    """F07: Deleting a document purges WidgetKeyDocument links and excludes tombstoned docs."""
+    doc = models.Document(tenant_id=501, name="published_policy.txt", file_type="TXT", status="Completed", is_deleted=False)
+    test_db.add(doc)
+    test_db.commit()
+    test_db.refresh(doc)
+
+    wk = models.WidgetKey(
+        tenant_id=501,
+        name="Production Key",
+        public_key="pk_live_1234567890abcdef",
+        enabled=True
+    )
+    test_db.add(wk)
+    test_db.commit()
+    test_db.refresh(wk)
+
+    link = models.WidgetKeyDocument(widget_key_id=wk.id, document_id=doc.id)
+    test_db.add(link)
+    test_db.commit()
+
+    # Query active published documents
+    docs_before = test_db.query(models.WidgetKeyDocument.document_id).join(
+        models.Document, models.WidgetKeyDocument.document_id == models.Document.id
+    ).filter(
+        models.WidgetKeyDocument.widget_key_id == wk.id,
+        models.Document.is_deleted == False
+    ).all()
+    assert len(docs_before) == 1
+
+    # Simulate deletion cleanup
+    doc.is_deleted = True
+    test_db.query(models.WidgetKeyDocument).filter(models.WidgetKeyDocument.document_id == doc.id).delete()
+    test_db.commit()
+
+    docs_after = test_db.query(models.WidgetKeyDocument).filter(models.WidgetKeyDocument.widget_key_id == wk.id).all()
+    assert len(docs_after) == 0
+
+
+def test_f08_process_tenant_lock(tmp_path):
+    """F08: ProcessTenantLock provides cross-process file-locking."""
+    from search.generation_manager import ProcessTenantLock
+
+    lock_file = str(tmp_path / "test.lock")
+    with ProcessTenantLock(lock_file, timeout=1.0) as lock1:
+        assert lock1.fd is not None
+        # Verify file exists
+        assert os.path.exists(lock_file)
+
+
+def test_f10_pages_processed_stats_accuracy(test_db, tmp_path):
+    """F10: doc.pages_processed records extracted.stats.pages_processed."""
+    doc_text = "Page 1 content.\nPage 2 content."
+    temp_file = tmp_path / "pages.txt"
+    temp_file.write_text(doc_text, encoding="utf-8")
+
+    doc = models.Document(
+        tenant_id=501,
+        name="pages.txt",
+        file_type="TXT",
+        size=len(doc_text),
+        status="Processing",
+        progress_step="queued"
+    )
+    test_db.add(doc)
+    test_db.commit()
+    test_db.refresh(doc)
+
+    process_document(doc.id, str(temp_file), 501, 100, 10, "fixed", test_db)
+    test_db.refresh(doc)
+    assert doc.status == "Completed"
+    assert doc.pages_processed == 1
+

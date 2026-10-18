@@ -354,8 +354,11 @@ def get_widget_key_documents(
     if not widget_key:
         raise HTTPException(status_code=404, detail="Widget key not found")
 
-    docs = db.query(models.WidgetKeyDocument.document_id).filter(
-        models.WidgetKeyDocument.widget_key_id == key_id
+    docs = db.query(models.WidgetKeyDocument.document_id).join(
+        models.Document, models.WidgetKeyDocument.document_id == models.Document.id
+    ).filter(
+        models.WidgetKeyDocument.widget_key_id == key_id,
+        models.Document.is_deleted == False
     ).all()
     return schemas.WidgetKeyDocumentResponse(
         widget_key_id=key_id,
@@ -415,8 +418,11 @@ def assign_widget_key_documents(
 
     db.commit()
 
-    docs = db.query(models.WidgetKeyDocument.document_id).filter(
-        models.WidgetKeyDocument.widget_key_id == key_id
+    docs = db.query(models.WidgetKeyDocument.document_id).join(
+        models.Document, models.WidgetKeyDocument.document_id == models.Document.id
+    ).filter(
+        models.WidgetKeyDocument.widget_key_id == key_id,
+        models.Document.is_deleted == False
     ).all()
     return schemas.WidgetKeyDocumentResponse(
         widget_key_id=key_id,

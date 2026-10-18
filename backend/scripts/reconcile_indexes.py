@@ -20,6 +20,14 @@ from sqlalchemy.orm import Session
 from database import SessionLocal
 import models
 
+def to_naive_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        import datetime as dt_module
+        return dt.astimezone(dt_module.timezone.utc).replace(tzinfo=None)
+    return dt
+
 def reconcile_indexes(dry_run: bool = True, db: Optional[Session] = None):
     print(f"=== Starting Index & Ingestion Reconciliation (Mode: {'DRY-RUN' if dry_run else 'FIX'}) ===")
     close_db = False
@@ -40,7 +48,7 @@ def reconcile_indexes(dry_run: bool = True, db: Optional[Session] = None):
         ).all()
 
         for d in processing_docs:
-            heartbeat = d.last_heartbeat_at or d.created_at
+            heartbeat = to_naive_utc(d.last_heartbeat_at or d.created_at)
             if heartbeat and heartbeat < stalled_threshold:
                 stalled_docs.append(d)
                 print(f"[STALLED JOB] Doc ID: {d.id}, Name: {d.name}, Step: {d.progress_step}, Last Heartbeat: {heartbeat}")

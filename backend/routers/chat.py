@@ -80,6 +80,18 @@ def retrieve_rag_chunks(
     if allowed_document_ids is not None and len(allowed_document_ids) == 0:
         return []
 
+    # Pre-fetch active completed, non-deleted document IDs for tenant to eliminate N+1 query loop (F09)
+    active_doc_query = db.query(models.Document.id).filter(
+        models.Document.tenant_id == tenant_id,
+        models.Document.status == "Completed",
+        models.Document.is_deleted == False
+    )
+    if allowed_document_ids is not None:
+        active_doc_query = active_doc_query.filter(models.Document.id.in_(allowed_document_ids))
+    active_doc_ids = set(d[0] for d in active_doc_query.all())
+    if not active_doc_ids:
+        return []
+
     from routers.documents import resolve_tenant_vector_index_path
     index_path, exists = resolve_tenant_vector_index_path(tenant_id, "all-MiniLM-L6-v2")
     if not exists or not os.path.exists(index_path):
@@ -123,9 +135,8 @@ def retrieve_rag_chunks(
                 continue
 
             doc_id = meta.get("document_id")
-            if allowed_document_ids is not None:
-                if doc_id is None or int(doc_id) not in allowed_document_ids:
-                    continue
+            if doc_id is None or int(doc_id) not in active_doc_ids:
+                continue
 
             dense_results.append({
                 "content": content_str,
@@ -135,19 +146,23 @@ def retrieve_rag_chunks(
         except KeyError:
             continue
 
-    # 2. Sparse BM25 search
+    # 2. Sparse BM25 search (using active generation path if present - F04)
     sparse_results = []
     try:
-        bm25_manager = BM25IndexManager(tenant_id=tenant_id)
+        active_bm25_dir = index_path if os.path.exists(os.path.join(index_path, "bm25.pkl")) else None
+        bm25_manager = BM25IndexManager(tenant_id=tenant_id, index_dir=active_bm25_dir)
         bm25_hits = bm25_manager.search(query, top_k=40)
-        for hit in bm25_hits:
-            hit_doc_id = (hit.get("metadata") or {}).get("document_id")
-            if allowed_document_ids is not None:
-                if hit_doc_id is not None and int(hit_doc_id) not in allowed_document_ids:
-                    continue
-            chunk_obj = db.query(models.DocumentChunk).filter(models.DocumentChunk.id == hit["chunk_id"]).first()
-            if chunk_obj:
-                if allowed_document_ids is not None and chunk_obj.document_id not in allowed_document_ids:
+        if bm25_hits:
+            candidate_chunk_ids = [hit["chunk_id"] for hit in bm25_hits]
+            chunk_map = {
+                c.id: c for c in db.query(models.DocumentChunk).filter(
+                    models.DocumentChunk.id.in_(candidate_chunk_ids),
+                    models.DocumentChunk.document_id.in_(active_doc_ids)
+                ).all()
+            }
+            for hit in bm25_hits:
+                chunk_obj = chunk_map.get(hit["chunk_id"])
+                if not chunk_obj:
                     continue
                 meta = dict(hit.get("metadata") or {})
                 meta["chunk_id"] = chunk_obj.id
@@ -172,43 +187,29 @@ def retrieve_rag_chunks(
         except Exception:
             top_results = top_results[:top_k]
 
-    # 5. Live DB record & status revalidation (NR-1.1-B-T06 / Defect I-13)
+    # 5. Live DB record & status revalidation (NR-1.1-B-T06 / Defect I-13 / F09)
     validated_results = []
+    top_chunk_ids = [r.get("metadata", {}).get("chunk_id") for r in top_results if r.get("metadata", {}).get("chunk_id")]
+    valid_chunk_ids = set()
+    if top_chunk_ids:
+        valid_chunk_ids = set(
+            c[0] for c in db.query(models.DocumentChunk.id).filter(
+                models.DocumentChunk.id.in_(top_chunk_ids)
+            ).all()
+        )
+
     for r in top_results:
         meta = r.get("metadata") or {}
         chunk_id = meta.get("chunk_id")
         doc_id = meta.get("document_id")
 
-        if chunk_id:
-            db_chunk = db.query(models.DocumentChunk).filter(models.DocumentChunk.id == chunk_id).first()
-            if not db_chunk:
-                continue
-            db_doc = db.query(models.Document).filter(
-                models.Document.id == db_chunk.document_id,
-                models.Document.tenant_id == tenant_id,
-                models.Document.status == "Completed",
-                models.Document.is_deleted == False
-            ).first()
-            if not db_doc:
-                continue
-            if allowed_document_ids is not None and db_doc.id not in allowed_document_ids:
-                continue
-            validated_results.append(r)
-        elif doc_id:
-            db_doc = db.query(models.Document).filter(
-                models.Document.id == doc_id,
-                models.Document.tenant_id == tenant_id,
-                models.Document.status == "Completed",
-                models.Document.is_deleted == False
-            ).first()
-            if not db_doc:
-                continue
-            if allowed_document_ids is not None and db_doc.id not in allowed_document_ids:
-                continue
-            validated_results.append(r)
-        else:
-            if allowed_document_ids is None:
-                validated_results.append(r)
+        if doc_id is not None and int(doc_id) not in active_doc_ids:
+            continue
+
+        if chunk_id and chunk_id not in valid_chunk_ids:
+            continue
+
+        validated_results.append(r)
 
     return validated_results[:top_k]
 

@@ -106,6 +106,11 @@ def process_document(document_id: int, file_path: str, tenant_id: int, chunk_siz
 
         gemini_api_key = os.getenv("GEMINI_API_KEY")
         ext = os.path.splitext(file_path)[1].lower()
+        if ext == ".bin" or not ext:
+            if doc and doc.name:
+                ext = os.path.splitext(doc.name)[1].lower()
+            elif doc and doc.file_type:
+                ext = f".{doc.file_type.lower()}"
         
         # 1. Extract content based on file extension
         if ext == '.pdf':
@@ -113,7 +118,7 @@ def process_document(document_id: int, file_path: str, tenant_id: int, chunk_siz
         elif ext == '.docx':
             extracted = extract_docx(file_path)
         elif ext in ['.xlsx', '.xls', '.csv']:
-            extracted = extract_excel_csv(file_path)
+            extracted = extract_excel_csv(file_path, file_ext=ext)
         elif ext in ['.pptx', '.ppt']:
             extracted = extract_pptx(file_path)
         elif ext in ['.html', '.htm', '.md']:
@@ -130,6 +135,7 @@ def process_document(document_id: int, file_path: str, tenant_id: int, chunk_siz
 
         # Update stats on document
         doc.total_pages = extracted.stats.total_pages
+        doc.pages_processed = extracted.stats.pages_processed
         doc.visual_pages = extracted.stats.visual_pages
         doc.table_count = extracted.stats.table_count
         doc.image_count = extracted.stats.image_count
@@ -149,6 +155,10 @@ def process_document(document_id: int, file_path: str, tenant_id: int, chunk_siz
             document_id=document_id,
             document_name=doc.name
         )
+
+        # Purge pre-existing chunks for this document to avoid duplication on retry (F03)
+        db.query(models.DocumentChunk).filter(models.DocumentChunk.document_id == document_id).delete()
+        db.flush()
 
         # 3. Persist Level 0 Parent Chunks to SQL table
         parent_db_objs = []
@@ -265,7 +275,7 @@ def process_document(document_id: int, file_path: str, tenant_id: int, chunk_siz
         doc.status = "Completed"
         doc.progress_step = "ready"
         doc.embeddings_count = len(all_chunks)
-        doc.pages_processed = doc.total_pages
+        doc.pages_processed = extracted.stats.pages_processed
         doc.progress = 1.0
         doc.last_heartbeat_at = datetime.utcnow()
         db.commit()
@@ -313,28 +323,12 @@ def reembed_stored_chunks(document_id: int, tenant_id: int, db: Session = None):
         if embeddings_model is None or getattr(embeddings_model, "model_name", None) != model_name:
             embeddings_model = _load_hf_embeddings(model_name)
 
-        model_slug = model_name.replace("/", "_").replace(":", "_")
-        versioned_index_path = f"vector_store/tenant_{tenant_id}_{model_slug}"
-        index_path, exists = resolve_tenant_vector_index_path(tenant_id, model_name)
-        if not exists:
-            index_path = versioned_index_path
-
-        if os.path.exists(index_path):
-            from langchain_community.vectorstores import FAISS
-            vectorstore = FAISS.load_local(index_path, embeddings_model, allow_dangerous_deserialization=True)
-            docstore_dict = vectorstore.docstore._dict
-            ids_to_delete = [uid for uid, doc_data in docstore_dict.items() if doc_data.metadata.get("document_id") == document_id]
-            if ids_to_delete:
-                vectorstore.delete(ids_to_delete)
-                vectorstore.save_local(index_path)
-
-        doc.progress = 0.3
-        db.commit()
-
         db_chunks = db.query(models.DocumentChunk).filter(
             models.DocumentChunk.document_id == document_id
         ).order_by(models.DocumentChunk.chunk_index).all()
 
+        all_chunks = []
+        all_metadatas = []
         if db_chunks:
             all_chunks = [c.content for c in db_chunks]
             all_metadatas = [{
@@ -349,23 +343,16 @@ def reembed_stored_chunks(document_id: int, tenant_id: int, db: Session = None):
                 "reference_id": c.reference_id
             } for c in db_chunks]
 
-            doc.progress = 0.6
-            db.commit()
+        doc.progress = 0.5
+        db.commit()
 
-            from langchain_community.vectorstores import FAISS
-            if os.path.exists(index_path):
-                vectorstore = FAISS.load_local(index_path, embeddings_model, allow_dangerous_deserialization=True)
-                vectorstore.add_texts(texts=all_chunks, metadatas=all_metadatas)
-            else:
-                vectorstore = FAISS.from_texts(texts=all_chunks, embedding=embeddings_model, metadatas=all_metadatas)
-
-            os.makedirs("vector_store", exist_ok=True)
-            vectorstore.save_local(index_path)
-
+        # Build BM25 input for tenant (strictly active, non-deleted chunks)
         all_tenant_chunks = db.query(models.DocumentChunk).options(
             joinedload(models.DocumentChunk.document)
         ).join(models.Document).filter(
-            models.Document.tenant_id == tenant_id
+            models.Document.tenant_id == tenant_id,
+            models.Document.status == "Completed",
+            models.Document.is_deleted == False
         ).all()
 
         bm25_input = [
@@ -382,8 +369,15 @@ def reembed_stored_chunks(document_id: int, tenant_id: int, db: Session = None):
                 }
             } for c in all_tenant_chunks
         ]
-        bm25_manager = BM25IndexManager(tenant_id=tenant_id)
-        bm25_manager.build_index(bm25_input)
+
+        from search.generation_manager import IndexGenerationManager
+        gen_mgr = IndexGenerationManager(tenant_id=tenant_id, model_name=model_name)
+        gen_mgr.build_and_publish_generation(
+            embeddings_model=embeddings_model,
+            new_chunks=all_chunks,
+            new_metadatas=all_metadatas,
+            all_bm25_chunks=bm25_input
+        )
 
         doc.status = "Completed"
         doc.embeddings_count = len(db_chunks)
@@ -433,6 +427,7 @@ def get_document_status(
         raise HTTPException(status_code=404, detail="Document not found")
         
     return schemas.DocumentStatusResponse(
+        document_id=doc.id,
         id=doc.id,
         name=doc.name,
         status=doc.status,
@@ -440,6 +435,8 @@ def get_document_status(
         progress_step=doc.progress_step or "queued",
         ingestion_job_id=doc.ingestion_job_id,
         error_message=doc.error_message,
+        pages_processed=doc.pages_processed or 0,
+        total_pages=doc.total_pages or 0,
         last_heartbeat_at=doc.last_heartbeat_at
     )
 
@@ -461,7 +458,8 @@ async def upload_document(
 
     # Streaming file read with 25MB size limit check and magic signature inspection (NR-2.2-B-T02)
     file_size = 0
-    unique_filename = f"{uuid.uuid4()}_{file.filename}"
+    safe_filename = os.path.basename(file.filename or "uploaded_document")
+    unique_filename = f"{uuid.uuid4()}_{safe_filename}"
     file_path = f"uploads/{unique_filename}"
     sha256 = hashlib.sha256()
     first_chunk = True
@@ -470,7 +468,7 @@ async def upload_document(
         with open(file_path, "wb") as f:
             while chunk := await file.read(8192):
                 if first_chunk:
-                    is_valid, reason = validate_file_magic(chunk, file.filename)
+                    is_valid, reason = validate_file_magic(chunk, safe_filename)
                     if not is_valid:
                         f.close()
                         if os.path.exists(file_path):
@@ -500,12 +498,12 @@ async def upload_document(
         raise HTTPException(status_code=400, detail=f"Failed to read upload stream: {read_err}")
 
     content_hash = sha256.hexdigest()
-    ext = os.path.splitext(file.filename)[1].upper().replace('.', '') or "TXT"
+    ext = os.path.splitext(safe_filename)[1].upper().replace('.', '') or "TXT"
     job_id = str(uuid.uuid4())
 
     doc = models.Document(
         tenant_id=current_user.tenant_id,
-        name=file.filename,
+        name=safe_filename,
         file_type=ext,
         size=file_size,
         status="Processing",
@@ -523,7 +521,7 @@ async def upload_document(
     db.refresh(doc)
 
     # Store uploaded original under durable, content-addressed storage key (NR-2.2-B-T01)
-    stored_path = storage_service.store_file(current_user.tenant_id, doc.id, file_path, content_hash)
+    stored_path = storage_service.store_file(current_user.tenant_id, doc.id, file_path, content_hash, filename=safe_filename)
     doc.storage_key = stored_path
     db.commit()
     db.refresh(doc)
@@ -574,7 +572,7 @@ def retry_document_ingestion(
     from services.storage import storage_service
     file_to_process = None
     if doc.content_sha256:
-        stored_path = storage_service.get_file_path(current_user.tenant_id, doc.id, doc.content_sha256)
+        stored_path = storage_service.get_file_path(current_user.tenant_id, doc.id, doc.content_sha256, filename=doc.name)
         if stored_path and os.path.exists(stored_path):
             file_to_process = stored_path
 
@@ -619,8 +617,9 @@ def delete_document(
     doc.progress_step = "deleted"
     db.commit()
 
-    # Purge chunk rows from database
+    # Purge chunk rows and widget key associations from database (F07)
     db.query(models.DocumentChunk).filter(models.DocumentChunk.document_id == document_id).delete()
+    db.query(models.WidgetKeyDocument).filter(models.WidgetKeyDocument.document_id == document_id).delete()
     db.commit()
 
     try:
@@ -743,6 +742,15 @@ def search_documents(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Vector dimension mismatch: query embedding has dimension {query_arr.shape[1]} but index expects {expected_dim}. Please re-index documents with the matching model."
             )
+        # Pre-fetch active completed, non-deleted document IDs for tenant to eliminate N+1 query loop (F09)
+        active_doc_ids = set(
+            d[0] for d in db.query(models.Document.id).filter(
+                models.Document.tenant_id == current_user.tenant_id,
+                models.Document.status == "Completed",
+                models.Document.is_deleted == False
+            ).all()
+        )
+
         scores, indices = vectorstore.index.search(query_arr, 50)
         for score, i in zip(scores[0], indices[0]):
             if i == -1: continue
@@ -751,17 +759,10 @@ def search_documents(
                 doc = vectorstore.docstore.search(_id)
                 meta = doc.metadata or {}
                 
-                # Live DB check for active, non-deleted parent document (NR-2.2-B-T08)
+                # Check for active, non-deleted parent document (NR-2.2-B-T08 / F09)
                 doc_id = meta.get("document_id")
-                if doc_id:
-                    p_doc = db.query(models.Document).filter(
-                        models.Document.id == doc_id,
-                        models.Document.tenant_id == current_user.tenant_id,
-                        models.Document.status == "Completed",
-                        models.Document.is_deleted == False
-                    ).first()
-                    if not p_doc:
-                        continue
+                if doc_id and doc_id not in active_doc_ids:
+                    continue
 
                 # Apply metadata filters
                 if query.document_ids and meta.get("document_id") not in query.document_ids:
@@ -781,23 +782,24 @@ def search_documents(
             except KeyError:
                 continue
 
-        # 2. Sparse BM25 Search
+        # 2. Sparse BM25 Search (using active generation path if present - F04)
         sparse_results = []
         if query.search_mode != "semantic":
-            bm25_manager = BM25IndexManager(tenant_id=current_user.tenant_id)
+            active_bm25_dir = index_path if os.path.exists(os.path.join(index_path, "bm25.pkl")) else None
+            bm25_manager = BM25IndexManager(tenant_id=current_user.tenant_id, index_dir=active_bm25_dir)
             bm25_hits = bm25_manager.search(query.query, top_k=50)
             
-            for hit in bm25_hits:
-                chunk_obj = db.query(models.DocumentChunk).filter(models.DocumentChunk.id == hit["chunk_id"]).first()
-                if chunk_obj:
-                    # Live DB check for active, non-deleted parent document (NR-2.2-B-T08)
-                    p_doc = db.query(models.Document).filter(
-                        models.Document.id == chunk_obj.document_id,
-                        models.Document.tenant_id == current_user.tenant_id,
-                        models.Document.status == "Completed",
-                        models.Document.is_deleted == False
-                    ).first()
-                    if not p_doc:
+            if bm25_hits:
+                bm25_chunk_ids = [hit["chunk_id"] for hit in bm25_hits]
+                chunk_map = {
+                    c.id: c for c in db.query(models.DocumentChunk).filter(
+                        models.DocumentChunk.id.in_(bm25_chunk_ids),
+                        models.DocumentChunk.document_id.in_(active_doc_ids)
+                    ).all()
+                }
+                for hit in bm25_hits:
+                    chunk_obj = chunk_map.get(hit["chunk_id"])
+                    if not chunk_obj:
                         continue
 
                     meta = hit["metadata"]

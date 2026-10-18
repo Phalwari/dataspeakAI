@@ -234,14 +234,15 @@ def extract_docx(file_path: str) -> ExtractedContent:
     content.stats.pages_processed = 1
     return content
 
-def extract_excel_csv(file_path: str) -> ExtractedContent:
+def extract_excel_csv(file_path: str, file_ext: Optional[str] = None) -> ExtractedContent:
     import pandas as pd
     content = ExtractedContent()
     
     table_ref_counter = 1
     full_text = []
     
-    if file_path.lower().endswith('.csv'):
+    check_ext = (file_ext or os.path.splitext(file_path)[1]).lower()
+    if check_ext == '.csv':
         df_dict = {"Sheet1": pd.read_csv(file_path, nrows=MAX_ROW_BUDGET)}
     else:
         df_dict = pd.read_excel(file_path, sheet_name=None, nrows=MAX_ROW_BUDGET)
