@@ -226,7 +226,9 @@ class ApiKey(Base):
     tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
     name = Column(String, nullable=False)
     description = Column(String, nullable=True)
-    key = Column(String, unique=True, index=True, nullable=False)
+    key = Column(String, unique=True, index=True, nullable=True)
+    key_prefix = Column(String(16), nullable=True)
+    hashed_key = Column(String(64), unique=True, index=True, nullable=True)
     status = Column(String, default="active") # active, revoked
     total_requests = Column(Integer, default=0)
     last_used_at = Column(DateTime, nullable=True)
@@ -259,8 +261,8 @@ class WidgetKeyDocument(Base):
     __tablename__ = "widget_key_documents"
 
     id = Column(Integer, primary_key=True, index=True)
-    widget_key_id = Column(Integer, ForeignKey("widget_keys.id", ondelete="CASCADE"), nullable=False)
-    document_id = Column(Integer, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
+    widget_key_id = Column(Integer, ForeignKey("widget_keys.id", ondelete="CASCADE"), nullable=False, index=True)
+    document_id = Column(Integer, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True)
     created_at = Column(DateTime, default=utc_now)
 
     __table_args__ = (

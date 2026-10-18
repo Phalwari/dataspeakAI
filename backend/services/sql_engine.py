@@ -6,6 +6,7 @@ import logging
 import requests
 import concurrent.futures
 from typing import Tuple, Dict, Any, List, Optional
+from pydantic import BaseModel
 
 logger = logging.getLogger("dataspeak.sql_engine")
 
@@ -20,6 +21,23 @@ from services.llm_generation_service import llm_gateway
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.pool import NullPool
 from sqlalchemy.exc import SQLAlchemyError
+
+
+class SafeExecutionRequest(BaseModel):
+    sql_query: str
+    max_rows: int = 100
+    timeout_ceiling: float = 12.0
+    statement_timeout_ms: int = 10000
+    read_only: bool = True
+
+
+class SafeExecutionResult(BaseModel):
+    columns: List[str]
+    rows: List[Dict[str, Any]]
+    row_count: int
+    is_truncated: bool = False
+    execution_time_ms: float
+    dialect: Optional[str] = None
 
 
 def get_connection_url(db_conn: models.DatabaseConnection) -> str | None:
@@ -538,70 +556,122 @@ def _make_json_serializable(val: Any) -> Any:
     return str(val)
 
 
-def execute_safe_sql(db_conn: models.DatabaseConnection, sql_query: str, max_rows: int = 100, timeout_ceiling: float = 12.0) -> Dict[str, Any]:
+def execute_safe_sql(
+    db_conn: models.DatabaseConnection,
+    sql_query: str | SafeExecutionRequest,
+    max_rows: int = 100,
+    timeout_ceiling: float = 12.0
+) -> Dict[str, Any]:
     """
-    Validates, caps with LIMIT max_rows, and safely executes a read-only SQL query
+    Validates, caps with outer LIMIT wrapper, and safely executes a read-only SQL query
     against the target database. Enforces statement timeout, read-only mode, and PII masking.
-    Returns structured columns, rows, count, and execution time.
+    Returns structured columns, rows, count, is_truncated flag, and execution time.
     """
-    is_valid, reason = validate_read_only_sql(sql_query)
+    if isinstance(sql_query, SafeExecutionRequest):
+        req = sql_query
+        actual_query = req.sql_query
+        max_rows = req.max_rows
+        timeout_ceiling = req.timeout_ceiling
+    else:
+        actual_query = sql_query
+
+    is_valid, reason = validate_read_only_sql(actual_query)
     if not is_valid:
         raise ValueError(f"SQL Guardrail Violation: {reason}")
 
-    # Remove trailing semicolon for LIMIT capping
-    clean_sql = sql_query.strip().rstrip(';')
+    clean_sql = actual_query.strip().rstrip(';').strip()
 
-    # Enforce LIMIT max_rows capping
-    if not re.search(r'\bLIMIT\s+\d+', clean_sql, re.IGNORECASE):
-        # Wrap query in a subquery or append LIMIT
-        if clean_sql.upper().startswith("WITH "):
-            # For CTEs, append LIMIT max_rows at the end
-            capped_sql = f"{clean_sql} LIMIT {max_rows}"
-        else:
-            capped_sql = f"SELECT * FROM ({clean_sql}) AS safe_limit_wrapper LIMIT {max_rows}"
-    else:
-        capped_sql = clean_sql
+    # Outer LIMIT bounding (Task NR-1.2-B-T05, Defect I-08)
+    fetch_limit = max_rows + 1
+    capped_sql = f"SELECT * FROM ({clean_sql}) AS _dataspeak_bounded_q LIMIT {fetch_limit}"
 
     connection_url = get_connection_url(db_conn)
+    if not connection_url:
+        raise RuntimeError(
+            f"Database connection unavailable or unsupported dialect for database "
+            f"'{getattr(db_conn, 'name', 'unknown')}'"
+        )
+
     start_time = time.time()
+    connect_args = {}
+    db_type = (db_conn.db_type or "").lower()
+    if "sqlite" in db_type:
+        connect_args = {"timeout": 10.0}
+    elif "postgres" in db_type:
+        connect_args = {"options": "-c default_transaction_read_only=on -c statement_timeout=10000"}
+    elif "mysql" in db_type or "mariadb" in db_type:
+        connect_args = {
+            "connect_timeout": 10,
+            "init_command": "SET SESSION max_execution_time=10000"
+        }
 
-    if connection_url:
-        connect_args = {}
-        db_type = (db_conn.db_type or "").lower()
-        if "sqlite" in db_type:
-            connect_args = {"timeout": 10.0}
-        elif "postgres" in db_type:
-            connect_args = {"options": "-c default_transaction_read_only=on -c statement_timeout=10000"}
-        elif "mysql" in db_type or "mariadb" in db_type:
-            connect_args = {
-                "connect_timeout": 10,
-                "init_command": "SET SESSION max_execution_time=10000"
+    def _apply_dialect_guardrails(conn_handle):
+        try:
+            if "sqlite" in db_type:
+                conn_handle.execute(text("PRAGMA query_only = ON;"))
+                conn_handle.execute(text("PRAGMA busy_timeout = 10000;"))
+            elif "postgres" in db_type:
+                conn_handle.execute(text("SET statement_timeout = 10000;"))
+                conn_handle.execute(text("SET TRANSACTION READ ONLY;"))
+            elif "mysql" in db_type or "mariadb" in db_type:
+                conn_handle.execute(text("SET SESSION TRANSACTION READ ONLY;"))
+                conn_handle.execute(text("SET SESSION max_execution_time = 10000;"))
+        except Exception as err:
+            logger.error(f"[SECURITY GUARDRAIL ERROR] Dialect guardrail failure ({db_type}): {err}")
+            raise RuntimeError(f"Database security guardrail application failed: {str(err)}")
+
+    def _run_query_internal():
+        try:
+            engine = create_engine(connection_url, poolclass=NullPool, connect_args=connect_args)
+            with engine.connect() as conn:
+                _apply_dialect_guardrails(conn)
+
+                result = conn.execute(text(capped_sql))
+                columns = list(result.keys())
+                raw_rows = result.fetchmany(fetch_limit)
+
+                is_truncated = False
+                if len(raw_rows) > max_rows:
+                    is_truncated = True
+                    raw_rows = raw_rows[:max_rows]
+
+                rows = [
+                    {col: _make_json_serializable(val) for col, val in zip(columns, row)}
+                    for row in raw_rows
+                ]
+                rows = mask_pii_rows(columns, rows)
+
+            engine.dispose()
+            exec_time_ms = round((time.time() - start_time) * 1000, 2)
+            return {
+                "columns": columns,
+                "rows": rows,
+                "row_count": len(rows),
+                "is_truncated": is_truncated,
+                "execution_time_ms": exec_time_ms
             }
-
-        def _apply_dialect_guardrails(conn_handle):
-            try:
-                if "sqlite" in db_type:
-                    conn_handle.execute(text("PRAGMA query_only = ON;"))
-                    conn_handle.execute(text("PRAGMA busy_timeout = 10000;"))
-                elif "postgres" in db_type:
-                    conn_handle.execute(text("SET statement_timeout = 10000;"))
-                    conn_handle.execute(text("SET TRANSACTION READ ONLY;"))
-                elif "mysql" in db_type or "mariadb" in db_type:
-                    conn_handle.execute(text("SET SESSION TRANSACTION READ ONLY;"))
-                    conn_handle.execute(text("SET SESSION max_execution_time = 10000;"))
-            except Exception as err:
-                print(f"[SECURITY GUARDRAIL ERROR] Dialect guardrail failure ({db_type}): {err}")
-                raise RuntimeError(f"Database security guardrail application failed: {str(err)}")
-
-        def _run_query_internal():
+        except SQLAlchemyError as sqle:
+            # Fallback if outer subquery wrapper encounters dialect syntax limitation
             try:
                 engine = create_engine(connection_url, poolclass=NullPool, connect_args=connect_args)
                 with engine.connect() as conn:
                     _apply_dialect_guardrails(conn)
+                    m = re.search(r'\bLIMIT\s+(\d+)', clean_sql, re.IGNORECASE)
+                    if m:
+                        existing_limit = int(m.group(1))
+                        effective_limit = min(existing_limit, fetch_limit)
+                        fallback_capped = re.sub(r'\bLIMIT\s+\d+', f'LIMIT {effective_limit}', clean_sql, flags=re.IGNORECASE)
+                    else:
+                        fallback_capped = f"{clean_sql} LIMIT {fetch_limit}"
 
-                    result = conn.execute(text(capped_sql))
+                    result = conn.execute(text(fallback_capped))
                     columns = list(result.keys())
-                    raw_rows = result.fetchall()
+                    raw_rows = result.fetchmany(fetch_limit)
+
+                    is_truncated = False
+                    if len(raw_rows) > max_rows:
+                        is_truncated = True
+                        raw_rows = raw_rows[:max_rows]
 
                     rows = [
                         {col: _make_json_serializable(val) for col, val in zip(columns, row)}
@@ -615,63 +685,23 @@ def execute_safe_sql(db_conn: models.DatabaseConnection, sql_query: str, max_row
                     "columns": columns,
                     "rows": rows,
                     "row_count": len(rows),
+                    "is_truncated": is_truncated,
                     "execution_time_ms": exec_time_ms
                 }
-            except SQLAlchemyError as sqle:
-                # If subquery wrapper fails on specific DB syntax, try direct LIMIT append
-                try:
-                    engine = create_engine(connection_url, poolclass=NullPool, connect_args=connect_args)
-                    with engine.connect() as conn:
-                        _apply_dialect_guardrails(conn)
-                        fallback_capped = f"{clean_sql} LIMIT {max_rows}"
-                        result = conn.execute(text(fallback_capped))
-                        columns = list(result.keys())
-                        raw_rows = result.fetchall()
-                        rows = [
-                            {col: _make_json_serializable(val) for col, val in zip(columns, row)}
-                            for row in raw_rows
-                        ]
-                        rows = mask_pii_rows(columns, rows)
-                    engine.dispose()
-                    exec_time_ms = round((time.time() - start_time) * 1000, 2)
-                    return {
-                        "columns": columns,
-                        "rows": rows,
-                        "row_count": len(rows),
-                        "execution_time_ms": exec_time_ms
-                    }
-                except Exception as e:
-                    raise RuntimeError(f"Database execution error: {str(sqle)}")
             except Exception as e:
-                raise RuntimeError(f"Execution error: {str(e)}")
+                raise RuntimeError(f"Database execution error: {str(sqle)}")
+        except Exception as e:
+            raise RuntimeError(f"Execution error: {str(e)}")
 
-        # Execute query within strict fail-safe execution watchdog
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        try:
-            future = executor.submit(_run_query_internal)
-            return future.result(timeout=timeout_ceiling)
-        except concurrent.futures.TimeoutError:
-            executor.shutdown(wait=False, cancel_futures=True)
-            raise RuntimeError(
-                f"Database execution timeout exceeded (10s dialect statement limit / {int(timeout_ceiling)}s watchdog for {db_type})"
-            )
-        finally:
-            executor.shutdown(wait=False, cancel_futures=True)
-
-    # Fallback simulated data execution for non-relational or simulated DBs
-    time.sleep(0.05)  # Simulate brief processing delay
-    exec_time_ms = round((time.time() - start_time) * 1000, 2)
-
-    mock_columns = ["id", "name", "email", "role", "created_at"]
-    mock_rows = [
-        {"id": 101, "name": "Alice Smith", "email": "alice@example.com", "role": "Admin", "created_at": "2026-01-15 10:30:00"},
-        {"id": 102, "name": "Bob Jones", "email": "bob@example.com", "role": "Developer", "created_at": "2026-02-01 14:20:00"},
-        {"id": 103, "name": "Charlie Brown", "email": "charlie@example.com", "role": "Business Owner", "created_at": "2026-03-10 09:15:00"},
-        {"id": 104, "name": "Diana Prince", "email": "diana@example.com", "role": "Developer", "created_at": "2026-04-05 16:45:00"},
-    ]
-    return {
-        "columns": mock_columns,
-        "rows": mask_pii_rows(mock_columns, mock_rows),
-        "row_count": len(mock_rows),
-        "execution_time_ms": exec_time_ms
-    }
+    # Execute query within strict fail-safe execution watchdog
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        future = executor.submit(_run_query_internal)
+        return future.result(timeout=timeout_ceiling)
+    except concurrent.futures.TimeoutError:
+        executor.shutdown(wait=False, cancel_futures=True)
+        raise RuntimeError(
+            f"Database execution timeout exceeded (10s dialect statement limit / {int(timeout_ceiling)}s watchdog for {db_type})"
+        )
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)

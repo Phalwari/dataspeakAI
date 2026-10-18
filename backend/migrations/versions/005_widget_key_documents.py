@@ -31,9 +31,16 @@ def upgrade() -> None:
             sa.Column("created_at", sa.DateTime(), nullable=True),
             sa.UniqueConstraint("widget_key_id", "document_id", name="uq_widget_key_document")
         )
-        op.create_index("ix_widget_key_documents_id", "widget_key_documents", ["id"], unique=False)
-        op.create_index("ix_widget_key_documents_widget_key_id", "widget_key_documents", ["widget_key_id"], unique=False)
-        op.create_index("ix_widget_key_documents_document_id", "widget_key_documents", ["document_id"], unique=False)
+        inspector = sa.inspect(bind)
+
+    existing_indexes = {idx["name"] for idx in inspector.get_indexes("widget_key_documents")} if "widget_key_documents" in inspector.get_table_names() else set()
+    for idx_name, cols in [
+        ("ix_widget_key_documents_id", ["id"]),
+        ("ix_widget_key_documents_widget_key_id", ["widget_key_id"]),
+        ("ix_widget_key_documents_document_id", ["document_id"]),
+    ]:
+        if idx_name not in existing_indexes:
+            op.create_index(idx_name, "widget_key_documents", cols, unique=False)
 
 
 def downgrade() -> None:
@@ -43,7 +50,12 @@ def downgrade() -> None:
     existing_tables = inspector.get_table_names()
 
     if "widget_key_documents" in existing_tables:
-        op.drop_index("ix_widget_key_documents_document_id", table_name="widget_key_documents")
-        op.drop_index("ix_widget_key_documents_widget_key_id", table_name="widget_key_documents")
-        op.drop_index("ix_widget_key_documents_id", table_name="widget_key_documents")
+        existing_indexes = {idx["name"] for idx in inspector.get_indexes("widget_key_documents")}
+        for idx_name in [
+            "ix_widget_key_documents_document_id",
+            "ix_widget_key_documents_widget_key_id",
+            "ix_widget_key_documents_id",
+        ]:
+            if idx_name in existing_indexes:
+                op.drop_index(idx_name, table_name="widget_key_documents")
         op.drop_table("widget_key_documents")

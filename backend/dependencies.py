@@ -108,3 +108,36 @@ def require_key_manager(current_user: models.User = Depends(get_current_user)) -
     return current_user
 
 
+from fastapi.security import APIKeyHeader
+from sqlalchemy import or_
+
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+def get_authenticated_api_key(
+    raw_api_key: str = Depends(api_key_header),
+    db: Session = Depends(get_db)
+) -> models.ApiKey:
+    """Authenticates external API requests using hashed API keys with plaintext fallback."""
+    import hashlib
+    if not raw_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing X-API-Key header"
+        )
+    key_hash = hashlib.sha256(raw_api_key.encode("utf-8")).hexdigest()
+    api_key = db.query(models.ApiKey).filter(
+        or_(models.ApiKey.hashed_key == key_hash, models.ApiKey.key == raw_api_key),
+        models.ApiKey.status == "active"
+    ).first()
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or revoked API key"
+        )
+    api_key.total_requests = (api_key.total_requests or 0) + 1
+    api_key.last_used_at = models.utc_now()
+    db.commit()
+    return api_key
+
+
+

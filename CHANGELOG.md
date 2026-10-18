@@ -17,6 +17,27 @@ To maintain seamless multi-developer and AI agent collaboration:
 
 ## [Unreleased]
 
+- **Phase NR-1: Milestone NR-1.2 — Shared Connection & Execution Policy (`backend/services/crypto_service.py`, `backend/services/connection_factory.py`, `backend/services/sql_engine.py`, `backend/services/db_utils.py`, `backend/crypto.py`, `backend/models.py`, `backend/schemas.py`, `backend/dependencies.py`, `backend/routers/api_keys.py`, `backend/routers/databases.py`, `backend/migrations/versions/006_hash_api_keys_and_encrypt_db_credentials.py`, `tests/test_nr1_connection_security.py`, `tests/test_nr1_query_safety.py`, `tests/test_nr0_regressions.py`)**:
+  - **Security & Cryptography (Versioned Credential Envelope & API Key Hashing - NR-1.2-A-T06, T08, T09):**
+    - Created `backend/services/crypto_service.py` implementing symmetric Fernet encryption with versioned envelopes (`v1:<base64_ciphertext>`) using a 32-byte key derived from `DATA_ENCRYPTION_KEY` or `SECRET_KEY`, with automatic migration of legacy plaintext or unversioned tokens.
+    - Updated `models.ApiKey` with `key_prefix` (varchar 16) and `hashed_key` (varchar 64, indexed). Internal keys use `omq_live_` + URL-safe tokens; only prefix and SHA-256 verifiers are persisted. Plaintext keys are returned exactly once upon creation via `ApiKeyCreateResponse` and masked in list endpoints (`omq_live_***`). Added `get_authenticated_api_key` dependency with hash lookup. Defect `I-04` permanently repaired.
+    - Authored versioned Alembic migration `006_hash_api_keys_and_encrypt_db_credentials.py` implementing Expand-Backfill-Validate pattern to safely backfill SHA-256 hashes for existing API keys and encrypt external database credentials into `v1:` envelopes.
+  - **Security & SSRF Defense (Centralized Connection Factory & Managed Boundaries - NR-1.2-A-T01, T02, T03, T04, T05, T07):**
+    - Built `DatabaseConnectionFactory` (`backend/services/connection_factory.py`) consolidating all connection creation, pooling, testing, and lifecycle management under tenant-scoped authorization.
+    - Implemented DNS resolution checks via `socket.getaddrinfo`, rejecting unresolvable hosts and blocking loopback (`127.0.0.0/8`, `::1`), link-local (`169.254.0.0/16`), AWS metadata (`169.254.169.254`), and RFC 1918 private subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) unless `ALLOW_PRIVATE_DB_HOSTS=true`. Defect `I-05` permanently repaired.
+    - Standardized URI generation using SQLAlchemy `URL.create()` to avoid password string interpolation bugs with special characters.
+    - Restricted external SQLite database files to managed sandbox `./data/sqlite_dbs/` with strict path traversal (`..`) rejection.
+    - Masked passwords (`***`) and returned sanitized connection strings in `DatabaseConnectionResponse` (`backend/schemas.py`), repairing Defect `I-06`.
+  - **Query Safety & Outer Row Capping (AST Validation, Read-Only Enforcement & Mock Removal - NR-1.2-B-T01 to T09):**
+    - Defined typed `SafeExecutionRequest` and `SafeExecutionResult` Pydantic models in `backend/services/sql_engine.py` standardizing row limits, deadlines, and parameters across all query consumers.
+    - Enforced dialect-aware AST validation with `sqlglot` in `validate_read_only_sql` permitting only single `exp.Select` statements and strictly rejecting multi-statement queries, DDL/DML, and dangerous functions. Defect `I-07` permanently repaired.
+    - Applied engine-level read-only guardrails (`PRAGMA query_only = ON;`, `SET TRANSACTION READ ONLY;`).
+    - Implemented mandatory outer LIMIT subquery wrapping: `SELECT * FROM (<clean_sql>) AS _dataspeak_bounded_q LIMIT {max_rows + 1}` fetched with `cursor.fetchmany(max_rows + 1)`. Detects row overflow, sets `is_truncated = True`, and truncates result sets to `max_rows`. Defect `I-08` / `FYP-02` permanently repaired; promoted `test_probe_i08_sql_executor_enforces_max_rows_when_query_has_limit` in `tests/test_nr0_regressions.py` to PASS.
+    - Enforced dual-layer query timeouts: dialect statement timeouts (`statement_timeout=10000`, `max_execution_time=10000`, `PRAGMA busy_timeout=10000`) and caller watchdog ceiling using `ThreadPoolExecutor` with manual lifecycle management (`shutdown(wait=False, cancel_futures=True)`) releasing caller immediately without thread deadlock or pool exhaustion (Defect `I-16`).
+    - Purged synthetic mock rows ("Alice Smith", "Bob Jones", lines 661–677 in `sql_engine.py`); missing/unsupported connections raise typed `RuntimeError` rather than returning phantom data (Defect `I-16` / `FYP-03`).
+    - Migrated `/api/databases/{id}/table/{name}` in `backend/routers/databases.py` to `execute_safe_sql`.
+  - **Verification:** Verified with `tests/test_nr1_connection_security.py` (10/10 passed in 0.64s), `tests/test_nr1_query_safety.py` (7/7 passed in 0.65s), `tests/test_nr0_migrations.py` (19/19 passed), and `tests/test_nr0_regressions.py` (45 passed, 3 xfailed for future phases). Phase NR-1 fully certified.
+
 - **Bug Fixes & Hardening (Widget Document Publication & Persistence - 2026-10-17)**:
   - **Payload & Schema Interoperability:** Resolved payload schema mismatch where frontend toggle sent singular `{ document_id: int }` while backend expected `{ document_ids: List[int] }` resulting in HTTP 422. Extended `WidgetKeyDocumentAssignRequest` in `backend/schemas.py` and `backend/routers/api_keys.py` to transparently accept both singular `document_id` and plural `document_ids`.
   - **State Persistence & Badge Synchronization:** Fixed response parsing of `published_document_ids` in `src/app/pages/dashboard/ChatbotWidgetPage.tsx` and `src/app/pages/dashboard/KnowledgeBasePage.tsx` so publication toggle state and `Widget Published` table badges remain accurate and persist upon navigation or page reload.
@@ -583,6 +604,11 @@ To maintain seamless multi-developer and AI agent collaboration:
   - Implemented MS-MARCO Cross-Encoder re-ranking for improved retrieval precision.
 - **Embedding Model Migration Tool (`backend/scripts/migrate_embeddings.py`)**:
   - CLI script to re-embed all tenant chunks with target model (default: `BAAI/bge-small-en-v1.5`), rebuild FAISS & BM25 indices, with `--dry-run` mode.
+
+### Added
+- **60% FYP SDS submission (`docs/reports/SDS DataSpeak AI.docx`, 2026-10-18):** Prepared Chapters 4 (Implementation) and 5 (Testing and Evaluation) using the supplied SDS reference and current repository evidence. Documented the original 20-module inventory and a qualified 12-module submission scope, added ten explanatory diagrams (including the corrected Chapter 3 widget flow), retained four appropriate interface screenshots, and refreshed the contents and pagination. Recorded actual verification: successful Vite build, 20 frontend tests and 80 focused backend tests passed; live acceptance cases remain explicitly unexecuted. Visually reviewed all 57 rendered pages. Original supplied documents and application source are unchanged.
+
+- **FYP capability verification (2026-10-18):** Added opt-in acceptance probes in `tests/manual/fyp_core_verification.py`, an evidence report at `docs/reports/fyp_capability_verification_2026-10-18.md`, and a session log. Reran 80 existing backend and 20 frontend tests successfully; frontend build passed. The final 19 additional probes returned 11 passes and 8 failures, reproducing seven unresolved issues in widget conversation binding, SQL caps/fallbacks, SQL follow-up context, citation reliability and stream persistence reporting. This verification changes no application behavior and closes no remediation tasks.
 
 ### Planned / In Progress
 - Implementation of remaining 25 enterprise database schema tables into `backend/models.py`.

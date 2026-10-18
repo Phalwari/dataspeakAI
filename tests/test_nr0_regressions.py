@@ -137,14 +137,10 @@ def test_probe_i08_control_sql_execution_basic(tmp_path):
     assert res["row_count"] == 1
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Issue I-08: Any existing LIMIT bypasses outer max_rows cap; owned by NR-1.2-B"
-)
 def test_probe_i08_sql_executor_enforces_max_rows_when_query_has_limit(tmp_path):
     """
     Defect Assertion: When a query includes its own LIMIT larger than max_rows,
-    execute_safe_sql MUST enforce the caller's max_rows ceiling.
+    execute_safe_sql MUST enforce the caller's max_rows ceiling. (Resolved in NR-1.2-B)
     """
     # Create an isolated SQLite table with 50 rows
     db_file = tmp_path / "numbers_db.sqlite"

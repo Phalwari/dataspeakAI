@@ -12,11 +12,13 @@ from datetime import datetime, timezone, timedelta
 
 router = APIRouter(prefix="/api/keys", tags=["api_keys"])
 
-def generate_secure_key():
-    # Format: omq_pk_live_[32 random chars]
-    chars = string.ascii_lowercase + string.digits
-    random_str = ''.join(random.choice(chars) for _ in range(32))
-    return f"omq_pk_live_{random_str}"
+def generate_secure_key() -> str:
+    # Format: omq_live_[32 urlsafe characters]
+    return f"omq_live_{secrets.token_urlsafe(32)}"
+
+def hash_key(raw_key: str) -> str:
+    import hashlib
+    return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
 def generate_public_widget_key():
     # Format: pk_live_[32 hex chars]
@@ -32,9 +34,33 @@ def get_api_keys(
         raise HTTPException(status_code=404, detail="User has no associated tenant")
         
     keys = db.query(models.ApiKey).filter(models.ApiKey.tenant_id == current_user.tenant_id).all()
-    return keys
+    response_items = []
+    for k in keys:
+        if k.key_prefix:
+            masked = f"{k.key_prefix}***"
+            prefix = k.key_prefix
+        elif k.key:
+            masked = f"{k.key[:10]}***"
+            prefix = k.key[:10]
+        else:
+            masked = "omq_live_***"
+            prefix = "omq_live_"
+        response_items.append(
+            schemas.ApiKeyResponse(
+                id=k.id,
+                name=k.name,
+                description=k.description,
+                key=masked,
+                key_prefix=prefix,
+                status=k.status,
+                total_requests=k.total_requests or 0,
+                last_used_at=k.last_used_at,
+                created_at=k.created_at,
+            )
+        )
+    return response_items
 
-@router.post("", response_model=schemas.ApiKeyResponse)
+@router.post("", response_model=schemas.ApiKeyCreateResponse)
 def create_api_key(
     key_data: schemas.ApiKeyCreate,
     current_user: models.User = Depends(require_key_manager), 
@@ -43,16 +69,32 @@ def create_api_key(
     if not current_user.tenant_id:
         raise HTTPException(status_code=404, detail="User has no associated tenant")
     
+    raw_key = generate_secure_key()
+    prefix = raw_key[:12]
+    hashed = hash_key(raw_key)
+
     new_key = models.ApiKey(
         tenant_id=current_user.tenant_id,
         name=key_data.name,
         description=key_data.description,
-        key=generate_secure_key()
+        key=None,
+        key_prefix=prefix,
+        hashed_key=hashed,
+        status="active"
     )
     db.add(new_key)
     db.commit()
     db.refresh(new_key)
-    return new_key
+    return schemas.ApiKeyCreateResponse(
+        id=new_key.id,
+        name=new_key.name,
+        description=new_key.description,
+        key=raw_key,
+        key_prefix=prefix,
+        status=new_key.status,
+        total_requests=new_key.total_requests or 0,
+        created_at=new_key.created_at
+    )
 
 @router.put("/{key_id}/revoke", response_model=schemas.ApiKeyResponse)
 def revoke_api_key(
@@ -74,7 +116,20 @@ def revoke_api_key(
     api_key.status = "revoked"
     db.commit()
     db.refresh(api_key)
-    return api_key
+    
+    prefix = api_key.key_prefix or (api_key.key[:10] if api_key.key else "omq_live_")
+    masked = f"{prefix}***"
+    return schemas.ApiKeyResponse(
+        id=api_key.id,
+        name=api_key.name,
+        description=api_key.description,
+        key=masked,
+        key_prefix=prefix,
+        status=api_key.status,
+        total_requests=api_key.total_requests or 0,
+        last_used_at=api_key.last_used_at,
+        created_at=api_key.created_at,
+    )
 
 @router.delete("/{key_id}")
 def delete_api_key(

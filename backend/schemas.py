@@ -181,6 +181,13 @@ class DatabaseConnectionResponse(DatabaseConnectionBase):
     tables_metadata: Optional[Any] = None
     created_at: Optional[datetime] = None
     
+    @model_validator(mode="after")
+    def redact_credentials(self):
+        if self.connection_string:
+            from services.crypto_service import redact_connection_url
+            self.connection_string = redact_connection_url(self.connection_string)
+        return self
+
     class Config:
         from_attributes = True
 
@@ -229,11 +236,25 @@ class ApiKeyCreate(BaseModel):
     name: str
     description: Optional[str] = None
 
+class ApiKeyCreateResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    key: str
+    key_prefix: str
+    status: str
+    total_requests: int = 0
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
 class ApiKeyResponse(BaseModel):
     id: int
     name: str
     description: Optional[str] = None
     key: str
+    key_prefix: Optional[str] = None
     status: str
     total_requests: int
     last_used_at: Optional[datetime] = None

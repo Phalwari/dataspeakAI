@@ -76,6 +76,16 @@ def add_database(
     if not current_user.tenant_id:
         raise HTTPException(status_code=404, detail="User has no associated tenant")
     
+    from services.connection_factory import DatabaseConnectionFactory
+    try:
+        if db_conn.db_type.lower() == "sqlite":
+            if db_conn.database:
+                DatabaseConnectionFactory.validate_sqlite_path(db_conn.database)
+        elif db_conn.host:
+            DatabaseConnectionFactory.validate_host_ssrf(db_conn.host, db_conn.port)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    
     new_db = models.DatabaseConnection(
         tenant_id=current_user.tenant_id,
         name=db_conn.name,
@@ -146,26 +156,21 @@ def get_table_data(
 ):
     db_conn = get_accessible_connection(db_id, current_user, db)
 
-    connection_url = get_connection_url(db_conn)
-    if not connection_url:
-        return [
-            {"id": 1, "name": "Mock Item 1", "status": "active"},
-            {"id": 2, "name": "Mock Item 2", "status": "inactive"},
-            {"id": 3, "name": "Mock Item 3", "status": "pending"},
-        ]
-
+    from services.sql_engine import execute_safe_sql
     try:
+        connection_url = get_connection_url(db_conn)
+        if not connection_url:
+            raise HTTPException(status_code=400, detail="Database connection URL is unavailable")
+
         engine = get_engine(connection_url)
         inspector = inspect(engine)
         valid_tables = inspector.get_table_names()
         if table_name not in valid_tables:
             raise HTTPException(status_code=400, detail="Invalid table name")
 
-        with engine.connect() as conn:
-            result = conn.execute(text(f'SELECT * FROM "{table_name}" LIMIT 100'))
-            columns = result.keys()
-            data = [dict(zip(columns, row)) for row in result]
-            return data
+        safe_query = f'SELECT * FROM "{table_name}"'
+        res = execute_safe_sql(db_conn, safe_query, max_rows=100)
+        return res["rows"]
     except HTTPException:
         raise
     except Exception as e:
@@ -257,28 +262,16 @@ def test_database_connection(
     if not current_user.tenant_id:
         raise HTTPException(status_code=404, detail="User has no associated tenant")
         
-    connection_url = ""
-    if db_conn.db_type == "postgresql":
-        connection_url = f"postgresql://{db_conn.username}:{db_conn.password}@{db_conn.host}/{db_conn.database}"
-    elif db_conn.db_type in ("mysql", "mariadb"):
-        connection_url = f"mysql+pymysql://{db_conn.username}:{db_conn.password}@{db_conn.host}/{db_conn.database}"
-    elif db_conn.db_type == "sqlite":
-        path = (db_conn.database if db_conn.database else db_conn.host) or ""
-        path = path.strip('"\'').replace("\\", "/")
-        connection_url = f"sqlite:///{path}"
-    else:
-        time.sleep(1)
-        return {"status": "success", "message": f"Connection simulated for {db_conn.db_type}"}
-        
-    try:
-        from sqlalchemy.pool import NullPool
-        connect_args = {'connect_timeout': 5} if db_conn.db_type != "sqlite" else {}
-        engine = create_engine(connection_url, connect_args=connect_args, poolclass=NullPool)
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        engine.dispose()
-        return {"status": "success", "message": "Connection successful"}
-    except SQLAlchemyError as e:
-        raise HTTPException(status_code=400, detail=f"Connection failed: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"An error occurred: {str(e)}")
+    from services.connection_factory import DatabaseConnectionFactory
+    
+    success, error_msg = DatabaseConnectionFactory.test_connection(
+        db_type=db_conn.db_type,
+        host=db_conn.host,
+        port=db_conn.port,
+        database=db_conn.database,
+        username=db_conn.username,
+        password=db_conn.password,
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail=error_msg or "Connection test failed")
+    return {"status": "success", "message": "Connection successful"}
