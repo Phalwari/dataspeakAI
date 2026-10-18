@@ -268,3 +268,89 @@ def test_clustering_genuine_silhouette_score():
     # Genuine silhouette score for 3 distinct clusters should be high (> 0.5) but not hardcoded 1.0
     assert 0.0 < km_res["score"] < 1.0
     assert km_res["score"] == km_res["silhouette_score"]
+
+
+# ============================================================================
+# REGRESSION DEFECT TESTS (REV-NR2.1-QA-01)
+# ============================================================================
+
+def test_partition_dataset_drops_target_nans():
+    """Fix F01: partition_dataset must drop missing targets to avoid sklearn NaN errors."""
+    df = pd.DataFrame({
+        "feat1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0] * 3,
+        "target": [1, np.nan, 0, 1, np.nan, 0, 1, 0, 1, 0] * 3,
+    })
+    partition = partition_dataset(
+        df=df,
+        feature_columns=["feat1"],
+        target_column="target",
+        problem_type="classification",
+    )
+    assert not partition["y_train"].isna().any()
+    assert not partition["y_test"].isna().any()
+    assert len(partition["train_df"]) + len(partition["test_df"]) == 24  # 30 - 6 NaNs
+
+
+def test_compute_period_trend_odd_row_flat_series():
+    """Fix F02: Odd row count on a flat series must calculate 0.0% trend instead of +100%."""
+    df = pd.DataFrame({
+        "revenue": [100.0, 100.0, 100.0],
+    })
+    trend = compute_period_trend(df, "revenue", "sum")
+    assert trend["trend_status"] in ("ok", "flat")
+    assert trend["trend_pct"] == 0.0
+    assert trend["trend_direction"] == "flat"
+
+
+def test_compute_period_trend_temporal_midpoint_split():
+    """Fix F02: Datetime columns should split on temporal midpoint."""
+    df = pd.DataFrame({
+        "revenue": [10.0, 20.0, 30.0, 40.0],
+        "date": ["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-31"],
+    })
+    trend = compute_period_trend(df, "revenue", "sum", date_col="date")
+    assert trend["trend_status"] == "ok"
+    assert trend["trend_pct"] is not None
+
+
+def test_feature_importance_aligned_with_categorical_onehot():
+    """Fix F04: Feature importance must aggregate back to original parent features."""
+    np.random.seed(42)
+    n = 60
+    age = np.random.randint(20, 60, size=n)
+    category = np.random.choice(["Electronics", "Clothing", "Home"], size=n)
+    # Target strongly depends on age
+    target = (age > 40).astype(int)
+
+    df = pd.DataFrame({"age": age, "category": category, "target": target})
+    problem_info = {
+        "problem_type": "classification",
+        "target_column": "target",
+        "feature_columns": ["age", "category"],
+    }
+    res = run_automl_pipeline(df, problem_info)
+    assert "best_model" in res and res["best_model"] is not None
+    rf_model = next((m for m in res["all_models"] if "Random Forest" in m["model"]), None)
+    if rf_model and rf_model.get("feature_importance"):
+        features = [item["feature"] for item in rf_model["feature_importance"]]
+        # Parent feature 'age' must be preserved and not replaced by dummy category names
+        assert "age" in features
+        for item in rf_model["feature_importance"]:
+            assert item["feature"] in ["age", "category"]
+
+
+def test_regression_target_no_class_imbalance_warning():
+    """Fix F06: Continuous regression target must not trigger classification class imbalance warning."""
+    np.random.seed(42)
+    df = pd.DataFrame({
+        "x": np.random.randn(50),
+        "y_continuous": np.linspace(10.0, 500.0, 50),
+    })
+    partition = partition_dataset(
+        df=df,
+        feature_columns=["x"],
+        target_column="y_continuous",
+        problem_type="regression",
+    )
+    assert partition["imbalance_detected"] is False
+    assert partition["imbalance_warning"] is None

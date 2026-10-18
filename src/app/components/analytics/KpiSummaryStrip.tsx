@@ -59,7 +59,13 @@ function getTrendBadge(
     return { label: `${rawPct.toFixed(1)}% ↓`, className: "text-rose-400 bg-rose-500/10 border-rose-500/30" };
   }
 
-  return { label: "Exact Total", className: "text-indigo-300 bg-indigo-500/10 border-indigo-500/30" };
+  const fallbackLabels: Record<string, string> = {
+    total: "Exact Total",
+    average: "Exact Average",
+    max: "Peak Record",
+    count: "Total Rows",
+  };
+  return { label: fallbackLabels[cardKey] || "Exact Total", className: "text-indigo-300 bg-indigo-500/10 border-indigo-500/30" };
 }
 
 const CARDS = [

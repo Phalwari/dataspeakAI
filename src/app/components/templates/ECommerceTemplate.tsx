@@ -563,21 +563,35 @@ export const DataSpeakDashboard: React.FC<any> = ({
             <span className="pill success"><CheckCircle size={12} /> {(mlData?.df_stats?.total_rows || filteredRows.length).toLocaleString()} {isDatabase ? "records analyzed" : "rows loaded"}</span>
             {isDatabase ? (
               <span className="pill accent"><Database size={12} /> Deterministic Pipeline (Phase 2C)</span>
-            ) : mlData?.automl_results?.best_model?.model ? (
-              <span
-                className="pill accent"
-                title={mlData.automl_results.best_model.f1_score !== undefined
-                  ? `Holdout Test Accuracy: ${(mlData.automl_results.best_model.score * 100).toFixed(1)}% | Weighted F1: ${(mlData.automl_results.best_model.f1_score * 100).toFixed(1)}%`
-                  : undefined}
-              >
-                <Brain size={12} /> {mlData.automl_results.best_model.model} · {mlData.automl_results.best_model.score ? (mlData.automl_results.best_model.score * 100).toFixed(1) + '%' : 'N/A'}
-                {mlData.automl_results.best_model.f1_score !== undefined && (
-                  <span style={{ opacity: 0.85, marginLeft: '4px' }}>
-                    (F1: {(mlData.automl_results.best_model.f1_score * 100).toFixed(1)}%)
-                  </span>
-                )}
-              </span>
-            ) : null}
+            ) : mlData?.automl_results?.best_model?.model ? (() => {
+              const best = mlData.automl_results.best_model;
+              const metricName = best.metric || (mlData.automl_results.problem_type === 'regression' ? 'R² Score' : mlData.automl_results.problem_type === 'clustering' ? 'Silhouette' : 'Accuracy');
+              let scoreText = 'N/A';
+              if (typeof best.score === 'number') {
+                if (metricName === 'R² Score' || best.r2_score !== undefined) {
+                  scoreText = `R²: ${best.score.toFixed(2)}`;
+                } else if (metricName === 'Silhouette' || best.silhouette_score !== undefined) {
+                  scoreText = `Silhouette: ${best.score.toFixed(2)}`;
+                } else {
+                  scoreText = `${(best.score * 100).toFixed(1)}%`;
+                }
+              }
+              const tooltipTitle = best.f1_score !== undefined
+                ? `Holdout Test Accuracy: ${(best.score * 100).toFixed(1)}% | Weighted F1: ${(best.f1_score * 100).toFixed(1)}%`
+                : best.mae !== undefined
+                ? `Holdout Test R²: ${best.score?.toFixed(2)} | MAE: ${best.mae}`
+                : undefined;
+              return (
+                <span className="pill accent" title={tooltipTitle}>
+                  <Brain size={12} /> {best.model} · {scoreText}
+                  {best.f1_score !== undefined && (
+                    <span style={{ opacity: 0.85, marginLeft: '4px' }}>
+                      (F1: {(best.f1_score * 100).toFixed(1)}%)
+                    </span>
+                  )}
+                </span>
+              );
+            })() : null}
             {mlData?.automl_results?.class_imbalance_detected && (
               <span
                 className="pill warning"

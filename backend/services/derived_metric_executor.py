@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from typing import Any, Literal, Sequence
 
 from pydantic import BaseModel, ConfigDict
@@ -501,13 +502,21 @@ def execute_metric_recipe(
     # ========================================================
 
     if isinstance(validated_recipe, PeriodComparisonRecipe):
+        curr_filters = list(filters or []) + [
+            MetricFilter(column=f.column, operator=f.operator, value=f.value)
+            for f in getattr(validated_recipe, "current_filters", []) or []
+        ]
+        prior_filters = list(filters or []) + [
+            MetricFilter(column=f.column, operator=f.operator, value=f.value)
+            for f in getattr(validated_recipe, "prior_filters", []) or []
+        ]
         current_res = execute_metric_recipe(
             recipe=validated_recipe.current_period_recipe,
             connection_id=connection_id,
             tenant_id=tenant_id,
             db_conn=db_conn,
             db=db,
-            filters=filters,
+            filters=curr_filters,
         )
         prior_res = execute_metric_recipe(
             recipe=validated_recipe.prior_period_recipe,
@@ -515,7 +524,7 @@ def execute_metric_recipe(
             tenant_id=tenant_id,
             db_conn=db_conn,
             db=db,
-            filters=filters,
+            filters=prior_filters,
         )
 
         current_val = _ensure_numeric(current_res.value, role="current_period")
@@ -677,9 +686,19 @@ class DataFrameMetricExecutor:
                 filtered = filtered[filtered[col] >= val]
             elif op == "<=":
                 filtered = filtered[filtered[col] <= val]
-            elif op == "LIKE":
-                pattern = str(val).replace("%", ".*")
-                filtered = filtered[filtered[col].astype(str).str.contains(pattern, regex=True, na=False)]
+            elif op in ("LIKE", "ILIKE"):
+                val_str = str(val)
+                tokens = []
+                for ch in val_str:
+                    if ch == "%":
+                        tokens.append(".*")
+                    elif ch == "_":
+                        tokens.append(".")
+                    else:
+                        tokens.append(re.escape(ch))
+                pattern = f"^{''.join(tokens)}$"
+                flags = re.IGNORECASE if op == "ILIKE" else 0
+                filtered = filtered[filtered[col].astype(str).str.contains(pattern, regex=True, flags=flags, na=False)]
             elif op == "IN":
                 val_list = val if isinstance(val, (list, tuple, set)) else [val]
                 filtered = filtered[filtered[col].isin(val_list)]
@@ -689,6 +708,7 @@ class DataFrameMetricExecutor:
         self,
         operand: AtomicMetricOperand,
         filters: Sequence[MetricFilter] | None = None,
+        missing_value_policy: str = "zero",
     ) -> Any | None:
         table_name, column_name = parse_column_ref(operand.target_ref)
         df = self._resolve_df(table_name)
@@ -707,7 +727,27 @@ class DataFrameMetricExecutor:
         if column_name not in filtered.columns:
             raise DerivedMetricExecutionError(f"Column '{column_name}' not found in table '{table_name}'.")
 
-        series = filtered[column_name].dropna()
+        raw_series = filtered[column_name]
+        has_nulls = bool(raw_series.isna().any())
+        policy = (missing_value_policy or "zero").lower()
+
+        if has_nulls:
+            if policy == "error":
+                raise DerivedMetricExecutionError(
+                    f"Target column '{column_name}' contains null values under 'error' missing_value_policy."
+                )
+            elif policy == "zero":
+                if operand.aggregation.upper() in ("SUM", "AVG", "MIN", "MAX"):
+                    series = raw_series.fillna(0)
+                else:
+                    series = raw_series.dropna()
+            elif policy == "drop":
+                series = raw_series.dropna()
+            else:
+                series = raw_series.dropna()
+        else:
+            series = raw_series
+
         if series.empty:
             if operand.aggregation in ("COUNT", "COUNT_DISTINCT"):
                 return 0
@@ -738,8 +778,10 @@ class DataFrameMetricExecutor:
         recipe: MetricRecipe,
         filters: Sequence[MetricFilter] | None = None,
     ) -> MetricRecipeExecutionResult:
+        policy = getattr(recipe, "missing_value_policy", "zero")
+
         if isinstance(recipe, AtomicMetricRecipe):
-            value = self.execute_atomic(recipe.operand, filters=filters)
+            value = self.execute_atomic(recipe.operand, filters=filters, missing_value_policy=policy)
             return MetricRecipeExecutionResult(
                 metric_id=recipe.metric_id,
                 metric_type=recipe.metric_type,
@@ -757,8 +799,8 @@ class DataFrameMetricExecutor:
             )
 
         if isinstance(recipe, RatioMetricRecipe):
-            num_raw = self.execute_atomic(recipe.numerator, filters=filters)
-            den_raw = self.execute_atomic(recipe.denominator, filters=filters)
+            num_raw = self.execute_atomic(recipe.numerator, filters=filters, missing_value_policy=policy)
+            den_raw = self.execute_atomic(recipe.denominator, filters=filters, missing_value_policy=policy)
             numerator = _ensure_numeric(num_raw, role="numerator")
             denominator = _ensure_numeric(den_raw, role="denominator")
             components = [
@@ -799,8 +841,8 @@ class DataFrameMetricExecutor:
             )
 
         if isinstance(recipe, DifferenceMetricRecipe):
-            left_raw = self.execute_atomic(recipe.left, filters=filters)
-            right_raw = self.execute_atomic(recipe.right, filters=filters)
+            left_raw = self.execute_atomic(recipe.left, filters=filters, missing_value_policy=policy)
+            right_raw = self.execute_atomic(recipe.right, filters=filters, missing_value_policy=policy)
             left = _ensure_numeric(left_raw, role="left")
             right = _ensure_numeric(right_raw, role="right")
             components = [
@@ -831,8 +873,16 @@ class DataFrameMetricExecutor:
             )
 
         if isinstance(recipe, PeriodComparisonRecipe):
-            curr_res = self.execute(recipe.current_period_recipe, filters=filters)
-            prior_res = self.execute(recipe.prior_period_recipe, filters=filters)
+            curr_filters = list(filters or []) + [
+                MetricFilter(column=f.column, operator=f.operator, value=f.value)
+                for f in getattr(recipe, "current_filters", []) or []
+            ]
+            prior_filters = list(filters or []) + [
+                MetricFilter(column=f.column, operator=f.operator, value=f.value)
+                for f in getattr(recipe, "prior_filters", []) or []
+            ]
+            curr_res = self.execute(recipe.current_period_recipe, filters=curr_filters)
+            prior_res = self.execute(recipe.prior_period_recipe, filters=prior_filters)
             current_val = _ensure_numeric(curr_res.value, role="current_period")
             prior_val = _ensure_numeric(prior_res.value, role="prior_period")
 

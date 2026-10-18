@@ -104,7 +104,7 @@ async def get_ml_analysis(
     return pipeline_results
 
 
-def _detect_domain(df, problem_info, template_type=None):
+def _detect_domain(df, problem_info, template_type=None, chart_df=None):
     try:
         from services.automl_service import (
             deep_profile, ai_domain_strategy, ai_chart_planner,
@@ -113,7 +113,8 @@ def _detect_domain(df, problem_info, template_type=None):
         profile = deep_profile(df)
         strategy = ai_domain_strategy(profile)
         chart_specs = ai_chart_planner(profile, strategy)
-        charts = compute_chart_data(df, chart_specs, profile)
+        data_for_charts = chart_df if chart_df is not None else df
+        charts = compute_chart_data(data_for_charts, chart_specs, profile)
         kpis = compute_kpis(df, strategy, profile)
         return {
             "charts": charts,
@@ -185,7 +186,7 @@ async def get_quick_stats(
                 "business_question": "General exploration of data"
             }
 
-        domain_res = _detect_domain(df, problem_info, template_type=None)
+        domain_res = _detect_domain(df, problem_info, template_type=None, chart_df=chart_df)
         charts = domain_res.get("charts", [])
         for c in charts:
             if isinstance(c, dict):

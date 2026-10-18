@@ -163,12 +163,13 @@ def partition_dataset(
     feature_columns: list,
     target_column: Optional[str] = None,
     spec: Optional[TrainingSpecification] = None,
+    problem_type: Optional[str] = None,
 ) -> dict:
     """
     Partitions the raw dataset into train and test sets BEFORE any fitting,
     imputation, scaling, or encoding to eliminate data leakage (Defect I-10).
     Supports random, stratified, and temporal splitting strategies.
-    Detects class imbalance on classification targets.
+    Detects class imbalance strictly on classification targets.
     """
     specification = spec or TrainingSpecification()
     
@@ -180,19 +181,29 @@ def partition_dataset(
 
     clean_df = df[cols_to_use].dropna(how="all").copy()
 
+    # Supervised learning requires valid, non-null target values (Fix F01)
+    if target_column and target_column in clean_df.columns:
+        clean_df = clean_df.dropna(subset=[target_column])
+
+    # Resolve problem type
+    resolved_problem_type = problem_type
+    if not resolved_problem_type and target_column and target_column in clean_df.columns:
+        t_series = clean_df[target_column]
+        if t_series.dtype in ['object', 'category', 'string', 'bool'] or t_series.nunique() <= 10:
+            resolved_problem_type = "classification"
+        else:
+            resolved_problem_type = "regression"
+
     imbalance_detected = False
     imbalance_warning = None
     min_class_ratio = 1.0
     majority_baseline = None
     class_distribution = None
 
-    # Class imbalance analysis
-    if target_column and target_column in clean_df.columns:
-        target_series = clean_df[target_column].dropna()
-        if not target_series.empty and (
-            target_series.dtype in ['object', 'category', 'string', 'bool']
-            or target_series.nunique() <= 20
-        ):
+    # Class imbalance analysis strictly for classification targets (Fix F06)
+    if resolved_problem_type == "classification" and target_column and target_column in clean_df.columns:
+        target_series = clean_df[target_column]
+        if not target_series.empty:
             proportions = target_series.value_counts(normalize=True)
             if not proportions.empty:
                 min_class_ratio = float(proportions.min())
@@ -248,8 +259,10 @@ def partition_dataset(
         X_train, X_test = X_all.iloc[:split_idx], X_all.iloc[split_idx:]
         y_train, y_test = y_all.iloc[:split_idx], y_all.iloc[split_idx:]
         actual_strategy = "temporal"
-    elif specification.split_strategy == "stratified" or (
-        target_column and y_all.nunique() <= 20 and all(c >= 2 for c in y_all.value_counts())
+    elif resolved_problem_type == "classification" and (
+        specification.split_strategy == "stratified" or (
+            target_column and y_all.nunique() <= 20 and all(c >= 2 for c in y_all.value_counts())
+        )
     ):
         try:
             X_train, X_test, y_train, y_test = train_test_split(
@@ -362,6 +375,7 @@ def run_automl_pipeline(
         feature_columns=features,
         target_column=target if problem_type != "clustering" else None,
         spec=specification,
+        problem_type=problem_type,
     )
 
     X_train = partition["train_df"]
@@ -373,6 +387,99 @@ def run_automl_pipeline(
     preprocessor, num_cols, cat_cols = build_feature_preprocessor(available_features, X_train)
 
     results = []
+
+    def _train_and_eval_model(
+        candidate_name,
+        candidate_model,
+        preproc,
+        X_tr,
+        y_tr,
+        X_te,
+        y_te,
+        folds,
+        metric_score_name,
+        p_type,
+        numeric_columns,
+        categorical_columns,
+        feat_names,
+    ):
+        pipeline = Pipeline([
+            ("preprocessor", preproc),
+            ("model", candidate_model),
+        ])
+
+        # Model selection on train data strictly via Cross Validation
+        cv_scores = cross_val_score(pipeline, X_tr, y_tr, cv=folds, scoring=metric_score_name)
+        mean_cv = clean_float(float(np.mean(cv_scores)))
+
+        # Fit once on train and evaluate on holdout test
+        pipeline.fit(X_tr, y_tr)
+        y_pred = pipeline.predict(X_te)
+
+        if p_type == "regression":
+            test_score = clean_float(r2_score(y_te, y_pred))
+            mae = clean_float(mean_absolute_error(y_te, y_pred))
+            metric_label = "R² Score"
+        else:
+            test_score = clean_float(accuracy_score(y_te, y_pred))
+            mae = None
+            metric_label = "Accuracy"
+
+        # Extract feature importance if available and map back to parent features (Fix F04)
+        feat_imp = []
+        inner_model = pipeline.named_steps["model"]
+        if hasattr(inner_model, "feature_importances_"):
+            importances = inner_model.feature_importances_
+            try:
+                fitted_pre = pipeline.named_steps["preprocessor"]
+                transformed_names = fitted_pre.get_feature_names_out()
+                feature_map = {}
+                for feat_name, imp in zip(transformed_names, importances):
+                    raw_name = feat_name
+                    for prefix in ["num__", "cat__", "remainder__"]:
+                        if raw_name.startswith(prefix):
+                            raw_name = raw_name[len(prefix):]
+                            break
+                    parent = raw_name
+                    for c in categorical_columns:
+                        if raw_name == c or raw_name.startswith(f"{c}_"):
+                            parent = c
+                            break
+                    feature_map[parent] = feature_map.get(parent, 0.0) + float(imp)
+                feat_imp = [
+                    {"feature": f, "importance": round(clean_float(score), 4)}
+                    for f, score in sorted(feature_map.items(), key=lambda x: x[1], reverse=True)[:10]
+                ]
+            except Exception:
+                # Fallback to direct mapping
+                feat_imp = [
+                    {"feature": f, "importance": round(clean_float(i), 4)}
+                    for f, i in sorted(
+                        zip(feat_names[:len(importances)], importances.tolist()),
+                        key=lambda x: x[1], reverse=True
+                    )[:10]
+                ]
+
+        candidate_res = {
+            "model": candidate_name,
+            "score": round(float(test_score), 4),
+            "test_score": round(float(test_score), 4),
+            "cv_score": round(float(mean_cv), 4),
+            "metric": metric_label,
+            "feature_importance": feat_imp,
+            "predictions_sample": [clean_float(v) for v in y_pred[:20]],
+            "actual_sample": [clean_float(v) for v in y_te[:20]],
+        }
+        if mae is not None:
+            candidate_res["mae"] = round(float(mae), 4)
+            candidate_res["r2_score"] = round(float(test_score), 4)
+        else:
+            candidate_res["accuracy"] = round(float(test_score), 4)
+            f1_val = f1_score(y_te, y_pred, average="weighted", zero_division=0)
+            candidate_res["f1_score"] = round(float(f1_val), 4)
+            candidate_res["confusion_matrix"] = confusion_matrix(y_te, y_pred).tolist()
+
+        return candidate_res
 
     if problem_type in ["regression", "classification"]:
         if y_train is None or len(X_train) < 5:
@@ -411,66 +518,24 @@ def run_automl_pipeline(
         cv_folds = min(3, max(2, len(X_train) // 5))
 
         for name, model in candidate_models.items():
-            if time.time() - start_time > timeout:
+            remaining_time = timeout - (time.time() - start_time)
+            if remaining_time <= 0:
                 results.append({"model": name, "error": f"Training timeout exceeded ({timeout}s)", "score": -1.0})
                 continue
 
             try:
-                pipeline = Pipeline([
-                    ("preprocessor", preprocessor),
-                    ("model", model),
-                ])
-
-                # Model selection on train data strictly via Cross Validation
-                cv_scores = cross_val_score(pipeline, X_train, y_train, cv=cv_folds, scoring=scoring_metric)
-                mean_cv = clean_float(float(np.mean(cv_scores)))
-
-                # Fit once on train and evaluate on holdout test
-                pipeline.fit(X_train, y_train)
-                y_pred = pipeline.predict(X_test)
-
-                if problem_type == "regression":
-                    test_score = clean_float(r2_score(y_test, y_pred))
-                    mae = clean_float(mean_absolute_error(y_test, y_pred))
-                    metric_name = "R² Score"
-                else:
-                    test_score = clean_float(accuracy_score(y_test, y_pred))
-                    mae = None
-                    metric_name = "Accuracy"
-
-                # Extract feature importance if available
-                feat_imp = []
-                inner_model = pipeline.named_steps["model"]
-                if hasattr(inner_model, "feature_importances_"):
-                    importances = inner_model.feature_importances_
-                    feat_imp = [
-                        {"feature": f, "importance": round(clean_float(i), 4)}
-                        for f, i in sorted(
-                            zip(available_features[:len(importances)], importances.tolist()),
-                            key=lambda x: x[1], reverse=True
-                        )[:10]
-                    ]
-
-                res = {
-                    "model": name,
-                    "score": round(float(test_score), 4),
-                    "test_score": round(float(test_score), 4),
-                    "cv_score": round(float(mean_cv), 4),
-                    "metric": metric_name,
-                    "feature_importance": feat_imp,
-                    "predictions_sample": [clean_float(v) for v in y_pred[:20]],
-                    "actual_sample": [clean_float(v) for v in y_test[:20]],
-                }
-                if mae is not None:
-                    res["mae"] = round(float(mae), 4)
-                    res["r2_score"] = round(float(test_score), 4)
-                else:
-                    res["accuracy"] = round(float(test_score), 4)
-                    f1_val = f1_score(y_test, y_pred, average="weighted", zero_division=0)
-                    res["f1_score"] = round(float(f1_val), 4)
-                    res["confusion_matrix"] = confusion_matrix(y_test, y_pred).tolist()
-
-                results.append(res)
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(
+                        _train_and_eval_model,
+                        name, model, preprocessor,
+                        X_train, y_train, X_test, y_test,
+                        cv_folds, scoring_metric, problem_type,
+                        num_cols, cat_cols, available_features
+                    )
+                    res = future.result(timeout=max(0.1, remaining_time))
+                    results.append(res)
+            except TimeoutError:
+                results.append({"model": name, "error": f"Training timeout exceeded ({timeout}s)", "score": -1.0})
             except Exception as e:
                 results.append({"model": name, "error": str(e), "score": -1.0})
 
@@ -1339,19 +1404,33 @@ def compute_period_trend(
                 date_col = c
                 break
 
+    has_date_split = False
     if date_col and date_col in df.columns:
         try:
-            df_sorted = df.dropna(subset=[col]).sort_values(by=date_col)
-            if len(df_sorted) < 2:
+            df_sorted = df.dropna(subset=[col]).copy()
+            dt_series = pd.to_datetime(df_sorted[date_col], errors="coerce")
+            valid_dt = dt_series.dropna()
+            if len(valid_dt) >= 2 and valid_dt.min() < valid_dt.max():
+                df_sorted["__parsed_date__"] = dt_series
+                df_sorted = df_sorted.dropna(subset=["__parsed_date__"]).sort_values(by="__parsed_date__")
+                min_dt = df_sorted["__parsed_date__"].min()
+                max_dt = df_sorted["__parsed_date__"].max()
+                mid_dt = min_dt + (max_dt - min_dt) / 2
+                prior_df = df_sorted[df_sorted["__parsed_date__"] < mid_dt]
+                curr_df = df_sorted[df_sorted["__parsed_date__"] >= mid_dt]
+                has_date_split = True
+            elif len(df_sorted) >= 2:
+                df_sorted = df_sorted.sort_values(by=date_col)
+                mid = len(df_sorted) // 2
+                prior_df = df_sorted.iloc[:mid]
+                curr_df = df_sorted.iloc[mid:]
+            else:
                 return {
                     "trend_pct": None,
                     "trend_direction": "flat",
                     "trend_status": "no_prior_data",
                     "trend_label": "New Metric",
                 }
-            mid = len(df_sorted) // 2
-            prior_df = df_sorted.iloc[:mid]
-            curr_df = df_sorted.iloc[mid:]
         except Exception:
             mid = len(df) // 2
             prior_df = df.iloc[:mid]
@@ -1395,6 +1474,14 @@ def compute_period_trend(
             "trend_status": "no_prior_data",
             "trend_label": "No prior data",
         }
+
+    # Normalize prior value for sum/total/count when row counts differ on index split (Fix F02)
+    # E.g., 3 rows split into 1 prior row and 2 current rows on a flat series should have 0% trend.
+    ag_lower = str(agg).lower()
+    if ag_lower in ["sum", "total", "count"] and not has_date_split:
+        if len(prior_df) > 0 and len(curr_df) > 0 and len(prior_df) != len(curr_df):
+            scale_factor = len(curr_df) / len(prior_df)
+            prior_val = prior_val * scale_factor
 
     if prior_val == 0:
         if curr_val == 0:

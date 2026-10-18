@@ -203,6 +203,12 @@ class DifferenceMetricRecipe(BaseMetricRecipe):
         return self
 
 
+class RecipeFilter(StrictRecipeModel):
+    column: str
+    operator: Literal["=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IN"] = "="
+    value: Any
+
+
 # ============================================================
 # PERIOD COMPARISON RECIPE
 # ============================================================
@@ -212,6 +218,8 @@ class PeriodComparisonRecipe(BaseMetricRecipe):
     current_period_recipe: Union[AtomicMetricRecipe, RatioMetricRecipe, DifferenceMetricRecipe]
     prior_period_recipe: Union[AtomicMetricRecipe, RatioMetricRecipe, DifferenceMetricRecipe]
     comparison_type: Literal["percentage_change", "absolute_difference"] = "percentage_change"
+    current_filters: list[RecipeFilter] = Field(default_factory=list)
+    prior_filters: list[RecipeFilter] = Field(default_factory=list)
 
 
 # ============================================================

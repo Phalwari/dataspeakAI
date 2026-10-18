@@ -305,3 +305,170 @@ def test_dataframe_metric_executor_wildcard_count(parity_fixture):
     res = df_exec.execute(count_recipe)
     assert res.status == "ok"
     assert res.value == 6
+
+
+# ============================================================================
+# REGRESSION DEFECT TESTS (REV-NR2.1-QA-01)
+# ============================================================================
+
+from services.metric_recipes import RecipeFilter
+from services.derived_metric_executor import DerivedMetricExecutionError
+
+
+def test_period_comparison_with_current_and_prior_filters(parity_fixture, monkeypatch):
+    """Fix F03: PeriodComparisonRecipe with period-specific filters."""
+    db = parity_fixture["db"]
+    tenant = parity_fixture["tenant"]
+    db_conn = parity_fixture["db_conn"]
+    df = parity_fixture["df_sales"]
+
+    base_recipe = AtomicMetricRecipe(
+        metric_id="rev",
+        title="Revenue",
+        format="currency",
+        operand=AtomicMetricOperand(target_ref="sales.revenue", aggregation="SUM"),
+    )
+
+    comp_recipe = PeriodComparisonRecipe(
+        metric_id="period_growth",
+        title="Quarterly Growth",
+        format="percentage",
+        current_period_recipe=base_recipe,
+        prior_period_recipe=base_recipe,
+        current_filters=[RecipeFilter(column="sales.period", operator="=", value="2026-Q2")],
+        prior_filters=[RecipeFilter(column="sales.period", operator="=", value="2026-Q1")],
+        comparison_type="percentage_change",
+    )
+
+    df_exec = DataFrameMetricExecutor(df)
+    df_res = df_exec.execute(comp_recipe)
+
+    def fake_execute_atomic(operand, connection_id, tenant_id, db_conn, db, filters=None):
+        where_clause = ""
+        params = {}
+        if filters:
+            conditions = []
+            for idx, f in enumerate(filters):
+                col = f.column.split(".", 1)[-1]
+                p_name = f"p_{idx}"
+                conditions.append(f"{col} {f.operator} :{p_name}")
+                params[p_name] = f.value
+            where_clause = "WHERE " + " AND ".join(conditions)
+        sql = f"SELECT SUM(revenue) FROM sales {where_clause}"
+        with parity_fixture["engine"].connect() as conn:
+            val = conn.execute(text(sql), params).scalar()
+            return float(val) if val is not None else 0.0
+
+    monkeypatch.setattr(
+        "services.derived_metric_executor._execute_atomic_operand",
+        fake_execute_atomic,
+    )
+
+    sql_res = execute_metric_recipe(
+        recipe=comp_recipe,
+        connection_id=db_conn.id,
+        tenant_id=tenant.id,
+        db_conn=db_conn,
+        db=db,
+    )
+
+    # Q1 sum: 100+200+300 = 600. Q2 sum: 150+450+0 = 600. Growth = 0.0%
+    assert_parity(sql_res, df_res)
+    assert df_res.value == 0.0
+    assert df_res.status in ("ok", "flat")
+
+
+def test_dataframe_metric_executor_missing_value_policy():
+    """Fix F07: DataFrameMetricExecutor respects missing_value_policy."""
+    df_with_nulls = pd.DataFrame({
+        "revenue": [100.0, None, 200.0],
+    })
+
+    # 1. Error policy
+    error_recipe = AtomicMetricRecipe(
+        metric_id="rev_err",
+        title="Revenue Error",
+        format="currency",
+        missing_value_policy="error",
+        operand=AtomicMetricOperand(target_ref="default.revenue", aggregation="SUM"),
+    )
+    df_exec = DataFrameMetricExecutor(df_with_nulls)
+    with pytest.raises(DerivedMetricExecutionError, match="contains null values"):
+        df_exec.execute(error_recipe)
+
+    # 2. Zero policy for AVG: (100 + 0 + 200) / 3 = 100.0
+    zero_recipe = AtomicMetricRecipe(
+        metric_id="rev_zero",
+        title="Revenue Zero",
+        format="currency",
+        missing_value_policy="zero",
+        operand=AtomicMetricOperand(target_ref="default.revenue", aggregation="AVG"),
+    )
+    res_zero = df_exec.execute(zero_recipe)
+    assert res_zero.status == "ok"
+    assert math.isclose(float(res_zero.value), 100.0)
+
+    # 3. Drop policy for AVG: (100 + 200) / 2 = 150.0
+    drop_recipe = AtomicMetricRecipe(
+        metric_id="rev_drop",
+        title="Revenue Drop",
+        format="currency",
+        missing_value_policy="drop",
+        operand=AtomicMetricOperand(target_ref="default.revenue", aggregation="AVG"),
+    )
+    res_drop = df_exec.execute(drop_recipe)
+    assert res_drop.status == "ok"
+    assert math.isclose(float(res_drop.value), 150.0)
+
+
+def test_dataframe_metric_executor_like_filter_regex_safety():
+    """Fix F08: SQL LIKE filter handles regex special characters without crashing or overmatching."""
+    df = pd.DataFrame({
+        "name": ["price ($)", "cost (USD)", "item.name", "itemXname"],
+        "amount": [10.0, 20.0, 30.0, 40.0],
+    })
+    df_exec = DataFrameMetricExecutor(df)
+
+    # Test with regex characters: "price ($)"
+    filter_paren = [MetricFilter(column="name", operator="LIKE", value="price ($)")]
+    rec = AtomicMetricRecipe(
+        metric_id="amt",
+        title="Amount",
+        format="currency",
+        operand=AtomicMetricOperand(target_ref="default.amount", aggregation="SUM"),
+    )
+    res = df_exec.execute(rec, filters=filter_paren)
+    assert res.value == 10.0
+
+    # Test with dot "." - should match literal dot, not wildcard
+    filter_dot = [MetricFilter(column="name", operator="LIKE", value="item.name")]
+    res_dot = df_exec.execute(rec, filters=filter_dot)
+    assert res_dot.value == 30.0
+
+    # Test prefix matching "cost%"
+    filter_prefix = [MetricFilter(column="name", operator="LIKE", value="cost%")]
+    res_prefix = df_exec.execute(rec, filters=filter_prefix)
+    assert res_prefix.value == 20.0
+
+
+def test_detect_domain_respects_chart_df(monkeypatch):
+    """Fix F05: _detect_domain computes charts using chart_df when supplied."""
+    from routers.file_insights import _detect_domain
+
+    full_df = pd.DataFrame({"x": list(range(100)), "y": list(range(100))})
+    sampled_df = pd.DataFrame({"x": list(range(10)), "y": list(range(10))})
+
+    recorded_dfs = []
+
+    def fake_compute_chart_data(df, chart_specs, profile):
+        recorded_dfs.append(df)
+        return [{"id": "chart_1", "type": "bar"}]
+
+    import services.automl_service as ams
+    monkeypatch.setattr(ams, "compute_chart_data", fake_compute_chart_data)
+
+    problem_info = {"problem_type": "regression", "target_column": "y", "feature_columns": ["x"]}
+    res = _detect_domain(full_df, problem_info, chart_df=sampled_df)
+    assert len(recorded_dfs) == 1
+    assert len(recorded_dfs[0]) == 10  # Used sampled_df (Fix F05)
+
