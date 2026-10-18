@@ -401,3 +401,16 @@ def test_widget_sql_table_grants(isolated_app: TestClient, nr0_scenario, isolate
         assert chat_resp2.status_code == 200
         ans2 = chat_resp2.json()["answer"]
         assert "not permitted" in ans2.lower()
+
+    # 4. Streamed verification (Finding F02): When query is unauthorized, stream delivers error and terminates
+    with patch("routers.widget.generate_sql_from_nl", return_value={"sql": "SELECT * FROM users", "explanation": "users query"}):
+        stream_resp = isolated_app.post(
+            "/api/widget/chat",
+            json={"session_token": token2, "query": "show me all users in database table", "stream": True},
+            headers={"Origin": "https://acme.com"}
+        )
+        assert stream_resp.status_code == 200
+        stream_text = stream_resp.text
+        assert "not permitted" in stream_text.lower() or "restricted" in stream_text.lower()
+        assert '"done": true' in stream_text.lower()
+

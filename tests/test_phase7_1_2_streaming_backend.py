@@ -438,3 +438,119 @@ def test_failover_before_first_token():
 
     asyncio.run(_run())
 
+
+def test_static_fallback_persistence_failure_yields_persistence_failed_code():
+    """Verify F03: Persistence failure in static fallback emits terminal PERSISTENCE_FAILED error payload."""
+    async def _run():
+        fake_gateway = MagicMock()
+        fake_gateway.generate_stream = MagicMock()
+
+        def failing_on_complete(answer):
+            raise RuntimeError("Simulated DB connection drop during static save")
+
+        req = create_mock_request()
+        events = []
+
+        async for sse_line in stream_chat_response(
+            request=req,
+            conversation_id=99,
+            user_query="Test static failure",
+            prompt="",
+            tenant_id=1,
+            gateway=fake_gateway,
+            static_fallback="Static message",
+            on_complete=failing_on_complete
+        ):
+            events.append(json.loads(sse_line[6:].strip()))
+
+        # Must have yielded initial static chunk followed by terminal PERSISTENCE_FAILED event
+        assert len(events) == 2
+        assert events[0]["chunk"] == "Static message"
+        assert events[0]["done"] is False
+
+        assert events[1]["done"] is True
+        assert events[1]["code"] == "PERSISTENCE_FAILED"
+        assert "could not be saved" in events[1]["error"]
+        assert fake_gateway.generate_stream.call_count == 0
+
+    asyncio.run(_run())
+
+
+def test_static_fallback_delivers_answer_without_invoking_gateway():
+    """Verify F02: Static fallback (validation messages, disabled DB) delivers chunk and terminates without calling LLM."""
+    async def _run():
+        fake_gateway = MagicMock()
+        fake_gateway.generate_stream = MagicMock()
+
+        saved_msg_id = None
+        def successful_on_complete(answer):
+            nonlocal saved_msg_id
+            saved_msg_id = 1234
+            return {"message_id": 1234, "sources": [{"document_name": "Policy.pdf"}]}
+
+        req = create_mock_request()
+        events = []
+
+        async for sse_line in stream_chat_response(
+            request=req,
+            conversation_id=100,
+            user_query="Blocked query",
+            prompt="",
+            tenant_id=1,
+            gateway=fake_gateway,
+            static_fallback="Access to the requested table is restricted.",
+            on_complete=successful_on_complete
+        ):
+            events.append(json.loads(sse_line[6:].strip()))
+
+        assert len(events) == 2
+        assert events[0]["chunk"] == "Access to the requested table is restricted."
+        assert events[0]["done"] is False
+
+        assert events[1]["done"] is True
+        assert events[1]["message_id"] == 1234
+        assert events[1].get("error") is None
+        assert fake_gateway.generate_stream.call_count == 0
+
+    asyncio.run(_run())
+
+
+def test_synchronous_on_complete_offloaded_via_to_thread():
+    """Verify F04: Synchronous on_complete callback is offloaded off the asyncio event loop thread."""
+    import threading
+
+    async def _run():
+        fake_gateway = MagicMock()
+        fake_gateway.generate_stream = MagicMock(return_value=FakeAsyncStream(["Token1", " Token2"]))
+
+        callback_thread = None
+        main_thread = threading.current_thread()
+
+        def sync_on_complete(full_answer):
+            nonlocal callback_thread
+            callback_thread = threading.current_thread()
+            return 888
+
+        req = create_mock_request()
+        events = []
+
+        async for sse_line in stream_chat_response(
+            request=req,
+            conversation_id=101,
+            user_query="Thread check",
+            prompt="Prompt",
+            tenant_id=1,
+            gateway=fake_gateway,
+            on_complete=sync_on_complete
+        ):
+            events.append(json.loads(sse_line[6:].strip()))
+
+        assert events[-1]["done"] is True
+        assert events[-1]["message_id"] == 888
+        assert callback_thread is not None
+        # Confirms execution ran in a separate worker thread, not blocking the event loop
+        assert callback_thread != main_thread
+
+    asyncio.run(_run())
+
+

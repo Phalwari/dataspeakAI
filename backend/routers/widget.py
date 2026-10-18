@@ -686,7 +686,11 @@ def process_widget_chat(
             conv.updated_at = datetime.now(timezone.utc)
             db.commit()
             db.refresh(assistant_msg)
-            return int(assistant_msg.id)
+            return {
+                "message_id": int(assistant_msg.id),
+                "sources": meta_json.get("citations"),
+                "grounding": meta_json.get("grounding"),
+            }
 
         return StreamingResponse(
             stream_chat_response(
@@ -699,7 +703,8 @@ def process_widget_chat(
                 citations=citations,
                 sql_data=None,
                 query_type=route_type,
-                on_complete=on_stream_complete
+                on_complete=on_stream_complete,
+                static_fallback=assistant_answer,
             ),
             media_type="text/event-stream",
             headers={"Vary": "Origin", "Cache-Control": "no-cache"}
@@ -707,7 +712,7 @@ def process_widget_chat(
 
     # Non-streaming synchronous path: single generation
     if prompt and not assistant_answer:
-        ans = call_gemini_api(prompt, gemini_api_key or "")
+        ans = call_gemini_api(prompt, gemini_api_key or "", tenant_id=tenant_id)
         if ans:
             assistant_answer = ans
 

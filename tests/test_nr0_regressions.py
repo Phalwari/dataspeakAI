@@ -232,7 +232,7 @@ def test_probe_i14_widget_non_streaming_generates_answer_only_once(isolated_app,
     token = session_resp.json()["token"]
     
     generation_call_count = 0
-    def fake_gemini_api(prompt, key):
+    def fake_gemini_api(prompt, key, *args, **kwargs):
         nonlocal generation_call_count
         generation_call_count += 1
         return "Synthetic response."
@@ -284,3 +284,42 @@ def test_probe_i09_kpi_trend_does_not_compare_sum_to_mean():
     assert revenue_kpi["trend_pct"] != 900.0, (
         "Correctness Failure (I-09): KPI trend compared total sum to single-row mean, inventing 900% growth!"
     )
+
+
+def test_probe_extractors_multimodal_ocr_import_and_signature(monkeypatch):
+    """
+    Verify F01: extract_pdf_split_router correctly imports and invokes
+    generate_multimodal_with_gemini with image_b64_list and api_key without ImportError.
+    """
+    from ingestion.extractors import extract_pdf_split_router
+    from unittest.mock import MagicMock
+    import fitz
+    import tempfile
+    import os
+
+    # Create a dummy 1-page PDF without text (triggers visual escalation path)
+    doc = fitz.open()
+    doc.new_page(width=100, height=100)
+    pdf_bytes = doc.tobytes()
+    doc.close()
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        tmp.write(pdf_bytes)
+        tmp_path = tmp.name
+
+    try:
+        mock_multimodal = MagicMock(return_value="Transcribed scanned text")
+        monkeypatch.setattr("services.llm_generation_service.generate_multimodal_with_gemini", mock_multimodal)
+
+        content = extract_pdf_split_router(tmp_path, gemini_api_key="fake-test-key")
+        assert len(content.narrative_chunks) == 1
+        assert "Transcribed scanned text" in content.narrative_chunks[0].text
+        assert mock_multimodal.called
+        call_kwargs = mock_multimodal.call_args[1]
+        assert "image_b64_list" in call_kwargs
+        assert call_kwargs["api_key"] == "fake-test-key"
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+

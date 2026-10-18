@@ -228,9 +228,11 @@ export function WidgetApp({ initialConfig }: WidgetAppProps): ComponentChild {
           if (retrySec) {
             setRetryCountdown(retrySec);
           }
-          // Remove empty assistant placeholder if failed before stream started
+          // Remove empty assistant placeholder if failed before stream started, or clear isStreaming if partial
           setMessages((prev) =>
-            prev.filter((m) => !(m.id === assistantMsgId && !m.text))
+            prev
+              .filter((m) => !(m.id === assistantMsgId && !m.text))
+              .map((m) => (m.id === assistantMsgId ? { ...m, isStreaming: false } : m))
           );
         },
         abortCtrl.signal
@@ -242,7 +244,9 @@ export function WidgetApp({ initialConfig }: WidgetAppProps): ComponentChild {
         setErrorMessage(err.message || 'Unable to establish secure connection');
       }
       setMessages((prev) =>
-        prev.filter((m) => !(m.id === assistantMsgId && !m.text))
+        prev
+          .filter((m) => !(m.id === assistantMsgId && !m.text))
+          .map((m) => (m.id === assistantMsgId ? { ...m, isStreaming: false } : m))
       );
     }
   };

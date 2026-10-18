@@ -124,11 +124,12 @@ def extract_pdf_split_router(file_path: str, gemini_api_key: Optional[str] = Non
                         img_bytes = pix.tobytes("png")
                         img_b64 = base64.b64encode(img_bytes).decode('utf-8')
                         
-                        from services.llm_generation_service import generate_sync
+                        from services.llm_generation_service import generate_multimodal_with_gemini
                         ocr_prompt = "Perform high-precision OCR on this document page. Reconstruct all narrative text, section headings, and tabular data into clean Markdown formatting. Describe any key visual figures or charts present."
-                        raw_ocr = generate_sync(
+                        raw_ocr = generate_multimodal_with_gemini(
                             ocr_prompt,
-                            image_b64_list=[img_b64]
+                            image_b64_list=[img_b64],
+                            api_key=gemini_api_key,
                         )
                         if raw_ocr and not raw_ocr.startswith("Sorry, all AI providers"):
                             page_text = f"[Scanned Page {page_num} OCR & Visual Parsing (Gemini 2.5 Flash)]\n" + raw_ocr.strip()

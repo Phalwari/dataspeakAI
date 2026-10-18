@@ -11,6 +11,8 @@ Features:
 - Sanitized in-flight error recovery preventing credential or stack trace leakage.
 - 100% backward compatibility with existing widget and frontend SSE parsers.
 """
+import asyncio
+import inspect
 import json
 import logging
 from typing import AsyncGenerator, Optional, List, Dict, Any, Callable
@@ -95,7 +97,11 @@ async def stream_chat_response(
             static_sql_agent = None
             if on_complete:
                 try:
-                    res = on_complete(static_fallback)
+                    if inspect.iscoroutinefunction(on_complete):
+                        res = await on_complete(static_fallback)
+                    else:
+                        res = await asyncio.to_thread(on_complete, static_fallback)
+
                     if isinstance(res, int):
                         returned_msg_id = res
                     elif isinstance(res, dict):
@@ -104,7 +110,16 @@ async def stream_chat_response(
                         static_grounding = res.get("grounding")
                         static_sql_agent = res.get("sql_agent")
                 except Exception as cb_err:
-                    logger.warning(f"[ChatStream Callback Error] {cb_err}")
+                    logger.error(f"[ChatStream Callback Error in static fallback] {cb_err}")
+                    err_payload = json.dumps({
+                        "chunk": "",
+                        "done": True,
+                        "error": "Message could not be saved to conversation history.",
+                        "code": "PERSISTENCE_FAILED",
+                        "conversation_id": conversation_id
+                    })
+                    yield f"data: {err_payload}\n\n"
+                    return
 
             effective_static_citations = static_sources if static_sources is not None else citations
             static_sources_list = []
@@ -165,7 +180,10 @@ async def stream_chat_response(
 
         if on_complete:
             try:
-                res = on_complete(full_answer)
+                if inspect.iscoroutinefunction(on_complete):
+                    res = await on_complete(full_answer)
+                else:
+                    res = await asyncio.to_thread(on_complete, full_answer)
                 if isinstance(res, int):
                     returned_msg_id = res
                 elif isinstance(res, dict):
