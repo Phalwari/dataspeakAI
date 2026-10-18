@@ -6,7 +6,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./app.db")
+raw_db_url = os.getenv("DATABASE_URL")
+if not raw_db_url or raw_db_url == "sqlite:///./app.db":
+    backend_dir = os.path.dirname(os.path.abspath(__file__))
+    default_db = os.path.join(backend_dir, "app.db").replace("\\", "/")
+    SQLALCHEMY_DATABASE_URL = f"sqlite:///{default_db}"
+else:
+    SQLALCHEMY_DATABASE_URL = raw_db_url
 
 # For SQLite, we need connect_args={"check_same_thread": False}
 # For PostgreSQL (production), we don't.

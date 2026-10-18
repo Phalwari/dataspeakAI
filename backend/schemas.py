@@ -398,6 +398,26 @@ class DocumentBase(BaseModel):
     visual_pages: int = 0
     celery_task_id: Optional[str] = None
     embedding_model: Optional[str] = "all-MiniLM-L6-v2"
+    storage_key: Optional[str] = None
+    content_sha256: Optional[str] = None
+    version: int = 1
+    ingestion_job_id: Optional[str] = None
+    progress_step: Optional[str] = "queued"
+    last_heartbeat_at: Optional[datetime] = None
+    is_deleted: bool = False
+
+class DocumentStatusResponse(BaseModel):
+    document_id: int
+    status: str
+    progress: float
+    progress_step: Optional[str] = None
+    error_message: Optional[str] = None
+    pages_processed: int = 0
+    total_pages: int = 0
+    last_heartbeat_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
 
 class DocumentResponse(DocumentBase):
     id: int

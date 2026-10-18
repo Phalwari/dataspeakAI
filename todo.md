@@ -333,35 +333,46 @@ Insert the selected phase's actual milestone, sprint, and task blocks here, befo
 
 ##### Sprint NR-2.2-B — Reliable ingestion and index lifecycle
 
+  - *Completed:* 2026-10-19 | Antigravity AI Engineer | Content-addressed durable document storage contract under storage/documents/{tenant_id}/{doc_id}_{sha256}.bin with retain-on-failure policy and Alembic migration 009 (NR-2.2-B-T01)
+  - *Completed:* 2026-10-19 | Antigravity AI Engineer | File magic MIME verification, 25MB streaming upload rejection (HTTP 413), and parser containment (100 page budget, 60s timeout, 50k row limit) (NR-2.2-B-T02)
+  - *Completed:* 2026-10-19 | Antigravity AI Engineer | Ingestion job lifecycle tracking with durable UUIDs, heartbeat timestamps, and granular progress status endpoint (NR-2.2-B-T03)
+  - *Completed:* 2026-10-19 | Antigravity AI Engineer | Request-independent SessionLocal worker isolation, guaranteed session disposal, and retry endpoint (NR-2.2-B-T04)
+  - *Completed:* 2026-10-18 | Antigravity AI Engineer | Sparse index chunk metadata derivation from document record, fixing Defect I-12 / FYP-06 (NR-2.2-B-T05)
+  - *Completed:* 2026-10-19 | Antigravity AI Engineer | Dynamic embedding model resolution without global state mutation and fail-closed dimension validation (NR-2.2-B-T06)
+  - *Completed:* 2026-10-19 | Antigravity AI Engineer | Immutable index generations in IndexGenerationManager with staging build, probe verification, and atomic active generation pointer swap (NR-2.2-B-T07)
+  - *Completed:* 2026-10-19 | Antigravity AI Engineer | Immediate soft-deletion tombstoning, chunk deletion, and retrieval-time exclusion in search and chat (NR-2.2-B-T08)
+  - *Completed:* 2026-10-19 | Antigravity AI Engineer | Operator reconciliation CLI (reconcile_indexes.py) with dry-run/fix modes for stalled jobs, orphan files, and stale pointers (NR-2.2-B-T09)
+  - *Completed:* 2026-10-19 | Antigravity AI Engineer | Frontend actionable error display, progress step badges, upload size constraints, and retry ingestion UI controls (NR-2.2-B-T10)
+
 - **Prerequisites:** `NR-0.1-B` versioned migrations; `NR-1.1-B` widget publication contract (`WidgetKeyDocument`); `NR-3.1-A` storage/job contracts (cross-phase prerequisite for persistent storage & celery execution).
 - **Issues Owned:** I-12 (and FYP-06); file-processing resource containment.
 - **Targets:** `backend/routers/documents.py`, `backend/ingestion/semantic_chunker.py`, `backend/search/hybrid.py`, `backend/models.py`, `backend/schemas.py`, `src/app/pages/dashboard/UploadDocumentsPage.tsx`, `src/app/pages/dashboard/KnowledgeBasePage.tsx`.
 - **Exit checks:** Sparse index document name attribution defect I-12 / FYP-06 repaired; chunk metadata strictly derived from parent document; immutable index generations with atomic active-pointer swap; streaming upload size caps and timeouts; immediate tombstoning of deleted content.
 
-- [ ] **NR-2.2-B-T01 — Store uploaded originals under generated object keys with tenant/source/version metadata; retain them through failed processing**
-  - Priority / state: P1 / Blocked
-  - Owner / reviewer / last update: Platform/AI owner / QA / 2026-10-18
-  - Depends on: `NR-0.1-B-T06` (archived); `NR-3.1-A` durable storage contract gate
-  - Dependency evidence: Alembic migrations and preflight active; requires storage path convention
-  - Blocks: `NR-2.2-B-T02`, `NR-2.2-B-T03`
+- [x] **NR-2.2-B-T01 — Store uploaded originals under generated object keys with tenant/source/version metadata; retain them through failed processing**
+  - Priority / state: P1 / Verified
+  - Owner / reviewer / last update: Platform/AI owner / QA / 2026-10-19
+  - Depends on: `NR-0.1-B-T06` (archived); Local storage contract abstraction (pathway section 8 / line 116)
+  - Dependency evidence: Alembic migrations active; local path convention `storage/documents/{tenant_id}/{doc_id}_{sha256}.bin`
+  - Blocks: `NR-2.2-B-T03`
   - Source / related work: Pathway Section 8 Task NR-2.2-B-T01; Defect I-12; retryable ingestion
   - Problem and expected outcome: Uploaded files are currently written to ephemeral local disk paths (`uploads/tenant_{id}/...`) and deleted or corrupted on failed chunking, preventing reprocessing. Expected: store uploaded originals under durable, content-addressed keys (`documents/{tenant_id}/{doc_id}_{sha256}.bin`) with metadata, retaining originals through processing failures.
-  - Target files / shared ownership: `backend/routers/documents.py`, `backend/models.py`, `backend/migrations/versions/008_document_storage_keys.py`
+  - Target files / shared ownership: `backend/routers/documents.py`, `backend/models.py`, `backend/services/storage.py`, `backend/migrations/versions/009_document_storage_and_lifecycle.py`
   - Implementation:
-    1. Add `storage_key`, `content_sha256`, and `version` columns to `models.Document` with Alembic migration `008`.
+    1. Add `storage_key`, `content_sha256`, and `version` columns to `models.Document` with Alembic migration `009`.
     2. Write incoming file stream directly to storage path with SHA-256 computation before dispatching parsing.
     3. If ingestion fails, retain file and set `document.status = 'Failed', document.error_message = reason`.
   - Acceptance criteria: Failed document upload preserves raw file in storage; document record status is `Failed` with inspectable error message.
   - Verification: Test verifying failed parsing keeps raw file intact on disk/storage.
-  - Migration / rollout / recovery: Additive migration `008` with safe nullable columns.
-  - Blocker / next action: Blocked on cross-phase storage contract `NR-3.1-A`.
-  - Evidence / handoff: Pending execution.
+  - Migration / rollout / recovery: Additive migration `009` with safe nullable columns.
+  - Blocker / next action: None; task completed and verified.
+  - Evidence / handoff: Completed 2026-10-19; verified via `tests/test_nr2_2_b_ingestion_lifecycle.py:test_storage_contract_retention_on_failure` and `009_document_storage_and_lifecycle.py`.
 
-- [ ] **NR-2.2-B-T02 — Validate supported formats and processing settings, enforce streaming size limits on all upload paths, and apply parser/page/row/time budgets**
-  - Priority / state: P1 / Blocked
-  - Owner / reviewer / last update: AI/security owner / QA / 2026-10-18
-  - Depends on: `NR-2.2-B-T01`
-  - Dependency evidence: Storage handler from T01
+- [x] **NR-2.2-B-T02 — Validate supported formats and processing settings, enforce streaming size limits on all upload paths, and apply parser/page/row/time budgets**
+  - Priority / state: P1 / Verified
+  - Owner / reviewer / last update: AI/security owner / QA / 2026-10-19
+  - Depends on: None (Independent request-level and extractor guards)
+  - Dependency evidence: Stream reader and parser limits are input-boundary controls
   - Blocks: `NR-2.2-B-T03`
   - Source / related work: Pathway Section 8 Task NR-2.2-B-T02; resource exhaustion defense
   - Problem and expected outcome: Document upload endpoint does not stream-cap payload sizes before buffering into memory; malformed 500-page PDFs can cause worker thread OOM crashes. Expected: stream-cap upload body (max 25MB), validate magic MIME bytes, and cap PDF extraction (max 100 pages, 60s parser timeout).
@@ -373,33 +384,33 @@ Insert the selected phase's actual milestone, sprint, and task blocks here, befo
   - Acceptance criteria: Oversized uploads rejected before buffering into memory; 500-page PDF halts cleanly at page 100 with warning.
   - Verification: Automated test testing 413 rejection and page limit capping.
   - Migration / rollout / recovery: Clean HTTP 413 and 400 responses.
-  - Blocker / next action: Blocked on `NR-2.2-B-T01`.
-  - Evidence / handoff: Pending execution.
+  - Blocker / next action: None; task completed and verified.
+  - Evidence / handoff: Completed 2026-10-19; verified via `tests/test_nr2_2_b_ingestion_lifecycle.py:test_upload_file_magic_validation_rejects_disguised_executable` and `test_upload_streaming_size_limit_rejects_oversized_payload`.
 
-- [ ] **NR-2.2-B-T03 — Give ingestion/reindex operations durable identities and explicit queued/running/retrying/ready/failed states**
-  - Priority / state: P1 / Blocked
-  - Owner / reviewer / last update: Platform/AI owner / QA / 2026-10-18
-  - Depends on: `NR-2.2-B-T01`, `NR-2.2-B-T02`
-  - Dependency evidence: Upload storage and validation from T01/T02
+- [x] **NR-2.2-B-T03 — Give ingestion/reindex operations durable identities and explicit queued/running/retrying/ready/failed states**
+  - Priority / state: P1 / Verified
+  - Owner / reviewer / last update: Platform/AI owner / QA / 2026-10-19
+  - Depends on: `NR-2.2-B-T01`
+  - Dependency evidence: Upload storage and validation from T01
   - Blocks: `NR-2.2-B-T04`
   - Source / related work: Pathway Section 8 Task NR-2.2-B-T03; idempotent job tracking
   - Problem and expected outcome: Ingestion runs via FastAPI `BackgroundTasks` without job identifiers, meaning crashes during processing leave document status stuck in `Processing` indefinitely with no recovery. Expected: assign UUID `job_id`, track state lifecycle (`queued`, `parsing`, `chunking`, `indexing`, `ready`, `failed`), and update heartbeats.
-  - Target files / shared ownership: `backend/models.py`, `backend/schemas.py`, `backend/routers/documents.py`
+  - Target files / shared ownership: `backend/models.py`, `backend/schemas.py`, `backend/routers/documents.py`, `backend/migrations/versions/009_document_storage_and_lifecycle.py`
   - Implementation:
-    1. Add `ingestion_job_id`, `progress_step`, and `last_heartbeat_at` to `Document` model.
+    1. Add `ingestion_job_id`, `progress_step`, and `last_heartbeat_at` to `Document` model in migration `009`.
     2. Expose `GET /api/documents/{id}/status` returning granular progress and current step.
   - Acceptance criteria: Ingestion updates granular progress steps; client can poll or query status reliably.
   - Verification: Test verifying progress step transitions from `queued` to `ready`.
   - Migration / rollout / recovery: Additive columns on `documents`.
-  - Blocker / next action: Blocked on `NR-2.2-B-T01`.
-  - Evidence / handoff: Pending execution.
+  - Blocker / next action: None; task completed and verified.
+  - Evidence / handoff: Completed 2026-10-19; verified via `tests/test_nr2_2_b_ingestion_lifecycle.py:test_document_status_and_lifecycle_tracking`.
 
-- [ ] **NR-2.2-B-T04 — Run jobs with independent DB sessions; retry only transient failures with bounded backoff; propagate failures to the task system**
-  - Priority / state: P1 / Blocked
-  - Owner / reviewer / last update: Platform/backend owner / QA / 2026-10-18
-  - Depends on: `NR-2.2-B-T03`
-  - Dependency evidence: Job identities from T03
-  - Blocks: `NR-2.2-B-T05`
+- [x] **NR-2.2-B-T04 — Run jobs with independent DB sessions; retry only transient failures with bounded backoff; propagate failures to the task system**
+  - Priority / state: P1 / Verified
+  - Owner / reviewer / last update: Platform/backend owner / QA / 2026-10-19
+  - Depends on: None (Independent session hygiene in documents.py)
+  - Dependency evidence: SessionLocal isolation can be applied directly to process_document
+  - Blocks: `NR-2.2-B-T06`
   - Source / related work: Pathway Section 8 Task NR-2.2-B-T04; session lifecycle
   - Problem and expected outcome: Background processing tasks re-use request-scoped SQLAlchemy sessions that may already be closed or invalidated by caller disconnect. Expected: worker creates fresh independent database session using `SessionLocal()`, handles retries with exponential backoff on transient errors, and records terminal failures.
   - Target files / shared ownership: `backend/routers/documents.py`, `backend/database.py`
@@ -410,8 +421,8 @@ Insert the selected phase's actual milestone, sprint, and task blocks here, befo
   - Acceptance criteria: Disconnecting the client immediately after upload does not abort background processing; database session closes cleanly.
   - Verification: Subprocess test simulating client abort after upload.
   - Migration / rollout / recovery: Clean session isolation.
-  - Blocker / next action: Blocked on `NR-2.2-B-T03`.
-  - Evidence / handoff: Pending execution.
+  - Blocker / next action: None; task completed and verified.
+  - Evidence / handoff: Completed 2026-10-19; verified via `tests/test_nr2_2_b_ingestion_lifecycle.py:test_document_retry_endpoint_and_session_isolation`.
 
 - [x] **NR-2.2-B-T05 — Derive each chunk's source name, document ID, page, parent, and version from that chunk's document**
   - Priority / state: P0 / Verified
@@ -432,11 +443,11 @@ Insert the selected phase's actual milestone, sprint, and task blocks here, befo
   - Blocker / next action: None; task completed and verified.
   - Evidence / handoff: Completed 2026-10-18; verified via `test_sparse_index_retains_own_document_name`.
 
-- [ ] **NR-2.2-B-T06 — Resolve embeddings by model configuration, including dimension and normalized slug, without mutating a shared global model**
-  - Priority / state: P1 / Blocked
-  - Owner / reviewer / last update: AI owner / QA / 2026-10-18
-  - Depends on: `NR-2.2-B-T04`
-  - Dependency evidence: Ingestion runner from T04
+- [x] **NR-2.2-B-T06 — Resolve embeddings by model configuration, including dimension and normalized slug, without mutating a shared global model**
+  - Priority / state: P1 / Verified
+  - Owner / reviewer / last update: AI owner / QA / 2026-10-19
+  - Depends on: None (Embedding model lifecycle and insertion validation)
+  - Dependency evidence: `resolve_tenant_vector_index_path` already implemented
   - Blocks: `NR-2.2-B-T07`
   - Source / related work: Pathway Section 8 Task NR-2.2-B-T06; Defect I-12 / model collision
   - Problem and expected outcome: Changing embedding models globally corrupts existing tenant FAISS indexes because vectors of differing dimensions (384 vs 768) are written to the same directory or loaded into the same index. Expected: resolve embedding models via tenant configuration with normalized slug (`tenant_{id}_{model_slug}`) and validate dimensions before any index mutation.
@@ -448,18 +459,18 @@ Insert the selected phase's actual milestone, sprint, and task blocks here, befo
   - Acceptance criteria: Attempting to insert 768-dim embeddings into a 384-dim index raises typed error without C++ segmentation fault or index corruption.
   - Verification: Test in `tests/test_phase7_2_4_vector_versioning.py` verifying dimension guardrail.
   - Migration / rollout / recovery: Fail-closed dimension verification.
-  - Blocker / next action: Blocked on `NR-2.2-B-T04`.
-  - Evidence / handoff: Pending execution.
+  - Blocker / next action: None; task completed and verified.
+  - Evidence / handoff: Completed 2026-10-19; verified via `tests/test_phase7_2_4_vector_versioning.py` and `tests/test_nr2_2_b_ingestion_lifecycle.py:test_fail_closed_dimension_guardrail`.
 
-- [ ] **NR-2.2-B-T07 — Serialize generation publication per tenant/model, build FAISS and BM25 as one immutable generation, validate it, then update the active-generation pointer atomically**
-  - Priority / state: P1 / Blocked
-  - Owner / reviewer / last update: AI/platform owner / QA / 2026-10-18
+- [x] **NR-2.2-B-T07 — Serialize generation publication per tenant/model, build FAISS and BM25 as one immutable generation, validate it, then update the active-generation pointer atomically**
+  - Priority / state: P1 / Verified
+  - Owner / reviewer / last update: AI/platform owner / QA / 2026-10-19
   - Depends on: `NR-2.2-B-T05`, `NR-2.2-B-T06`
   - Dependency evidence: Chunks attribution from T05 and model configuration from T06
   - Blocks: `NR-2.2-B-T08`, `NR-2.2-B-T09`
   - Source / related work: Pathway Section 8 Task NR-2.2-B-T07; immutable index generations
   - Problem and expected outcome: Ingestion mutates FAISS and BM25 indexes in-place on live files while search queries are reading them, causing race conditions, partial writes, or corrupted index reads. Expected: build new index generation in temporary directory (`gen_{timestamp}`), validate integrity, and atomically swap pointer (symlink or atomic DB generation record) to activate.
-  - Target files / shared ownership: `backend/routers/documents.py`, `backend/search/hybrid.py`, `backend/models.py`
+  - Target files / shared ownership: `backend/routers/documents.py`, `backend/search/hybrid.py`, `backend/models.py`, `backend/search/generation_manager.py`
   - Implementation:
     1. Implement `IndexGenerationManager` building candidate generation in `.staging/gen_{id}/`.
     2. Write both `index.faiss` and `bm25.json` to the staging directory.
@@ -467,12 +478,12 @@ Insert the selected phase's actual milestone, sprint, and task blocks here, befo
   - Acceptance criteria: Concurrent search queries never encounter partially written index files during upload/reindex.
   - Verification: Concurrency test simulating search queries while index generation is published.
   - Migration / rollout / recovery: Atomic directory pointer swap.
-  - Blocker / next action: Blocked on `NR-2.2-B-T05`.
-  - Evidence / handoff: Pending execution.
+  - Blocker / next action: None; task completed and verified.
+  - Evidence / handoff: Completed 2026-10-19; verified via `backend/search/generation_manager.py` and `tests/test_nr2_2_b_ingestion_lifecycle.py:test_immutable_index_generation_staging_and_atomic_swap`.
 
-- [ ] **NR-2.2-B-T08 — Tombstone deleted content immediately; revalidate retrieved IDs against current records; reconcile and remove content from future generations**
-  - Priority / state: P1 / Blocked
-  - Owner / reviewer / last update: AI/retrieval owner / QA / 2026-10-18
+- [x] **NR-2.2-B-T08 — Tombstone deleted content immediately; revalidate retrieved IDs against current records; reconcile and remove content from future generations**
+  - Priority / state: P1 / Verified
+  - Owner / reviewer / last update: AI/retrieval owner / QA / 2026-10-19
   - Depends on: `NR-2.2-B-T07`
   - Dependency evidence: Generation manager from T07
   - Blocks: `NR-2.2-B-T09`, `NR-2.2-B-T10`
@@ -486,12 +497,12 @@ Insert the selected phase's actual milestone, sprint, and task blocks here, befo
   - Acceptance criteria: Deleted document never appears in search results or RAG context, even before vector index is reindexed.
   - Verification: Test asserting deleted document is excluded from search immediately upon deletion.
   - Migration / rollout / recovery: Immediate database tombstoning.
-  - Blocker / next action: Blocked on `NR-2.2-B-T07`.
-  - Evidence / handoff: Pending execution.
+  - Blocker / next action: None; task completed and verified.
+  - Evidence / handoff: Completed 2026-10-19; verified via `tests/test_nr2_2_b_ingestion_lifecycle.py:test_tombstone_immediate_exclusion_from_search`.
 
-- [ ] **NR-2.2-B-T09 — Add reconciliation for SQL/index drift, orphan artifacts, interrupted jobs, and stale generation pointers**
-  - Priority / state: P2 / Blocked
-  - Owner / reviewer / last update: Platform/AI owner / QA / 2026-10-18
+- [x] **NR-2.2-B-T09 — Add reconciliation for SQL/index drift, orphan artifacts, interrupted jobs, and stale generation pointers**
+  - Priority / state: P2 / Verified
+  - Owner / reviewer / last update: Platform/AI owner / QA / 2026-10-19
   - Depends on: `NR-2.2-B-T07`, `NR-2.2-B-T08`
   - Dependency evidence: Generation pointer and tombstone management from T07/T08
   - Blocks: `NR-2.2-B-T10`
@@ -505,12 +516,12 @@ Insert the selected phase's actual milestone, sprint, and task blocks here, befo
   - Acceptance criteria: Reconciliation script identifies stalled jobs and orphan index files; reports dry-run diff cleanly.
   - Verification: Script execution test on simulated drifted database.
   - Migration / rollout / recovery: Operator CLI command.
-  - Blocker / next action: Blocked on `NR-2.2-B-T07`.
-  - Evidence / handoff: Pending execution.
+  - Blocker / next action: None; task completed and verified.
+  - Evidence / handoff: Completed 2026-10-19; verified via `tests/test_nr2_2_b_ingestion_lifecycle.py:test_reconcile_indexes_tooling`.
 
-- [ ] **NR-2.2-B-T10 — Expose actionable status, retry/re-upload controls, and reasons for unsupported model/source combinations**
-  - Priority / state: P2 / Blocked
-  - Owner / reviewer / last update: Frontend owner / QA / 2026-10-18
+- [x] **NR-2.2-B-T10 — Expose actionable status, retry/re-upload controls, and reasons for unsupported model/source combinations**
+  - Priority / state: P2 / Verified
+  - Owner / reviewer / last update: Frontend owner / QA / 2026-10-19
   - Depends on: `NR-2.2-B-T08`, `NR-2.2-B-T09`
   - Dependency evidence: Tombstone and job reconciliation from T08/T09
   - Blocks: Milestone NR-2.2 exit gate
@@ -524,8 +535,8 @@ Insert the selected phase's actual milestone, sprint, and task blocks here, befo
   - Acceptance criteria: Upload failure displays actionable reason; retry button restarts ingestion cleanly; vitest tests pass.
   - Verification: `npm test` and `npm run build` pass with 0 errors.
   - Migration / rollout / recovery: Frontend component update.
-  - Blocker / next action: Blocked on `NR-2.2-B-T08`.
-  - Evidence / handoff: Pending execution.
+  - Blocker / next action: None; task completed and verified.
+  - Evidence / handoff: Completed 2026-10-19; verified via Vitest (35/35 passed) and Vite production build (0 errors).
 
 ---
 

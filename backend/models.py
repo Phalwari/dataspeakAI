@@ -309,6 +309,13 @@ class Document(Base):
     visual_pages = Column(Integer, default=0)      # Pages that required VLM processing
     celery_task_id = Column(String, nullable=True)
     embedding_model = Column(String, default="all-MiniLM-L6-v2")
+    storage_key = Column(String(512), nullable=True)
+    content_sha256 = Column(String(64), nullable=True)
+    version = Column(Integer, default=1, nullable=False)
+    ingestion_job_id = Column(String(64), nullable=True)
+    progress_step = Column(String(64), default="queued", nullable=True)
+    last_heartbeat_at = Column(DateTime, nullable=True)
+    is_deleted = Column(Boolean, default=False, nullable=False, server_default=text("false"))
     created_at = Column(DateTime, default=utc_now)
     tenant = relationship("Tenant")
     chunks = relationship("DocumentChunk", back_populates="document", cascade="all, delete-orphan")

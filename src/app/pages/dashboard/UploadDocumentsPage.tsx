@@ -269,7 +269,7 @@ export function UploadDocumentsPage() {
             <CardHeader>
               <CardTitle>Select Files</CardTitle>
               <CardDescription>
-                Upload PDF, DOCX, XLSX, PPTX, CSV, HTML, MD, or TXT files (max 100MB each)
+                Upload PDF, DOCX, XLSX, PPTX, CSV, HTML, MD, or TXT files (max 25MB each)
               </CardDescription>
             </CardHeader>
             <CardContent>

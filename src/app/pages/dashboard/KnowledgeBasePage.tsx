@@ -205,6 +205,28 @@ export function KnowledgeBasePage() {
     }
   };
 
+  const handleRetryIngestion = async (id: number) => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/documents/${id}/retry`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (response.ok) {
+        toast.success("Ingestion retry initiated");
+        fetchDocuments();
+      } else {
+        const err = await response.json().catch(() => ({}));
+        toast.error(err.detail || "Failed to retry ingestion");
+      }
+    } catch (error) {
+      console.error("Failed to retry ingestion:", error);
+      toast.error("Failed to retry ingestion");
+    }
+  };
+
   const fetchDocumentChunks = async (document: any) => {
     setSelectedDocument(document);
     setDocumentChunks([]);
@@ -258,10 +280,14 @@ export function KnowledgeBasePage() {
   const renderStatusCell = (doc: any) => {
     if (doc.status === "Processing") {
       const percent = Math.round((doc.progress || 0) * 100);
+      const step = doc.progress_step || "processing";
       return (
-        <div className="flex items-center gap-2 min-w-[120px]">
+        <div className="flex flex-col gap-1 min-w-[130px]">
+          <div className="flex items-center justify-between text-xs">
+            <span className="capitalize text-yellow-700 font-medium">{step}</span>
+            <span className="text-xs font-semibold text-yellow-700">{percent}%</span>
+          </div>
           <Progress value={percent} className="h-2 bg-yellow-100 [&>[data-slot=progress-indicator]]:bg-yellow-500 flex-1" />
-          <span className="text-xs font-semibold text-yellow-700">{percent}%</span>
         </div>
       );
     }
@@ -433,6 +459,18 @@ export function KnowledgeBasePage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center justify-end gap-2">
+                      {doc.status === "Failed" && (
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="text-amber-600 border-amber-200 hover:bg-amber-50 h-8 gap-1 text-xs"
+                          onClick={() => handleRetryIngestion(doc.id)}
+                          title="Retry Ingestion"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          Retry
+                        </Button>
+                      )}
                       <Button 
                         variant="ghost" 
                         size="icon" 
@@ -457,6 +495,12 @@ export function KnowledgeBasePage() {
                             <Info className="w-4 h-4 mr-2" />
                             View Details
                           </DropdownMenuItem>
+                          {doc.status === "Failed" && (
+                            <DropdownMenuItem onClick={() => handleRetryIngestion(doc.id)}>
+                              <RefreshCw className="w-4 h-4 mr-2 text-amber-600" />
+                              Retry Ingestion
+                            </DropdownMenuItem>
+                          )}
                           <DropdownMenuItem onClick={() => handleReindex(doc.id)}>
                             <RefreshCw className="w-4 h-4 mr-2" />
                             Re-index

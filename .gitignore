@@ -15,6 +15,8 @@ __pycache__/
 backend/uploads/
 backend/vector_store/
 vector_store/
+storage/
+backend/storage/
 _qa_tmp/
 backend/app.db
 *.db
@@ -32,6 +34,9 @@ scratch/
 .cursor/
 .gemini/
 .mcp.json
+.agents/fyp-verification/
+.agents/sds-submission/
+.agents/mcp_config.json
 qa_app.db
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).

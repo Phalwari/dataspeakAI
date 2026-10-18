@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, status
 from sqlalchemy.orm import Session, joinedload
 from typing import Tuple, List, Optional, Dict, Any
+from datetime import datetime
 import re
+import hashlib
 import models, schemas
-from database import get_db
+from database import get_db, SessionLocal
 from dependencies import get_current_user, require_source_manager, require_query_executor
 import os
 import io
@@ -16,7 +18,7 @@ router = APIRouter(prefix="/api/documents", tags=["documents"])
 os.makedirs("uploads", exist_ok=True)
 os.makedirs("vector_store", exist_ok=True)
 
-# We use a global variable to load embeddings once
+# We use a global variable fallback for test doubles/monkeypatching
 embeddings_model = None
 
 def _load_hf_embeddings(model_name="all-MiniLM-L6-v2"):
@@ -28,10 +30,16 @@ def _load_hf_embeddings(model_name="all-MiniLM-L6-v2"):
 
 def resolve_tenant_vector_index_path(tenant_id: int, model_name: str = "all-MiniLM-L6-v2") -> Tuple[str, bool]:
     """
-    Resolves the versioned FAISS vector store path for a tenant.
+    Resolves the active FAISS vector store path for a tenant.
     Returns (path, exists).
-    Falls back to legacy un-slugged path if versioned directory does not exist.
+    Checks active generation pointer first (NR-2.2-B-T07), then versioned directory, then legacy un-slugged path.
     """
+    from search.generation_manager import IndexGenerationManager
+    gen_mgr = IndexGenerationManager(tenant_id, model_name)
+    active_path, active_exists = gen_mgr.get_active_generation_path()
+    if active_exists:
+        return active_path, True
+
     clean_model = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', model_name or "all-MiniLM-L6-v2").strip("._")
     model_slug = clean_model or "all-MiniLM-L6-v2"
     versioned_path = f"vector_store/tenant_{tenant_id}_{model_slug}"
@@ -71,13 +79,31 @@ from ingestion.extractors import (
 from search.bm25_index import BM25IndexManager
 from search.hybrid import reciprocal_rank_fusion, cross_encoder_rerank
 
-MAX_FILE_SIZE = 100 * 1024 * 1024  # 100 MB Limit
+MAX_FILE_SIZE = 25 * 1024 * 1024  # 25 MB Limit (NR-2.2-B-T02)
 
-def process_document(document_id: int, file_path: str, tenant_id: int, chunk_size: int, chunk_overlap: int, strategy: str, db: Session):
+def process_document(document_id: int, file_path: str, tenant_id: int, chunk_size: int = 512, chunk_overlap: int = 50, strategy: str = "fixed", db: Optional[Session] = None):
+    close_db = False
+    if db is None:
+        from database import SessionLocal
+        db = SessionLocal()
+        close_db = True
+
     doc = db.query(models.Document).filter(models.Document.id == document_id).first()
-    if not doc: return
+    if not doc:
+        if close_db:
+            db.close()
+        return
 
     try:
+        # Assign job ID and initial step (NR-2.2-B-T03)
+        if not doc.ingestion_job_id:
+            doc.ingestion_job_id = str(uuid.uuid4())
+        doc.progress_step = "parsing"
+        doc.status = "Processing"
+        doc.progress = 0.1
+        doc.last_heartbeat_at = datetime.utcnow()
+        db.commit()
+
         gemini_api_key = os.getenv("GEMINI_API_KEY")
         ext = os.path.splitext(file_path)[1].lower()
         
@@ -107,7 +133,9 @@ def process_document(document_id: int, file_path: str, tenant_id: int, chunk_siz
         doc.visual_pages = extracted.stats.visual_pages
         doc.table_count = extracted.stats.table_count
         doc.image_count = extracted.stats.image_count
+        doc.progress_step = "chunking"
         doc.progress = 0.3
+        doc.last_heartbeat_at = datetime.utcnow()
         db.commit()
 
         # 2. Hierarchical Chunking (Task 7.2.2)
@@ -164,10 +192,12 @@ def process_document(document_id: int, file_path: str, tenant_id: int, chunk_siz
             child_db_objs.append(db_c)
         db.flush()
 
+        doc.progress_step = "indexing"
         doc.progress = 0.6
+        doc.last_heartbeat_at = datetime.utcnow()
         db.commit()
 
-        # 5. Index Child Chunks into Versioned FAISS (Task 7.2.4)
+        # 5. Index Chunks into Immutable Generation (Task NR-2.2-B-T07)
         target_specs = child_specs if child_specs else parent_specs
         target_db_objs = child_db_objs if child_specs else parent_db_objs
 
@@ -181,40 +211,17 @@ def process_document(document_id: int, file_path: str, tenant_id: int, chunk_siz
             meta["source"] = doc.name
             all_metadatas.append(meta)
 
-        global embeddings_model
         model_name = getattr(doc, "embedding_model", "all-MiniLM-L6-v2") or "all-MiniLM-L6-v2"
-        if embeddings_model is None or getattr(embeddings_model, "model_name", None) != model_name:
-            embeddings_model = _load_hf_embeddings(model_name)
+        # Support test doubles if monkeypatched on module, else load clean instance
+        active_embeddings = embeddings_model if embeddings_model is not None else _load_hf_embeddings(model_name)
 
-        model_slug = model_name.replace("/", "_").replace(":", "_")
-        versioned_index_path = f"vector_store/tenant_{tenant_id}_{model_slug}"
-        legacy_index_path = f"vector_store/tenant_{tenant_id}"
-
-        index_load_path = versioned_index_path
-        if not os.path.exists(versioned_index_path) and os.path.exists(legacy_index_path):
-            index_load_path = legacy_index_path
-
-        from langchain_community.vectorstores import FAISS
-        if os.path.exists(index_load_path):
-            vectorstore = FAISS.load_local(index_load_path, embeddings_model, allow_dangerous_deserialization=True)
-            vectorstore.add_texts(texts=all_chunks, metadatas=all_metadatas)
-        else:
-            vectorstore = FAISS.from_texts(texts=all_chunks, embedding=embeddings_model, metadatas=all_metadatas)
-
-        os.makedirs("vector_store", exist_ok=True)
-        vectorstore.save_local(versioned_index_path)
-
-        doc.status = "Completed"
-        doc.embeddings_count = len(all_chunks)
-        doc.pages_processed = doc.total_pages
-        doc.progress = 1.0
-        db.commit()
-
-        # Build BM25 index for tenant
+        # Build BM25 input for tenant (strictly active, non-deleted chunks - NR-2.2-B-T05 / Defect I-12)
         all_tenant_chunks = db.query(models.DocumentChunk).options(
             joinedload(models.DocumentChunk.document)
         ).join(models.Document).filter(
-            models.Document.tenant_id == tenant_id
+            models.Document.tenant_id == tenant_id,
+            models.Document.status == "Completed",
+            models.Document.is_deleted == False
         ).all()
         
         bm25_input = [
@@ -231,25 +238,59 @@ def process_document(document_id: int, file_path: str, tenant_id: int, chunk_siz
                 }
             } for c in all_tenant_chunks
         ]
-        bm25_manager = BM25IndexManager(tenant_id=tenant_id)
-        bm25_manager.build_index(bm25_input)
+        # Include current document's newly flushed chunks into BM25
+        for db_c in target_db_objs:
+            bm25_input.append({
+                "id": db_c.id,
+                "content": db_c.content,
+                "metadata": {
+                    "document_id": document_id,
+                    "chunk_index": db_c.chunk_index,
+                    "page_number": db_c.page_number,
+                    "content_type": db_c.content_type,
+                    "reference_id": db_c.reference_id,
+                    "source": doc.name
+                }
+            })
+
+        from search.generation_manager import IndexGenerationManager
+        gen_mgr = IndexGenerationManager(tenant_id=tenant_id, model_name=model_name)
+        gen_mgr.build_and_publish_generation(
+            embeddings_model=active_embeddings,
+            new_chunks=all_chunks,
+            new_metadatas=all_metadatas,
+            all_bm25_chunks=bm25_input
+        )
+
+        doc.status = "Completed"
+        doc.progress_step = "ready"
+        doc.embeddings_count = len(all_chunks)
+        doc.pages_processed = doc.total_pages
+        doc.progress = 1.0
+        doc.last_heartbeat_at = datetime.utcnow()
+        db.commit()
 
     except Exception as e:
         import traceback
         traceback.print_exc()
         print(f"Error processing document: {e}")
         doc.status = "Failed"
+        doc.progress_step = "failed"
         doc.error_message = str(e)
         doc.progress = 0.0
+        doc.last_heartbeat_at = datetime.utcnow()
         db.commit()
 
     finally:
-        # File Cleanup after processing
+        # File Cleanup of ephemeral upload copy, but retain durable storage_service copy
         if os.path.exists(file_path):
             try:
-                os.remove(file_path)
+                if ("uploads" in file_path or "uploads\\" in file_path or "uploads/" in file_path) and getattr(doc, "storage_key", None):
+                    os.remove(file_path)
             except Exception as clean_err:
                 print(f"Failed to cleanup temp file {file_path}: {clean_err}")
+        if close_db:
+            db.close()
 
 def reembed_stored_chunks(document_id: int, tenant_id: int, db: Session = None):
     close_db = False
@@ -370,7 +411,37 @@ def get_documents(
     if not current_user.tenant_id:
         raise HTTPException(status_code=404, detail="User has no associated tenant")
         
-    return db.query(models.Document).filter(models.Document.tenant_id == current_user.tenant_id).all()
+    return db.query(models.Document).filter(
+        models.Document.tenant_id == current_user.tenant_id,
+        models.Document.is_deleted == False
+    ).all()
+
+@router.get("/{document_id}/status", response_model=schemas.DocumentStatusResponse)
+def get_document_status(
+    document_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=404, detail="User has no associated tenant")
+        
+    doc = db.query(models.Document).filter(
+        models.Document.id == document_id,
+        models.Document.tenant_id == current_user.tenant_id
+    ).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    return schemas.DocumentStatusResponse(
+        id=doc.id,
+        name=doc.name,
+        status=doc.status,
+        progress=doc.progress or 0.0,
+        progress_step=doc.progress_step or "queued",
+        ingestion_job_id=doc.ingestion_job_id,
+        error_message=doc.error_message,
+        last_heartbeat_at=doc.last_heartbeat_at
+    )
 
 @router.post("/upload", response_model=schemas.DocumentResponse)
 async def upload_document(
@@ -385,32 +456,75 @@ async def upload_document(
     if not current_user.tenant_id:
         raise HTTPException(status_code=404, detail="User has no associated tenant")
 
-    # Streaming file read with 100MB size limit check
+    from ingestion.extractors import validate_file_magic
+    from services.storage import storage_service
+
+    # Streaming file read with 25MB size limit check and magic signature inspection (NR-2.2-B-T02)
     file_size = 0
     unique_filename = f"{uuid.uuid4()}_{file.filename}"
     file_path = f"uploads/{unique_filename}"
+    sha256 = hashlib.sha256()
+    first_chunk = True
 
-    with open(file_path, "wb") as f:
-        while chunk := await file.read(8192):
-            file_size += len(chunk)
-            if file_size > MAX_FILE_SIZE:
-                f.close()
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-                raise HTTPException(status_code=400, detail=f"File exceeds maximum allowed size of 100MB")
-            f.write(chunk)
-        
+    try:
+        with open(file_path, "wb") as f:
+            while chunk := await file.read(8192):
+                if first_chunk:
+                    is_valid, reason = validate_file_magic(chunk, file.filename)
+                    if not is_valid:
+                        f.close()
+                        if os.path.exists(file_path):
+                            os.remove(file_path)
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"File validation failed: {reason}"
+                        )
+                    first_chunk = False
+
+                file_size += len(chunk)
+                if file_size > MAX_FILE_SIZE:
+                    f.close()
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail="File exceeds maximum allowed size of 25MB"
+                    )
+                sha256.update(chunk)
+                f.write(chunk)
+    except HTTPException:
+        raise
+    except Exception as read_err:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        raise HTTPException(status_code=400, detail=f"Failed to read upload stream: {read_err}")
+
+    content_hash = sha256.hexdigest()
     ext = os.path.splitext(file.filename)[1].upper().replace('.', '') or "TXT"
+    job_id = str(uuid.uuid4())
+
     doc = models.Document(
         tenant_id=current_user.tenant_id,
         name=file.filename,
         file_type=ext,
         size=file_size,
         status="Processing",
+        progress_step="queued",
+        ingestion_job_id=job_id,
+        content_sha256=content_hash,
+        version=1,
         embeddings_count=0,
-        progress=0.05
+        progress=0.05,
+        last_heartbeat_at=datetime.utcnow(),
+        is_deleted=False
     )
     db.add(doc)
+    db.commit()
+    db.refresh(doc)
+
+    # Store uploaded original under durable, content-addressed storage key (NR-2.2-B-T01)
+    stored_path = storage_service.store_file(current_user.tenant_id, doc.id, file_path, content_hash)
+    doc.storage_key = stored_path
     db.commit()
     db.refresh(doc)
 
@@ -434,8 +548,52 @@ async def upload_document(
         doc.celery_task_id = task.id
         db.commit()
     else:
-        background_tasks.add_task(process_document, doc.id, file_path, current_user.tenant_id, chunk_size, chunk_overlap, chunking_strategy, db)
+        background_tasks.add_task(process_document, doc.id, file_path, current_user.tenant_id, chunk_size, chunk_overlap, chunking_strategy)
     
+    return doc
+
+@router.post("/{document_id}/retry", response_model=schemas.DocumentResponse)
+def retry_document_ingestion(
+    document_id: int,
+    background_tasks: BackgroundTasks,
+    current_user: models.User = Depends(require_source_manager),
+    db: Session = Depends(get_db)
+):
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=404, detail="User has no associated tenant")
+
+    doc = db.query(models.Document).filter(
+        models.Document.id == document_id,
+        models.Document.tenant_id == current_user.tenant_id
+    ).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if doc.is_deleted:
+        raise HTTPException(status_code=400, detail="Cannot retry a deleted document")
+
+    from services.storage import storage_service
+    file_to_process = None
+    if doc.content_sha256:
+        stored_path = storage_service.get_file_path(current_user.tenant_id, doc.id, doc.content_sha256)
+        if stored_path and os.path.exists(stored_path):
+            file_to_process = stored_path
+
+    if not file_to_process and doc.storage_key and os.path.exists(doc.storage_key):
+        file_to_process = doc.storage_key
+
+    if not file_to_process:
+        raise HTTPException(status_code=400, detail="Original document file not found in storage. Please re-upload.")
+
+    doc.status = "Processing"
+    doc.progress_step = "queued"
+    doc.error_message = None
+    doc.progress = 0.05
+    doc.last_heartbeat_at = datetime.utcnow()
+    doc.ingestion_job_id = str(uuid.uuid4())
+    db.commit()
+    db.refresh(doc)
+
+    background_tasks.add_task(process_document, doc.id, file_to_process, current_user.tenant_id, 512, 50, "fixed")
     return doc
 
 @router.delete("/{document_id}")
@@ -455,16 +613,23 @@ def delete_document(
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
         
+    # Immediate tombstoning (NR-2.2-B-T08 / Defect I-12)
+    doc.is_deleted = True
+    doc.status = "Deleted"
+    doc.progress_step = "deleted"
+    db.commit()
+
+    # Purge chunk rows from database
+    db.query(models.DocumentChunk).filter(models.DocumentChunk.document_id == document_id).delete()
+    db.commit()
+
     try:
-        global embeddings_model
         model_name = getattr(doc, "embedding_model", "all-MiniLM-L6-v2") or "all-MiniLM-L6-v2"
-        if embeddings_model is None or getattr(embeddings_model, "model_name", None) != model_name:
-            embeddings_model = _load_hf_embeddings(model_name)
-        
+        emb = embeddings_model if embeddings_model is not None else _load_hf_embeddings(model_name)
         index_path, exists = resolve_tenant_vector_index_path(current_user.tenant_id, model_name)
         if exists and os.path.exists(index_path):
             from langchain_community.vectorstores import FAISS
-            vectorstore = FAISS.load_local(index_path, embeddings_model, allow_dangerous_deserialization=True)
+            vectorstore = FAISS.load_local(index_path, emb, allow_dangerous_deserialization=True)
             docstore_dict = vectorstore.docstore._dict
             ids_to_delete = [uid for uid, doc_data in docstore_dict.items() if doc_data.metadata.get("document_id") == document_id]
             if ids_to_delete:
@@ -472,9 +637,7 @@ def delete_document(
                 vectorstore.save_local(index_path)
     except Exception as e:
         print(f"Failed to delete embeddings for document {document_id}: {e}")
-        
-    db.delete(doc)
-    db.commit()
+
     return {"message": "Document deleted"}
 
 @router.post("/{document_id}/reindex", response_model=schemas.DocumentResponse)
@@ -588,6 +751,18 @@ def search_documents(
                 doc = vectorstore.docstore.search(_id)
                 meta = doc.metadata or {}
                 
+                # Live DB check for active, non-deleted parent document (NR-2.2-B-T08)
+                doc_id = meta.get("document_id")
+                if doc_id:
+                    p_doc = db.query(models.Document).filter(
+                        models.Document.id == doc_id,
+                        models.Document.tenant_id == current_user.tenant_id,
+                        models.Document.status == "Completed",
+                        models.Document.is_deleted == False
+                    ).first()
+                    if not p_doc:
+                        continue
+
                 # Apply metadata filters
                 if query.document_ids and meta.get("document_id") not in query.document_ids:
                     continue
@@ -615,6 +790,16 @@ def search_documents(
             for hit in bm25_hits:
                 chunk_obj = db.query(models.DocumentChunk).filter(models.DocumentChunk.id == hit["chunk_id"]).first()
                 if chunk_obj:
+                    # Live DB check for active, non-deleted parent document (NR-2.2-B-T08)
+                    p_doc = db.query(models.Document).filter(
+                        models.Document.id == chunk_obj.document_id,
+                        models.Document.tenant_id == current_user.tenant_id,
+                        models.Document.status == "Completed",
+                        models.Document.is_deleted == False
+                    ).first()
+                    if not p_doc:
+                        continue
+
                     meta = hit["metadata"]
                     if query.document_ids and meta.get("document_id") not in query.document_ids:
                         continue

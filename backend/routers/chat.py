@@ -186,7 +186,8 @@ def retrieve_rag_chunks(
             db_doc = db.query(models.Document).filter(
                 models.Document.id == db_chunk.document_id,
                 models.Document.tenant_id == tenant_id,
-                models.Document.status == "Completed"
+                models.Document.status == "Completed",
+                models.Document.is_deleted == False
             ).first()
             if not db_doc:
                 continue
@@ -197,7 +198,8 @@ def retrieve_rag_chunks(
             db_doc = db.query(models.Document).filter(
                 models.Document.id == doc_id,
                 models.Document.tenant_id == tenant_id,
-                models.Document.status == "Completed"
+                models.Document.status == "Completed",
+                models.Document.is_deleted == False
             ).first()
             if not db_doc:
                 continue

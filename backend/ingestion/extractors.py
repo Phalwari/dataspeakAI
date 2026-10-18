@@ -45,9 +45,40 @@ def table_to_html(table: List[List[Any]]) -> str:
     html += "  </tbody>\n</table>"
     return html
 
+def validate_file_magic(first_chunk: bytes, filename: str) -> Tuple[bool, str]:
+    """
+    Validates file magic signatures against extension.
+    Rejects dangerous executables and mismatched formats (NR-2.2-B-T02).
+    """
+    ext = os.path.splitext(filename)[1].lower()
+    
+    # Reject dangerous executable headers
+    if first_chunk.startswith(b"MZ"):  # DOS/Windows PE EXE/DLL
+        return False, "Executable binaries (.exe/.dll) are not permitted"
+    if first_chunk.startswith(b"\x7fELF"):  # Linux ELF binary
+        return False, "Executable binaries (ELF) are not permitted"
+    if first_chunk.startswith(b"\xca\xfe\xba\xbe"):  # Java class / Mach-O
+        return False, "Binary executable format is not permitted"
+    if first_chunk.startswith(b"#!"):  # Shell script
+        return False, "Shell scripts are not permitted as documents"
+        
+    if ext == ".pdf":
+        if not first_chunk.startswith(b"%PDF-"):
+            return False, "File does not match valid PDF magic signature (%PDF-)"
+    elif ext in [".docx", ".xlsx", ".pptx"]:
+        if not first_chunk.startswith(b"PK\x03\x04"):
+            return False, f"File with extension {ext} is not a valid zip container"
+            
+    return True, "Valid"
+
+MAX_PAGE_BUDGET = 100
+PDF_DEADLINE_SECONDS = 60.0
+MAX_ROW_BUDGET = 50000
+
 def extract_pdf_split_router(file_path: str, gemini_api_key: Optional[str] = None) -> ExtractedContent:
     import fitz  # PyMuPDF
     import pdfplumber
+    import time
     
     content = ExtractedContent()
     doc_pdf = fitz.open(file_path)
@@ -56,9 +87,17 @@ def extract_pdf_split_router(file_path: str, gemini_api_key: Optional[str] = Non
     
     table_ref_counter = 1
     figure_ref_counter = 1
+    start_time = time.time()
     
+    pages_to_process = min(total_pages, MAX_PAGE_BUDGET)
+    if total_pages > MAX_PAGE_BUDGET:
+        print(f"[FastPath] PDF exceeds maximum budget of {MAX_PAGE_BUDGET} pages. Processing capped at {pages_to_process} pages.")
+
     with pdfplumber.open(file_path) as pdf:
-        for page_idx in range(total_pages):
+        for page_idx in range(pages_to_process):
+            if time.time() - start_time > PDF_DEADLINE_SECONDS:
+                print(f"[FastPath] Extraction deadline exceeded ({PDF_DEADLINE_SECONDS}s). Halting extraction at page {page_idx + 1}.")
+                break
             page_num = page_idx + 1
             fitz_page = doc_pdf[page_idx]
             plumber_page = pdf.pages[page_idx]
@@ -203,11 +242,13 @@ def extract_excel_csv(file_path: str) -> ExtractedContent:
     full_text = []
     
     if file_path.lower().endswith('.csv'):
-        df_dict = {"Sheet1": pd.read_csv(file_path)}
+        df_dict = {"Sheet1": pd.read_csv(file_path, nrows=MAX_ROW_BUDGET)}
     else:
-        df_dict = pd.read_excel(file_path, sheet_name=None)
+        df_dict = pd.read_excel(file_path, sheet_name=None, nrows=MAX_ROW_BUDGET)
         
     for sheet_name, df in df_dict.items():
+        if len(df) > MAX_ROW_BUDGET:
+            df = df.iloc[:MAX_ROW_BUDGET]
         # Clean NaNs
         df = df.fillna("")
         raw_table = [list(df.columns)] + df.values.tolist()
