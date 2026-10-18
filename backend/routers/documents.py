@@ -225,7 +225,7 @@ def process_document(document_id: int, file_path: str, tenant_id: int, chunk_siz
                     "page_number": c.page_number,
                     "content_type": c.content_type,
                     "reference_id": c.reference_id,
-                    "source": doc.name
+                    "source": c.document.name if (hasattr(c, "document") and c.document) else doc.name
                 }
             } for c in all_tenant_chunks
         ]
@@ -333,7 +333,7 @@ def reembed_stored_chunks(document_id: int, tenant_id: int, db: Session = None):
                     "page_number": c.page_number,
                     "content_type": c.content_type,
                     "reference_id": c.reference_id,
-                    "source": doc.name
+                    "source": c.document.name if (hasattr(c, "document") and c.document) else doc.name
                 }
             } for c in all_tenant_chunks
         ]

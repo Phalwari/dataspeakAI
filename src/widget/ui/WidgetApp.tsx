@@ -364,8 +364,12 @@ export function WidgetApp({ initialConfig }: WidgetAppProps): ComponentChild {
                           m.sources.map((src, i) =>
                             h(
                               'span',
-                              { key: `src-${i}`, class: 'dataspeak-source-badge' },
-                              `📄 ${src.document_name}${src.page_number ? ` (p. ${src.page_number})` : ''}`
+                              {
+                                key: `src-${i}`,
+                                class: `dataspeak-source-badge ${src.grounding_status === 'unverified' ? 'unverified' : ''}`,
+                                title: src.grounding_status === 'unverified' ? 'Evidence unverified' : undefined,
+                              },
+                              `${src.grounding_status === 'unverified' ? '⚠️' : '📄'} ${src.document_name}${src.page_number ? ` (p. ${src.page_number})` : ''}`
                             )
                           )
                         )

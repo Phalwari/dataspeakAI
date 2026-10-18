@@ -1,3 +1,4 @@
+from enum import Enum
 import re
 from pydantic import BaseModel, EmailStr, model_validator, field_validator, Field, ConfigDict
 from typing import Optional, List, Any, Dict, Literal
@@ -642,6 +643,13 @@ class ConversationUpdate(BaseModel):
     title: Optional[str] = None
     user_id: Optional[int] = None
 
+class GroundingStatus(str, Enum):
+    SUPPORTED = "supported"
+    PARTIALLY_SUPPORTED = "partially_supported"
+    UNSUPPORTED = "unsupported"
+    UNVERIFIED = "unverified"
+    NO_CLAIMS = "no_claims"
+
 class ChatRequest(BaseModel):
     conversation_id: Optional[int] = None
     query: str
@@ -658,6 +666,12 @@ class SourceCitation(BaseModel):
     score: Optional[float] = 0.0
     grounding_score: Optional[float] = None
     is_grounded: Optional[bool] = None
+    retrieval_similarity: Optional[float] = None
+    claim_support_score: Optional[float] = None
+    document_id: Optional[int] = None
+    chunk_id: Optional[int] = None
+    document_version: Optional[int] = 1
+    grounding_status: Optional[str] = None
 
 class ChatResponse(BaseModel):
     conversation_id: int
@@ -669,6 +683,12 @@ class ChatResponse(BaseModel):
     sources: List[SourceCitation] = []
     sql_data: Optional[Dict[str, Any]] = None
     grounding: Optional[Dict[str, Any]] = None
+    grounding_status: Optional[str] = None
+    unverified_reason: Optional[str] = None
+    claim_coverage_ratio: Optional[float] = None
+    total_claims_count: Optional[int] = None
+    verified_claims_count: Optional[int] = None
+    skipped_claims_count: Optional[int] = None
     sql_agent: Optional[Dict[str, Any]] = None
     created_at: datetime
 

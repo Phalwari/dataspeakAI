@@ -49,7 +49,13 @@ interface SourceCitation {
   reference_id?: string;
   snippet: string;
   score?: number;
+  retrieval_similarity?: number;
+  claim_support_score?: number;
   grounding_score?: number;
+  grounding_status?: string;
+  document_id?: number;
+  chunk_id?: number;
+  document_version?: number;
   is_grounded?: boolean;
 }
 
@@ -78,15 +84,23 @@ interface ChatMessage {
       corrections_made?: boolean;
     };
     grounding?: {
+      status?: "supported" | "partially_supported" | "unsupported" | "unverified" | "no_claims";
       confidence?: number;
       has_low_confidence?: boolean;
       disclaimer?: string;
+      unverified_reason?: string;
+      claim_coverage_ratio?: number;
+      total_claims_count?: number;
+      verified_claims_count?: number;
+      skipped_claims_count?: number;
       verified_claims?: Array<{
         claim: string;
         is_grounded: boolean;
         score: number;
+        raw_similarity?: number;
         source?: string;
         page_number?: number;
+        reason?: string;
       }>;
     };
     route_decision?: {
@@ -891,16 +905,31 @@ export function ChatPage() {
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <FileText className="w-3.5 h-3.5 text-blue-600" />
                             <span>Grounding Sources ({sources.length} Citation{sources.length > 1 ? "s" : ""})</span>
-                            {msg.metadata_json?.grounding?.confidence !== undefined && (
+                            {msg.metadata_json?.grounding && (
                               <Badge
                                 variant="outline"
-                                className={`text-[9px] px-1.5 py-0 h-4 ${
-                                  msg.metadata_json.grounding.has_low_confidence
+                                className={`text-[9px] px-1.5 py-0 h-4 font-medium ${
+                                  msg.metadata_json.grounding.status === "supported"
+                                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                    : msg.metadata_json.grounding.status === "partially_supported"
                                     ? "bg-amber-50 text-amber-700 border-amber-200"
-                                    : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                    : msg.metadata_json.grounding.status === "unverified"
+                                    ? "bg-yellow-50 text-yellow-800 border-yellow-300"
+                                    : msg.metadata_json.grounding.status === "no_claims"
+                                    ? "bg-gray-100 text-gray-600 border-gray-200"
+                                    : "bg-red-50 text-red-700 border-red-200"
                                 }`}
+                                title={msg.metadata_json.grounding.unverified_reason || msg.metadata_json.grounding.disclaimer || undefined}
                               >
-                                {msg.metadata_json.grounding.has_low_confidence ? "Low Grounding" : "Verified Grounding"} ({Math.round(msg.metadata_json.grounding.confidence * 100)}%)
+                                {msg.metadata_json.grounding.status === "supported"
+                                  ? `Verified (${msg.metadata_json.grounding.verified_claims_count ?? 0}/${msg.metadata_json.grounding.total_claims_count ?? 0} claims)`
+                                  : msg.metadata_json.grounding.status === "partially_supported"
+                                  ? `Partial Grounding (${msg.metadata_json.grounding.verified_claims_count ?? 0}/${msg.metadata_json.grounding.total_claims_count ?? 0} claims)`
+                                  : msg.metadata_json.grounding.status === "unverified"
+                                  ? "⚠️ Unverified Evidence"
+                                  : msg.metadata_json.grounding.status === "no_claims"
+                                  ? "No Factual Claims"
+                                  : "Evidence Contradicted"}
                               </Badge>
                             )}
                           </div>
@@ -928,16 +957,25 @@ export function ChatPage() {
                                         p. {src.page_number}
                                       </Badge>
                                     )}
-                                    {(src.score !== undefined || src.grounding_score !== undefined) && (
+                                    {src.retrieval_similarity !== undefined && (
+                                      <Badge variant="outline" className="text-[9px] px-1 py-0 h-3.5 bg-blue-50/50 text-blue-700 border-blue-200" title="Retrieval similarity">
+                                        sim: {Math.round(src.retrieval_similarity * 100)}%
+                                      </Badge>
+                                    )}
+                                    {(src.claim_support_score !== undefined || src.score !== undefined) && (
                                       <Badge
                                         variant="outline"
                                         className={`text-[9px] px-1.5 py-0 h-4 ${
-                                          (src.grounding_score ?? src.score ?? 0) >= 0.65
+                                          src.grounding_status === "unverified"
+                                            ? "bg-yellow-50 text-yellow-800 border-yellow-300"
+                                            : (src.claim_support_score ?? src.score ?? 0) >= 0.65
                                             ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                                             : "bg-gray-100 text-gray-600 border-gray-200"
                                         }`}
                                       >
-                                        {Math.round((src.grounding_score ?? src.score ?? 0) * 100)}%
+                                        {src.grounding_status === "unverified"
+                                          ? "Unverified"
+                                          : `support: ${Math.round((src.claim_support_score ?? src.score ?? 0) * 100)}%`}
                                       </Badge>
                                     )}
                                   </div>

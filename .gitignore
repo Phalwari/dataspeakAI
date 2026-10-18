@@ -22,6 +22,7 @@ backend/app.db
 *.sqlite3
 scratch/
 *.zip
+~$*
 
 # IDEs & Local Agent Configs
 .vscode/

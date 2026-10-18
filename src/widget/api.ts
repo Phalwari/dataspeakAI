@@ -24,6 +24,9 @@ export interface SourceCitation {
   reference_id?: string;
   snippet?: string;
   score?: number;
+  retrieval_similarity?: number;
+  claim_support_score?: number;
+  grounding_status?: string;
 }
 
 const STORAGE_KEY_PREFIX = 'dataspeak_widget_';

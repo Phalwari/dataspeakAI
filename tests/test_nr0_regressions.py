@@ -182,10 +182,6 @@ def test_probe_i11_control_citation_service_empty_claims():
     assert res["grounding_confidence"] == 0.0 or res["citations"] == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Issue I-11: Embedding error returns positive 0.7 confidence without disclaimer; owned by NR-2.2-A"
-)
 def test_probe_i11_citation_grounding_reports_failure_honestly():
     """
     Defect Assertion: When embedding generation throws an exception, verify_grounding
