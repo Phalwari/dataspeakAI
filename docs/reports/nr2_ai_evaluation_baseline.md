@@ -37,15 +37,20 @@ The benchmark dataset is versioned in `tests/fixtures/nr2/eval_dataset_v1.json` 
 
 ## 3. Benchmark Verification Results
 
-Execution via `pytest tests/test_nr2_eval_benchmark.py`:
+Execution via `pytest tests/test_nr2_eval_benchmark.py -v`:
 
 ```
-tests/test_nr2_eval_benchmark.py::test_eval_dataset_structure_and_completeness PASSED
-tests/test_nr2_eval_benchmark.py::test_eval_benchmark_numerical_hallucinations_rejected PASSED
-tests/test_nr2_eval_benchmark.py::test_eval_benchmark_date_conflicts_rejected PASSED
-tests/test_nr2_eval_benchmark.py::test_eval_benchmark_negation_polarity_traps_rejected PASSED
-tests/test_nr2_eval_benchmark.py::test_eval_benchmark_prompt_injections_defused PASSED
-tests/test_nr2_eval_benchmark.py::test_eval_benchmark_outage_simulation_honest_unverified PASSED
+tests/test_nr2_eval_benchmark.py::test_eval_dataset_structure_and_completeness PASSED [  9%]
+tests/test_nr2_eval_benchmark.py::test_eval_benchmark_sql_supported_grounding PASSED [ 18%]
+tests/test_nr2_eval_benchmark.py::test_eval_benchmark_rag_supported_grounding PASSED [ 27%]
+tests/test_nr2_eval_benchmark.py::test_eval_benchmark_hybrid_supported_grounding PASSED [ 36%]
+tests/test_nr2_eval_benchmark.py::test_eval_benchmark_unanswerable_abstention PASSED [ 45%]
+tests/test_nr2_eval_benchmark.py::test_eval_benchmark_numerical_hallucinations_rejected PASSED [ 54%]
+tests/test_nr2_eval_benchmark.py::test_eval_benchmark_date_conflicts_rejected PASSED [ 63%]
+tests/test_nr2_eval_benchmark.py::test_eval_benchmark_negation_polarity_traps_rejected PASSED [ 72%]
+tests/test_nr2_eval_benchmark.py::test_eval_benchmark_prompt_injections_defused PASSED [ 81%]
+tests/test_nr2_eval_benchmark.py::test_eval_benchmark_outage_simulation_honest_unverified PASSED [ 90%]
+tests/test_nr2_eval_benchmark.py::test_eval_benchmark_all_25_cases_comprehensive_pass_rate PASSED [100%]
 ```
 
 ### Key Quantitative Metrics

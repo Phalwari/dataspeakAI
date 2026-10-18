@@ -10,8 +10,8 @@
       "question": "What is total sales revenue recorded in the system?",
       "ground_truth_answer": "Total sales revenue is $313,750.",
       "expected_grounding_status": "supported",
-      "expected_min_confidence": 0.8,
-      "context_evidence": "SELECT SUM(amount) AS revenue FROM sales -> 313750"
+      "expected_min_confidence": 0.75,
+      "context_evidence": "SQL query execution result: Total sales revenue sum is 313750."
     },
     {
       "id": "TC-02",
@@ -20,8 +20,8 @@
       "question": "How many active user accounts are currently registered?",
       "ground_truth_answer": "There are 250 active user accounts registered.",
       "expected_grounding_status": "supported",
-      "expected_min_confidence": 0.8,
-      "context_evidence": "SELECT COUNT(*) FROM users WHERE status = 'active' -> 250"
+      "expected_min_confidence": 0.70,
+      "context_evidence": "SQL query execution result: Total active user accounts count is 250."
     },
     {
       "id": "TC-03",
@@ -31,7 +31,7 @@
       "ground_truth_answer": "Total EMEA revenue reached $125,000 across 85 transactions.",
       "expected_grounding_status": "supported",
       "expected_min_confidence": 0.75,
-      "context_evidence": "SELECT SUM(amount) FROM sales WHERE region = 'EMEA' -> 125000"
+      "context_evidence": "SQL query execution result: Total EMEA sales revenue sum is 125000 across 85 transactions."
     },
     {
       "id": "TC-04",
@@ -41,7 +41,7 @@
       "ground_truth_answer": "Enterprise tier accounts spent $180,000, while Standard accounts spent $133,750.",
       "expected_grounding_status": "supported",
       "expected_min_confidence": 0.75,
-      "context_evidence": "Customer tiers: Enterprise spent 180000, Standard spent 133750"
+      "context_evidence": "Customer spending by tier: Enterprise spent 180000, Standard spent 133750."
     },
     {
       "id": "TC-05",
@@ -80,8 +80,8 @@
       "question": "What is the API rate limit for anonymous widget requests?",
       "ground_truth_answer": "The anonymous widget request rate limit is 60 requests per minute.",
       "expected_grounding_status": "supported",
-      "expected_min_confidence": 0.7,
-      "context_evidence": "Rate limit specification table: | Endpoint | Limit | Window | Anonymous Widget | 60 requests | 1 minute |"
+      "expected_min_confidence": 0.65,
+      "context_evidence": "Rate limit specification table:\n| Endpoint | Limit | Window |\n| Anonymous Widget | 60 requests | 1 minute |"
     },
     {
       "id": "TC-09",

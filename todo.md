@@ -161,7 +161,7 @@ Insert the selected phase's actual milestone, sprint, and task blocks here, befo
 
 ##### Sprint NR-2.2-A — Grounding states and answer evaluation (COMPLETED & VERIFIED)
 
-- **Status:** Completed & Verified (100%). All 8 tasks (NR-2.2-A-T01 through NR-2.2-A-T08) verified against acceptance criteria and regression suites (`tests/test_nr0_regressions.py` 28 passed, 1 xfailed; `tests/test_nr2_eval_benchmark.py` and `tests/test_nr2_grounding_verification.py` 13/13 passed; `tests/test_phase7_2_3_citation_grounding.py` 4/4 passed; Defect I-11 / FYP-05 repaired; prompt injection sanitization; `npm test` 35/35 passed; `npm run build` passed in 8.49s). Full task blocks archived in `## 📦 Archived / Completed Tasks`.
+- **Status:** Completed & Verified (100%). All 8 tasks (NR-2.2-A-T01 through NR-2.2-A-T08) verified against acceptance criteria and regression suites (`tests/test_nr0_regressions.py` 11 passed, 1 xfailed; `tests/test_nr2_eval_benchmark.py` and `tests/test_nr2_grounding_verification.py` 18/18 passed; `tests/test_phase7_2_3_citation_grounding.py` 4/4 passed; Defect I-11 / FYP-05 repaired; prompt injection sanitization; `npm test` 35/35 passed; `npm run build` passed in 7.18s). Full task blocks archived in `## 📦 Archived / Completed Tasks`.
   - *Completed:* 2026-10-18 | Antigravity AI Engineer | Explicit GroundingStatus enum ('supported', 'partially_supported', 'unsupported', 'unverified', 'no_claims') and unverified error reporting; Defect I-11 / FYP-05 repaired (NR-2.2-A-T01)
   - *Completed:* 2026-10-18 | Antigravity AI Engineer | Decoupled retrieval similarity from claim support with claim coverage ratio (NR-2.2-A-T02)
   - *Completed:* 2026-10-18 | Antigravity AI Engineer | Relational markdown table cell and numerical/negation extraction with skipped claims tracking (NR-2.2-A-T03)
@@ -170,6 +170,7 @@ Insert the selected phase's actual milestone, sprint, and task blocks here, befo
   - *Completed:* 2026-10-18 | Antigravity AI Engineer | Frontend grounding status badges and verified claim counts across ChatPage and standalone widget (NR-2.2-A-T06)
   - *Completed:* 2026-10-18 | Antigravity AI Engineer | Versioned 25-case evaluation benchmark dataset fixtures and automated test runner (NR-2.2-A-T07)
   - *Completed:* 2026-10-18 | Antigravity AI Engineer | Published baseline AI evaluation report and model-change gate policy (NR-2.2-A-T08)
+  - *Completed & Verified:* 2026-10-18 | Antigravity AI Engineer | Independent QA Review Remediation (`REV-NR2.2-QA-01`): All 10 defects (`F01`–`F10`) remediated and verified: sentence-level negation matching (F01), comma/currency normalization (F02), full 25-case benchmark runner parity at 25/25 passing (F03), widget prompt injection sanitization and grounding verification parity (F04), table parsing in grounding verification (F05), suffix lookahead word boundary fix (F06), partial date month-year matching (F07), historical message fallback (F08), widget unverified badge CSS (F09), and eager joinedload on chunk parent documents (F10).
 
 - **Prerequisites:** `NR-0.1-A` regression suite (`tests/test_nr0_regressions.py`); `NR-1.1-A`/`B` authorization and publication contracts (`can_execute_queries`, `WidgetKeyDocument`).
 - **Issues Owned:** I-11 (and FYP-05).

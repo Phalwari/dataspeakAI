@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import Tuple, List, Optional, Dict, Any
 import re
 import models, schemas
@@ -211,7 +211,9 @@ def process_document(document_id: int, file_path: str, tenant_id: int, chunk_siz
         db.commit()
 
         # Build BM25 index for tenant
-        all_tenant_chunks = db.query(models.DocumentChunk).join(models.Document).filter(
+        all_tenant_chunks = db.query(models.DocumentChunk).options(
+            joinedload(models.DocumentChunk.document)
+        ).join(models.Document).filter(
             models.Document.tenant_id == tenant_id
         ).all()
         
@@ -319,7 +321,9 @@ def reembed_stored_chunks(document_id: int, tenant_id: int, db: Session = None):
             os.makedirs("vector_store", exist_ok=True)
             vectorstore.save_local(index_path)
 
-        all_tenant_chunks = db.query(models.DocumentChunk).join(models.Document).filter(
+        all_tenant_chunks = db.query(models.DocumentChunk).options(
+            joinedload(models.DocumentChunk.document)
+        ).join(models.Document).filter(
             models.Document.tenant_id == tenant_id
         ).all()
 

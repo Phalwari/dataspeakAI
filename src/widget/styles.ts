@@ -266,6 +266,12 @@ export function getWidgetStyles(themeColor: string = "#3b82f6", position: string
   gap: 3px;
 }
 
+.dataspeak-source-badge.unverified {
+  background: #fffbeb;
+  color: #b45309;
+  border: 1px solid #fde68a;
+}
+
 .dataspeak-typing {
   display: flex;
   align-items: center;

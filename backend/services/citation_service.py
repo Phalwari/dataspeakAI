@@ -31,40 +31,65 @@ NEGATION_TOKENS = {
 
 def extract_numbers_and_dates(text: str) -> Set[str]:
     """
-    Extracts numerical amounts, currency, percentages, years, and dates.
-    Normalizes them for substring or token comparison.
+    Extracts numerical amounts, currency, percentages, quarters, years, and dates.
+    Normalizes them for robust substring, token, or equivalent-unit comparison.
     """
     if not text:
         return set()
     
     tokens = set()
-    # Currency with amounts: $10M, $12.4 million, €50, etc.
+    # Currency with amounts: $10M, $12.4 million, €50, $313,750, etc.
     currency_matches = re.findall(r'[\$€£]\s*\d+(?:,\d{3})*(?:\.\d+)?(?:\s*(?:million|billion|thousand|[kKmMbBtT]))?', text)
     for m in currency_matches:
-        tokens.add(re.sub(r'\s+', '', m.lower()))
+        clean_m = re.sub(r'[\s,]+', '', m.lower())
+        tokens.add(clean_m)
+        num_part = re.sub(r'^[\$€£]', '', clean_m)
+        tokens.add(num_part)
+        if num_part.endswith('m'):
+            tokens.add(num_part[:-1] + 'million')
+        elif num_part.endswith('million'):
+            tokens.add(num_part[:-7] + 'm')
+        elif num_part.endswith('k'):
+            tokens.add(num_part[:-1] + 'thousand')
+        elif num_part.endswith('thousand'):
+            tokens.add(num_part[:-8] + 'k')
+        elif num_part.endswith('b'):
+            tokens.add(num_part[:-1] + 'billion')
+        elif num_part.endswith('billion'):
+            tokens.add(num_part[:-7] + 'b')
     
     # Percentages: 40%, 12.5%
     pct_matches = re.findall(r'\b\d+(?:\.\d+)?%', text)
     for m in pct_matches:
         tokens.add(m.lower())
+        tokens.add(m.rstrip('%'))
     
+    # Quarters: Q1 2024, Q4 2023
+    q_matches = re.findall(r'\bq[1-4]\s*(?:19|20)\d{2}\b', text.lower())
+    for m in q_matches:
+        tokens.add(re.sub(r'\s+', '', m))
+        
+    # Standard numbers with decimals or commas (e.g. 10000, 12.4, 250, 313750)
+    # Uses lookahead to avoid truncating numbers followed by currency suffix letters
+    raw_nums = re.findall(r'\b\d+(?:,\d{3})*(?:\.\d+)?(?=[a-zA-Z]|\b)', text)
+    for m in raw_nums:
+        clean_num = m.replace(',', '')
+        if len(clean_num) > 1 or clean_num in {"0", "1"}:
+            tokens.add(clean_num)
+            
+    # Written month dates: "September 2021", "September 15, 2021", "Jan 15, 2024"
+    month_year_matches = re.findall(
+        r'\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember))\b(?:\s+\d{1,2},?)?\s+\b(19\d{2}|20\d{2})\b',
+        text.lower()
+    )
+    for mon, yr in month_year_matches:
+        tokens.add(f'{mon} {yr}')
+        tokens.add(yr)
+
     # Years: 1990-2099
     year_matches = re.findall(r'\b(?:19|20)\d{2}\b', text)
     for m in year_matches:
         tokens.add(m)
-        
-    # Standard numbers with decimals or commas (e.g. 10000, 12.4, 250)
-    raw_nums = re.findall(r'\b\d+(?:,\d{3})*(?:\.\d+)?\b', text)
-    for m in raw_nums:
-        clean_num = m.replace(',', '')
-        # Only add if not part of small indexing or single digit if possible, but keep specific numbers
-        if len(clean_num) > 1 or clean_num in {"0", "1"}:
-            tokens.add(clean_num)
-            
-    # Written month dates: "September 2021", "Jan 15, 2024"
-    date_matches = re.findall(r'\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember))\s+\d{1,4}\b', text, flags=re.IGNORECASE)
-    for m in date_matches:
-        tokens.add(m.lower().strip())
         
     return tokens
 
@@ -73,6 +98,36 @@ def has_negation(text: str) -> bool:
     """Checks whether the text contains explicit negation tokens."""
     words = set(re.findall(r'\b\w+\b', text.lower()))
     return bool(words & NEGATION_TOKENS)
+
+
+def get_sentence_words(s: str) -> Set[str]:
+    """Extracts non-stopword content tokens from a sentence for alignment scoring."""
+    return set(re.findall(r'\b\w+\b', s.lower())) - NEGATION_TOKENS - {
+        "the", "a", "an", "is", "was", "are", "were", "to", "in", "on", "at",
+        "for", "of", "and", "or", "it", "its", "by", "from", "as", "be", "with"
+    }
+
+
+def find_best_matching_sentence(claim: str, chunk: str) -> str:
+    """
+    Finds the single sentence within a chunk that has the highest content word overlap
+    with the claim. Used to avoid false-positive negation mismatches across unrelated sentences.
+    """
+    sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+|\n+', chunk) if len(s.strip()) > 5]
+    if not sentences:
+        return chunk
+    claim_words = get_sentence_words(claim)
+    if not claim_words:
+        return chunk
+    best_s = None
+    best_score = -1
+    for s in sentences:
+        s_words = get_sentence_words(s)
+        overlap = len(claim_words & s_words)
+        if overlap > best_score:
+            best_score = overlap
+            best_s = s
+    return best_s if (best_score > 0 and best_s) else chunk
 
 
 def verify_numerical_and_negation(claim: str, chunk_content: str) -> Tuple[bool, Optional[str]]:
@@ -88,18 +143,25 @@ def verify_numerical_and_negation(claim: str, chunk_content: str) -> Tuple[bool,
     missing_nums = []
     chunk_lower = chunk_content.lower()
     for num in claim_nums:
-        # Check either in chunk_nums set or as a substring
-        if num not in chunk_nums and num not in chunk_lower and num.replace('$', '') not in chunk_lower:
+        num_clean = re.sub(r'[\$€£,]', '', num).strip()
+        num_has_match = (
+            num in chunk_nums
+            or num in chunk_lower
+            or num_clean in chunk_nums
+            or (len(num_clean) > 0 and num_clean in chunk_lower)
+        )
+        if not num_has_match:
             missing_nums.append(num)
             
     if missing_nums:
         return False, f"Numerical/date token mismatch: {missing_nums} not found in source evidence"
     
-    # Check negation polarity mismatch
+    # Check negation polarity mismatch against the best matching sentence rather than entire chunk
     claim_neg = has_negation(claim)
-    chunk_neg = has_negation(chunk_content)
-    if claim_neg != chunk_neg:
-        return False, f"Negation polarity mismatch (claim negation={claim_neg}, source negation={chunk_neg})"
+    best_matching_sent = find_best_matching_sentence(claim, chunk_content)
+    best_neg = has_negation(best_matching_sent)
+    if claim_neg != best_neg:
+        return False, f"Negation polarity mismatch (claim negation={claim_neg}, source negation={best_neg})"
         
     return True, None
 
@@ -172,11 +234,12 @@ class CitationService:
         raw_sentences = re.split(r'(?<=[.!?])\s+', cleaned)
         claims: List[str] = []
 
-        # Filter patterns for non-factual conversational fluff
+        # Filter patterns for non-factual conversational fluff and polite abstentions
         skip_patterns = [
             r'^(hello|hi|hey|greetings|thank you|thanks|sure|certainly|here is|here are|hope this helps)',
             r'^(in summary|in conclusion|to conclude|let me know)',
             r'^(note:|disclaimer:|warning:)',
+            r'(?i)^(i searched|the indexed documents do not contain|there is no\b|no records or documents exist|i could not find|i couldn\'t find|no information is available|the provided context does not contain)',
         ]
 
         for s in raw_sentences:
@@ -244,7 +307,7 @@ class CitationService:
                 "disclaimer": None
             }
 
-        claims, skipped_count = self.extract_claims_with_stats(actual_text, parse_tables=False)
+        claims, skipped_count = self.extract_claims_with_stats(actual_text, parse_tables=True)
         if not claims:
             # Fallback citations directly from chunks if claims could not be extracted
             citations = []

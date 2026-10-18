@@ -917,7 +917,11 @@ export function ChatPage() {
                                     ? "bg-yellow-50 text-yellow-800 border-yellow-300"
                                     : msg.metadata_json.grounding.status === "no_claims"
                                     ? "bg-gray-100 text-gray-600 border-gray-200"
-                                    : "bg-red-50 text-red-700 border-red-200"
+                                    : msg.metadata_json.grounding.status === "unsupported"
+                                    ? "bg-red-50 text-red-700 border-red-200"
+                                    : (msg.metadata_json.grounding.confidence ?? 0) >= 0.65
+                                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                    : "bg-yellow-50 text-yellow-800 border-yellow-300"
                                 }`}
                                 title={msg.metadata_json.grounding.unverified_reason || msg.metadata_json.grounding.disclaimer || undefined}
                               >
@@ -929,7 +933,11 @@ export function ChatPage() {
                                   ? "⚠️ Unverified Evidence"
                                   : msg.metadata_json.grounding.status === "no_claims"
                                   ? "No Factual Claims"
-                                  : "Evidence Contradicted"}
+                                  : msg.metadata_json.grounding.status === "unsupported"
+                                  ? "Evidence Contradicted"
+                                  : (msg.metadata_json.grounding.confidence ?? 0) >= 0.65
+                                  ? "Verified Grounding"
+                                  : "Unverified Grounding"}
                               </Badge>
                             )}
                           </div>

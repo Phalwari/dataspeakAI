@@ -705,6 +705,8 @@ class WidgetChatResponse(BaseModel):
     answer: str
     query_type: str
     sources: List[SourceCitation] = []
+    grounding: Optional[Dict[str, Any]] = None
+    grounding_status: Optional[str] = None
     created_at: datetime
 
 class WidgetConfigResponse(BaseModel):
