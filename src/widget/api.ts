@@ -315,6 +315,10 @@ export async function streamWidgetChat(
       for (const ev of events) {
         if (ev.error) {
           onError(ev.error);
+          try {
+            await reader.cancel();
+          } catch {}
+          return;
         }
         if (ev.chunk) {
           onChunk(ev.chunk);
@@ -334,6 +338,7 @@ export async function streamWidgetChat(
     for (const ev of remaining) {
       if (ev.error) {
         onError(ev.error);
+        return;
       }
       if (ev.chunk) {
         onChunk(ev.chunk);

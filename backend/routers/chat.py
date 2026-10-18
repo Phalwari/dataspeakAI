@@ -476,6 +476,7 @@ def update_conversation(
 
     if payload.title is not None:
         conv.title = payload.title.strip()
+        conv.is_custom_title = True
 
     if payload.user_id is not None:
         if conv.user_id is None and current_user.role == "Admin":
@@ -755,7 +756,7 @@ def chat_endpoint(
             assistant_answer = "No database connection is available for your organization. Please connect a database in the Databases tab or switch source to Knowledge Base."
         else:
             # Generate and execute SQL via Self-Correcting SQLAgent
-            nl_res = generate_sql_from_nl(db_conn, user_query, db_session=db)
+            nl_res = generate_sql_from_nl(db_conn, user_query, db_session=db, conversation_history=history_text)
             msg_metadata["sql_agent"] = {
                 "attempts": nl_res.get("attempts", 1),
                 "corrections_made": nl_res.get("corrections_made", False)
@@ -911,7 +912,7 @@ def chat_endpoint(
         db_conn = auto_select_database(user_query, tenant_id, db)
         sql_rows_text = "None"
         if db_conn:
-            nl_res = generate_sql_from_nl(db_conn, user_query, db_session=db)
+            nl_res = generate_sql_from_nl(db_conn, user_query, db_session=db, conversation_history=history_text)
             msg_metadata["sql_agent"] = {
                 "attempts": nl_res.get("attempts", 1),
                 "corrections_made": nl_res.get("corrections_made", False)

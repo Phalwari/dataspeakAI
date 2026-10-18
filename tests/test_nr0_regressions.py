@@ -216,10 +216,6 @@ def test_probe_i11_citation_grounding_reports_failure_honestly():
 # 5. Family I-14: Widget Double Generation (Owned by NR-2.3-A)
 # ===========================================================================
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Issue I-14: Widget non-streaming generates answer twice; owned by NR-2.3-A"
-)
 def test_probe_i14_widget_non_streaming_generates_answer_only_once(isolated_app, nr0_scenario):
     """
     Defect Assertion: A non-streaming widget chat request MUST generate the answer exactly once.

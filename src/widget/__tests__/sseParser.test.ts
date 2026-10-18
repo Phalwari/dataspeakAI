@@ -178,7 +178,7 @@ describe('SSE Parser and Streaming Contract (Task 7.1.2)', () => {
       expect(errorMessage).toBeNull();
     });
 
-    it('calls onError callback when error event is received from server', async () => {
+    it('calls onError callback when error event is received from server and does not trigger onDone', async () => {
       const ssePayload =
         'data: {"chunk": "Start", "done": false}\n\n' +
         'data: {"chunk": "", "done": true, "error": "AI service quota exhausted", "conversation_id": 10}\n\n';
@@ -196,19 +196,23 @@ describe('SSE Parser and Streaming Contract (Task 7.1.2)', () => {
       globalThis.fetch = vi.fn().mockResolvedValue(mockResponse);
 
       let reportedError = '';
+      let doneCalled = false;
       await streamWidgetChat(
         'http://localhost:8000',
         'token',
         'Query',
         10,
         () => {},
-        () => {},
+        () => {
+          doneCalled = true;
+        },
         (err) => {
           reportedError = err;
         }
       );
 
       expect(reportedError).toBe('AI service quota exhausted');
+      expect(doneCalled).toBe(false);
     });
   });
 

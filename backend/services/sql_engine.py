@@ -487,7 +487,8 @@ def generate_sql_from_nl(
     user_question: str,
     db_session=None,
     tenant_id: Optional[int] = None,
-    allowed_tables: Optional[List[str]] = None
+    allowed_tables: Optional[List[str]] = None,
+    conversation_history: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Uses SQLAgent (with AST schema validation, SAVEPOINT rollback dry-runs,
@@ -501,7 +502,8 @@ def generate_sql_from_nl(
             user_question=user_question,
             db_session=db_session,
             tenant_id=tenant_id,
-            allowed_tables=allowed_tables
+            allowed_tables=allowed_tables,
+            conversation_history=conversation_history
         )
     except Exception as agent_err:
         logger.error(f"[SQL Engine] SQLAgent run failed, using standard fallback: {agent_err}")

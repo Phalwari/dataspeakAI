@@ -35,6 +35,7 @@ export function WidgetApp({ initialConfig }: WidgetAppProps): ComponentChild {
   const [isStreaming, setIsStreaming] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [retryCountdown, setRetryCountdown] = useState<number | null>(null);
+  const [lastFailedQuery, setLastFailedQuery] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -170,6 +171,7 @@ export function WidgetApp({ initialConfig }: WidgetAppProps): ComponentChild {
 
     setInputValue('');
     setErrorMessage(null);
+    setLastFailedQuery(query);
 
     // 1. Add user message
     const userMsgId = `user-${Date.now()}`;
@@ -210,6 +212,7 @@ export function WidgetApp({ initialConfig }: WidgetAppProps): ComponentChild {
         (meta) => {
           abortControllerRef.current = null;
           setIsStreaming(false);
+          setLastFailedQuery(null);
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantMsgId
@@ -401,6 +404,25 @@ export function WidgetApp({ initialConfig }: WidgetAppProps): ComponentChild {
                 h('span', null, errorMessage),
                 retryCountdown !== null
                   ? h('span', { class: 'dataspeak-countdown' }, ` (${retryCountdown}s)`)
+                  : lastFailedQuery
+                  ? h(
+                      'button',
+                      {
+                        class: 'dataspeak-retry-btn',
+                        onClick: () => {
+                          const q = lastFailedQuery;
+                          setErrorMessage(null);
+                          if (q) {
+                            setInputValue(q);
+                            setTimeout(() => {
+                              inputRef.current?.focus();
+                            }, 50);
+                          }
+                        },
+                        'aria-label': 'Retry previous message',
+                      },
+                      'Retry'
+                    )
                   : null,
               ])
             : null,

@@ -666,14 +666,14 @@ def search_documents(
                         f"Document Context:\n{context_text}"
                     )
 
-                    gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
-                    gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_api_key}"
-                    payload = {"contents": [{"parts": [{"text": prompt}]}]}
-                    headers = {"Content-Type": "application/json"}
-                    res = requests.post(gemini_url, json=payload, headers=headers, timeout=30)
-                    if res.status_code == 200:
-                        res_data = res.json()
-                        answer = res_data["candidates"][0]["content"]["parts"][0]["text"]
+                    from services.llm_generation_service import llm_gateway
+                    raw = llm_gateway.generate_sync(
+                        prompt=prompt,
+                        tenant_id=current_user.tenant_id,
+                        purpose="document_search"
+                    )
+                    if raw and not raw.startswith("Sorry, all AI providers"):
+                        answer = raw.strip()
                 except Exception as err:
                     print(f"Gemini synthesis error: {err}")
 

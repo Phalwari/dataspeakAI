@@ -124,27 +124,14 @@ def extract_pdf_split_router(file_path: str, gemini_api_key: Optional[str] = Non
                         img_bytes = pix.tobytes("png")
                         img_b64 = base64.b64encode(img_bytes).decode('utf-8')
                         
-                        gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
-                        gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_api_key}"
-                        payload = {
-                            "contents": [{
-                                "parts": [
-                                    {"text": "Perform high-precision OCR on this document page. Reconstruct all narrative text, section headings, and tabular data into clean Markdown formatting. Describe any key visual figures or charts present."},
-                                    {
-                                        "inlineData": {
-                                            "mimeType": "image/png",
-                                            "data": img_b64
-                                        }
-                                    }
-                                ]
-                            }]
-                        }
-                        headers = {"Content-Type": "application/json"}
-                        res = requests.post(gemini_url, json=payload, headers=headers, timeout=30)
-                        if res.status_code == 200:
-                            res_data = res.json()
-                            ocr_result = res_data["candidates"][0]["content"]["parts"][0]["text"]
-                            page_text = f"[Scanned Page {page_num} OCR & Visual Parsing (Gemini 2.5 Flash)]\n" + ocr_result
+                        from services.llm_generation_service import generate_sync
+                        ocr_prompt = "Perform high-precision OCR on this document page. Reconstruct all narrative text, section headings, and tabular data into clean Markdown formatting. Describe any key visual figures or charts present."
+                        raw_ocr = generate_sync(
+                            ocr_prompt,
+                            image_b64_list=[img_b64]
+                        )
+                        if raw_ocr and not raw_ocr.startswith("Sorry, all AI providers"):
+                            page_text = f"[Scanned Page {page_num} OCR & Visual Parsing (Gemini 2.5 Flash)]\n" + raw_ocr.strip()
                     except Exception as gemini_err:
                         print(f"[VisualPath] Gemini OCR failed on page {page_num}: {gemini_err}")
                 

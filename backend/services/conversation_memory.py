@@ -177,9 +177,28 @@ class ConversationMemoryManager:
                     if not summary:
                         raise ValueError("Empty summary returned by LLM")
 
-                    conv.summary_text = summary
-                    conv.summary_turn_count = target_turn_count
+                    from sqlalchemy import text
+                    current_turn_count = int(conv.summary_turn_count or 0)
+                    cas_res = db.execute(
+                        text(
+                            "UPDATE conversations SET summary_text = :summary, summary_turn_count = :new_count "
+                            "WHERE id = :id AND (summary_turn_count = :old_count OR summary_turn_count IS NULL)"
+                        ),
+                        {
+                            "summary": summary,
+                            "new_count": target_turn_count,
+                            "id": conversation_id,
+                            "old_count": current_turn_count
+                        }
+                    )
                     db.commit()
+                    if cas_res.rowcount == 0:
+                        logger.warning(
+                            f"[CONV_MEMORY] CAS version mismatch for conv {conversation_id}: version was updated concurrently. Discarding stale update."
+                        )
+                        db.refresh(conv)
+                        return conv.summary_text
+
                     db.refresh(conv)
                     logger.info(f"[CONV_MEMORY] Successfully updated summary for conv {conversation_id} to version {target_turn_count}")
                     return summary

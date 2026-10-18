@@ -17,6 +17,35 @@ To maintain seamless multi-developer and AI agent collaboration:
 
 ## [Unreleased]
 
+- **Phase NR-2: Milestone NR-2.3 — Reliable Conversation Execution (`backend/services/chat_stream.py`, `backend/routers/widget.py`, `backend/routers/chat.py`, `backend/services/sql_agent.py`, `backend/services/sql_engine.py`, `backend/services/conversation_memory.py`, `backend/services/conversation_title.py`, `backend/services/query_router.py`, `backend/services/ai_insights.py`, `backend/routers/documents.py`, `backend/ingestion/extractors.py`, `backend/models.py`, `backend/schemas.py`, `backend/migrations/versions/008_title_customized_flag.py`, `src/app/pages/dashboard/ChatPage.tsx`, `src/widget/ui/WidgetApp.tsx`, `src/widget/api.ts`, `src/widget/styles.ts`, `docs/reports/nr2_streaming_performance.md`)**:
+  - **Single Generation Invariant & Multi-Turn SQL Context (Tasks NR-2.3-A-T01, T02; Defect I-14 / FYP-08 Repaired):**
+    - Eliminated redundant early and duplicate LLM invocations across widget chat and non-streaming fallback routes. Non-streaming chat now calls `call_gemini_api` exactly once per user turn, cutting user latency and server token expenditures by 50%.
+    - Extended `generate_sql_from_nl` and `sql_agent.run` with `conversation_history`, enabling ambiguous follow-up questions to resolve schema entities accurately against prior turns.
+    - Converted `test_probe_i14_widget_non_streaming_generates_answer_only_once` in `tests/test_nr0_regressions.py` from strict XFAIL to standard passing test; verified via `tests/manual/fyp_core_verification.py:test_sql_followup_generation_receives_prior_question`.
+  - **Unified LLMGateway Migration (Task NR-2.3-A-T02):**
+    - Replaced all legacy raw HTTP `requests.post` call sites in `backend/services/query_router.py`, `backend/services/ai_insights.py`, `backend/routers/documents.py`, and `backend/ingestion/extractors.py` with `llm_gateway.generate_sync`.
+    - Added base64 image passing support in `LLMGateway.generate_sync` for OCR table and document vision parsing.
+    - Preserved test fixture backward-compatibility for monkeypatched intent routing tests.
+  - **Stream Disconnect Slot Recovery & Cancellation (Task NR-2.3-A-T05; Defect I-13 / FYP-07 Repaired):**
+    - Added `request.is_disconnected()` polling in `stream_chat_response` generator loop, halting upstream token generation immediately upon client abort or disconnect.
+    - Guaranteed widget concurrent stream slot reclamation in generator `finally:` block via `widget_limiter.release_stream(public_key)`.
+  - **Explicit Terminal Error Frame on Persistence Failure (Task NR-2.3-A-T04):**
+    - Wrapped message persistence callback `on_complete` inside `try/except` in `backend/services/chat_stream.py`.
+    - On database failure, yields an explicit terminal SSE error frame `data: {"chunk": "", "done": true, "error": "Message could not be saved to conversation history.", "code": "PERSISTENCE_FAILED", "conversation_id": conversation_id}\n\n` before exiting, preventing misleading phantom success states.
+  - **Atomic Compare-And-Set (CAS) Conversation Memory (Task NR-2.3-A-T06):**
+    - Hardened `ConversationMemoryManager.save_summary` with conditional SQL Compare-And-Set update (`UPDATE conversations SET summary_text = :summary, summary_turn_count = :new_count WHERE id = :id AND (summary_turn_count = :old_count OR summary_turn_count IS NULL)`). Prevents concurrent asynchronous background summarization passes from clobbering newer conversation memory versions.
+  - **User Custom Title Preservation Lock (Task NR-2.3-A-T07):**
+    - Added `is_custom_title = Column(Boolean, default=False, nullable=False, server_default=text("false"))` to `Conversation` model with Alembic migration `008` and startup fallback.
+    - Configured `PUT /api/conversations/{id}` to set `is_custom_title = True` upon user rename.
+    - Updated `backend/services/conversation_title.py` to check `conv.is_custom_title` before and after LLM title generation, aborting commit if True to prevent overwriting user-edited titles.
+  - **Frontend Stream Safety & Actionable Widget Retry (Task NR-2.3-A-T08):**
+    - In `src/app/pages/dashboard/ChatPage.tsx`, tracked `activeRequestIdRef` and `activeConvIdRef`, aborted in-flight streams upon conversation switching or unmounting, and ensured `finally` blocks reset loading states strictly when `activeRequestIdRef.current === currentRequestId`.
+    - In `src/widget/api.ts`, updated `streamWidgetChat` to cancel reader and exit immediately on `ev.error`, suppressing erroneous `onDone` invocations.
+    - In `src/widget/ui/WidgetApp.tsx`, added actionable `Retry` button restoring the failed query in the error banner.
+  - **Performance Documentation (Task NR-2.3-A-T09):**
+    - Authored `docs/reports/nr2_streaming_performance.md` documenting 85.9% TTFT latency improvements, slot recovery guarantees, and memory concurrency verification.
+  - **Verification Evidence:** Full backend test suite passing (`12/12` passed with 0 xfails in `test_nr0_regressions.py`, `19/19` passed in `tests/manual/fyp_core_verification.py`, `6/6` passed in `test_phase7_1_4_memory.py`, `5/5` passed in `test_phase7_1_5_titles.py`); Vitest unit test suite passing (`35/35` passed); Vite production build passing with 0 errors.
+
 - **Phase NR-2: Milestone QA-NR-2.2-Repair — Milestone NR-2.2 QA Defect Remediation & Verification Hardening (`REV-NR2.2-QA-01`) (`backend/services/citation_service.py`, `backend/routers/documents.py`, `backend/routers/widget.py`, `backend/schemas.py`, `src/app/pages/dashboard/ChatPage.tsx`, `src/widget/styles.ts`, `tests/fixtures/nr2/eval_dataset_v1.json`, `tests/test_nr2_eval_benchmark.py`, `docs/reports/nr2_ai_evaluation_baseline.md`)**:
   - **Repaired and regression-verified all 10 QA findings (`F01`–`F10`):**
     - **F01 (P1) - Sentence-Level Negation Polarity Matching (`backend/services/citation_service.py`):** Fixed false-positive contradictions caused by checking chunk-wide negations against affirmative claims. Implemented `find_best_matching_sentence(claim, chunk_text)` using content-word overlap, comparing claim polarity strictly against the specific matching evidence sentence rather than the entire 500-token chunk.

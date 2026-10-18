@@ -147,7 +147,13 @@ export function ChatPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const activeRequestIdRef = useRef<string | null>(null);
+  const activeConvIdRef = useRef<number | null>(activeConvId);
   const token = localStorage.getItem("token");
+
+  useEffect(() => {
+    activeConvIdRef.current = activeConvId;
+  }, [activeConvId]);
 
   // Scroll to bottom
   const scrollToBottom = () => {
@@ -161,7 +167,11 @@ export function ChatPage() {
   // Clean up any in-flight stream on unmount
   useEffect(() => {
     return () => {
-      abortControllerRef.current?.abort();
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+      activeRequestIdRef.current = null;
     };
   }, []);
 
@@ -171,6 +181,7 @@ export function ChatPage() {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
+    activeRequestIdRef.current = null;
     setIsLoading(false);
     setMessages((prev) =>
       prev.map((m, idx) =>
@@ -184,6 +195,18 @@ export function ChatPage() {
           : m
       )
     );
+  };
+
+  // Handle Select Conversation with In-flight Stream Abort
+  const handleSelectConversation = (id: number) => {
+    if (id === activeConvId) return;
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    activeRequestIdRef.current = null;
+    setIsLoading(false);
+    setActiveConvId(id);
   };
 
   // Fetch Conversation List
@@ -238,6 +261,7 @@ export function ChatPage() {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
+    activeRequestIdRef.current = null;
     setIsLoading(false);
     setActiveConvId(null);
     setMessages([]);
@@ -278,6 +302,13 @@ export function ChatPage() {
     setMessages((prev) => [...prev, tempUserMsg, tempAssistantMsg]);
     setIsLoading(true);
 
+    const currentRequestId =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    activeRequestIdRef.current = currentRequestId;
+    const initialConvId = activeConvId;
+
     const abortCtrl = new AbortController();
     abortControllerRef.current = abortCtrl;
 
@@ -316,7 +347,7 @@ export function ChatPage() {
       let buffer = "";
 
       while (true) {
-        if (abortCtrl.signal.aborted) {
+        if (abortCtrl.signal.aborted || activeRequestIdRef.current !== currentRequestId) {
           try {
             await reader.cancel();
           } catch {}
@@ -331,6 +362,13 @@ export function ChatPage() {
         buffer = parts.pop() || "";
 
         for (const part of parts) {
+          if (abortCtrl.signal.aborted || activeRequestIdRef.current !== currentRequestId) {
+            try {
+              await reader.cancel();
+            } catch {}
+            return;
+          }
+
           const trimmed = part.trim();
           if (!trimmed.startsWith("data:")) continue;
           const jsonStr = trimmed.slice(5).trim();
@@ -381,7 +419,7 @@ export function ChatPage() {
 
               if (
                 parsed.conversation_id &&
-                (!activeConvId || activeConvId !== parsed.conversation_id)
+                (!activeConvIdRef.current || activeConvIdRef.current === initialConvId)
               ) {
                 setActiveConvId(parsed.conversation_id);
               }
@@ -393,7 +431,7 @@ export function ChatPage() {
         }
       }
     } catch (err: any) {
-      if (err.name === "AbortError" || abortCtrl.signal.aborted) {
+      if (err.name === "AbortError" || abortCtrl.signal.aborted || activeRequestIdRef.current !== currentRequestId) {
         return;
       }
       toast.error(err.message || "Failed to process chat query");
@@ -410,8 +448,11 @@ export function ChatPage() {
         )
       );
     } finally {
-      abortControllerRef.current = null;
-      setIsLoading(false);
+      if (activeRequestIdRef.current === currentRequestId) {
+        abortControllerRef.current = null;
+        activeRequestIdRef.current = null;
+        setIsLoading(false);
+      }
     }
   };
 
@@ -435,7 +476,7 @@ export function ChatPage() {
         if (activeConvId === id) {
           const remaining = conversations.filter((c) => c.id !== id);
           if (remaining.length > 0) {
-            setActiveConvId(remaining[0].id);
+            handleSelectConversation(remaining[0].id);
           } else {
             handleNewChat();
           }
@@ -548,7 +589,7 @@ export function ChatPage() {
                 <div
                   key={conv.id}
                   onClick={() => {
-                    if (!isEditing) setActiveConvId(conv.id);
+                    if (!isEditing) handleSelectConversation(conv.id);
                   }}
                   className={`group relative flex flex-col gap-1 p-3 rounded-lg cursor-pointer transition-all border text-left ${
                     isActive

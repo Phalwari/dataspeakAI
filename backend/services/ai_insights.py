@@ -82,16 +82,13 @@ Return ONLY a valid JSON array of objects with the following keys:
 - "sparkline_values": (array of 6 integers e.g. [10, 20, 15, 30, 25, 40])
         """
 
-        gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_key}"
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}]
-        }
-        
-        res = requests.post(url, json=payload, timeout=15)
-        if res.status_code == 200:
-            res_json = res.json()
-            raw_text = res_json['candidates'][0]['content']['parts'][0]['text']
+        from services.llm_generation_service import llm_gateway
+        raw_text = llm_gateway.generate_sync(
+            prompt=prompt,
+            tenant_id=tenant_id,
+            purpose="ai_insights"
+        )
+        if raw_text and not raw_text.startswith("Sorry, all AI providers"):
             # Clean markdown codeblocks if present
             cleaned_text = raw_text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
             parsed_insights = json.loads(cleaned_text)

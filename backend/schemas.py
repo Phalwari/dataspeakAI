@@ -346,11 +346,20 @@ class WidgetSessionRequest(BaseModel):
 
 class WidgetSessionResponse(BaseModel):
     session_token: str
+    token: Optional[str] = None
     expires_in: int
     tenant_id: int
     conversation_id: int
     visitor_id: Optional[str] = None
     continuity_token: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def populate_token(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "token" not in data and "session_token" in data:
+                data["token"] = data["session_token"]
+        return data
 
 class ChatbotConfigBase(BaseModel):
     theme_color: str
@@ -620,6 +629,7 @@ class ConversationResponse(BaseModel):
     is_shared: Optional[bool] = False
     shares: Optional[List[ConversationShareResponse]] = []
     messages: Optional[List[MessageResponse]] = []
+    is_custom_title: Optional[bool] = False
 
     class Config:
         from_attributes = True
@@ -635,6 +645,7 @@ class ConversationListItem(BaseModel):
     user_id: Optional[int] = None
     is_owner: Optional[bool] = True
     is_shared: Optional[bool] = False
+    is_custom_title: Optional[bool] = False
 
     class Config:
         from_attributes = True

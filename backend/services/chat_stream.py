@@ -174,7 +174,16 @@ async def stream_chat_response(
                     callback_grounding = res.get("grounding")
                     callback_sql_agent = res.get("sql_agent")
             except Exception as cb_err:
-                logger.warning(f"[ChatStream Callback Error] {cb_err}")
+                logger.error(f"[ChatStream Callback Error] {cb_err}")
+                err_payload = json.dumps({
+                    "chunk": "",
+                    "done": True,
+                    "error": "Message could not be saved to conversation history.",
+                    "code": "PERSISTENCE_FAILED",
+                    "conversation_id": conversation_id
+                })
+                yield f"data: {err_payload}\n\n"
+                return
 
         # Construct backward-compatible done payload
         sources_list = []

@@ -136,7 +136,7 @@ async def generate_and_set_conversation_title_in_background(
 
         # Verify user has not already renamed the conversation
         db.refresh(conv)
-        if conv.title != initial_heuristic_title:
+        if getattr(conv, "is_custom_title", False) or conv.title != initial_heuristic_title:
             logger.info(f"[CONV_TITLE] User already renamed conv {conversation_id} to '{conv.title}'. Skipping overwrite.")
             return conv.title
 
@@ -145,7 +145,7 @@ async def generate_and_set_conversation_title_in_background(
 
             # Re-verify before commit
             db.refresh(conv)
-            if conv.title == initial_heuristic_title:
+            if not getattr(conv, "is_custom_title", False) and conv.title == initial_heuristic_title:
                 conv.title = new_title
                 db.commit()
                 db.refresh(conv)

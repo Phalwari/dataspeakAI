@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Float, JSON, Index, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Float, JSON, Index, UniqueConstraint, text
 from sqlalchemy.orm import relationship
 from database import Base
 from datetime import datetime, timezone
@@ -532,6 +532,7 @@ class Conversation(Base):
     platform = Column(String, default="web")
     summary_text = Column(Text, nullable=True)
     summary_turn_count = Column(Integer, default=0, nullable=False)
+    is_custom_title = Column(Boolean, default=False, nullable=False, server_default=text("false"))
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 

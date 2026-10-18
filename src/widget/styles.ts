@@ -448,5 +448,21 @@ export function getWidgetStyles(themeColor: string = "#3b82f6", position: string
 .dataspeak-countdown {
   font-weight: 600;
 }
+
+.dataspeak-retry-btn {
+  background: #ffffff;
+  border: 1px solid #f87171;
+  color: #b91c1c;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.dataspeak-retry-btn:hover {
+  background: #fef2f2;
+}
 `;
 }

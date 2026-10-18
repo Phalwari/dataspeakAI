@@ -267,7 +267,8 @@ class SQLAgent:
         user_question: str,
         db_session: Optional[Session] = None,
         tenant_id: Optional[int] = None,
-        allowed_tables: Optional[List[str]] = None
+        allowed_tables: Optional[List[str]] = None,
+        conversation_history: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Runs the self-correcting agent execution loop.
@@ -286,6 +287,8 @@ class SQLAgent:
         t_id = tenant_id or getattr(db_conn, "tenant_id", None)
         dialect = getattr(db_conn, "db_type", "SQL")
 
+        conv_ctx = f"CONVERSATION CONTEXT:\n{conversation_history}\n\n" if conversation_history else ""
+
         base_prompt = (
             f"You are a Senior SQL & Database Engineer. Given the following database schema context and user question, "
             f"generate a valid, read-only SQL query ({dialect} dialect) and a short explanation.\n\n"
@@ -297,6 +300,7 @@ class SQLAgent:
             "```sql\n<your SQL query here>\n```\n"
             "Explanation: <1-2 sentence explanation of how the query works>\n\n"
             f"DATABASE SCHEMA:\n{schema_ctx}\n\n"
+            f"{conv_ctx}"
             f"USER QUESTION: {user_question}"
         )
 

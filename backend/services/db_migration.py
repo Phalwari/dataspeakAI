@@ -93,6 +93,8 @@ MIGRATION_COLUMNS = [
     # Phase 7: Task 7.1.4 Conversation Memory Management
     ("conversations", "summary_text", "TEXT", "TEXT"),
     ("conversations", "summary_turn_count", "INTEGER DEFAULT 0", "INTEGER DEFAULT 0"),
+    # Milestone NR-2.3: Task NR-2.3-A-T07 Custom Title Preservation
+    ("conversations", "is_custom_title", "BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE"),
     # Phase 7: Task 7.2.2 Hierarchical Document Chunks
     ("document_chunks", "parent_chunk_id", "INTEGER", "INTEGER"),
     ("document_chunks", "hierarchy_level", "INTEGER DEFAULT 1", "INTEGER DEFAULT 1"),
