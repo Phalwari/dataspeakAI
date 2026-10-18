@@ -157,14 +157,21 @@ async def get_quick_stats(
         if df.empty:
             raise HTTPException(status_code=400, detail="Uploaded dataset file is empty.")
 
+        total_rows_full = int(len(df))
+        is_sampled = False
+        sample_size = total_rows_full
+        chart_df = df
         if len(df) > 10000:
-            df = df.sample(10000, random_state=42)
+            chart_df = df.sample(10000, random_state=42)
+            is_sampled = True
+            sample_size = 10000
 
         df_stats = {
-            "total_rows": int(len(df)),
+            "total_rows": total_rows_full,
             "total_columns": int(len(df.columns)),
             "columns": list(df.columns),
-            "memory_mb": round(float(df.memory_usage().sum()) / 1e6, 2)
+            "memory_mb": round(float(df.memory_usage().sum()) / 1e6, 2),
+            "is_sampled": False,
         }
 
         try:
@@ -180,7 +187,17 @@ async def get_quick_stats(
 
         domain_res = _detect_domain(df, problem_info, template_type=None)
         charts = domain_res.get("charts", [])
+        for c in charts:
+            if isinstance(c, dict):
+                c["is_sampled"] = is_sampled
+                c["sample_size"] = sample_size
+                c["total_rows"] = total_rows_full
+
         key_metrics = domain_res.get("key_metrics", [])
+        for k in key_metrics:
+            if isinstance(k, dict):
+                k["is_sampled"] = False
+
         detected_domain = domain_res.get("detected_domain", "general")
 
         # Business summary via Multi-LLM caller

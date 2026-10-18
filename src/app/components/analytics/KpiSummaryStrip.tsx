@@ -14,6 +14,9 @@ interface KpiStats {
   max: number | null;
   min: number | null;
   count: number | null;
+  trend_status?: string | Record<string, string>;
+  trend_pct?: number | Record<string, number | null>;
+  is_sampled?: boolean;
 }
 
 interface KpiSummaryStripProps {
@@ -22,6 +25,41 @@ interface KpiSummaryStripProps {
   selectedMeasure?: string;
   selectedTable?: string;
   selectedAgg?: string;
+}
+
+function getTrendBadge(
+  cardKey: string,
+  stats?: KpiStats | null
+): { label: string; className: string } {
+  if (!stats) {
+    return { label: "No baseline", className: "text-slate-400 bg-slate-500/10 border-slate-500/30" };
+  }
+
+  const rawStatus = typeof stats.trend_status === "object"
+    ? stats.trend_status?.[cardKey]
+    : stats.trend_status;
+
+  const rawPct = typeof stats.trend_pct === "object"
+    ? stats.trend_pct?.[cardKey]
+    : (typeof stats.trend_pct === "number" ? stats.trend_pct : null);
+
+  if (rawStatus === "unavailable_zero_baseline") {
+    return { label: "Baseline 0", className: "text-amber-400 bg-amber-500/10 border-amber-500/30" };
+  }
+  if (rawStatus === "no_prior_data") {
+    return { label: "New Metric", className: "text-blue-400 bg-blue-500/10 border-blue-500/30" };
+  }
+  if (rawStatus === "flat" || rawPct === 0) {
+    return { label: "0.0%", className: "text-slate-400 bg-slate-500/10 border-slate-500/30" };
+  }
+  if (rawPct != null && !isNaN(rawPct)) {
+    if (rawPct > 0) {
+      return { label: `+${rawPct.toFixed(1)}% ↑`, className: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30" };
+    }
+    return { label: `${rawPct.toFixed(1)}% ↓`, className: "text-rose-400 bg-rose-500/10 border-rose-500/30" };
+  }
+
+  return { label: "Exact Total", className: "text-indigo-300 bg-indigo-500/10 border-indigo-500/30" };
 }
 
 const CARDS = [
@@ -34,8 +72,6 @@ const CARDS = [
     glow: "shadow-[0_0_24px_rgba(59,130,246,0.18),inset_0_1px_0_rgba(255,255,255,0.08)]",
     iconBg: "bg-blue-500/15 border border-blue-500/35",
     iconColor: "text-blue-400",
-    trend: "+12.4% ↑",
-    trendColor: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30",
   },
   {
     key: "average" as keyof KpiStats,
@@ -46,8 +82,6 @@ const CARDS = [
     glow: "shadow-[0_0_24px_rgba(16,185,129,0.18),inset_0_1px_0_rgba(255,255,255,0.08)]",
     iconBg: "bg-emerald-500/15 border border-emerald-500/35",
     iconColor: "text-emerald-400",
-    trend: "+5.2% ↑",
-    trendColor: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30",
   },
   {
     key: "max" as keyof KpiStats,
@@ -58,8 +92,6 @@ const CARDS = [
     glow: "shadow-[0_0_24px_rgba(168,85,247,0.18),inset_0_1px_0_rgba(255,255,255,0.08)]",
     iconBg: "bg-purple-500/15 border border-purple-500/35",
     iconColor: "text-purple-400",
-    trend: "-2.1% ↓",
-    trendColor: "text-rose-400 bg-rose-500/10 border-rose-500/30",
   },
   {
     key: "count" as keyof KpiStats,
@@ -70,8 +102,6 @@ const CARDS = [
     glow: "shadow-[0_0_24px_rgba(245,158,11,0.18),inset_0_1px_0_rgba(255,255,255,0.08)]",
     iconBg: "bg-amber-500/15 border border-amber-500/35",
     iconColor: "text-amber-400",
-    trend: "+8.7% ↑",
-    trendColor: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30",
   },
 ];
 
@@ -169,9 +199,14 @@ export function KpiSummaryStrip({
                 </p>
               )}
 
-              <span className={`inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full border ${card.trendColor}`}>
-                {card.trend}
-              </span>
+              {(() => {
+                const badge = getTrendBadge(card.key, stats);
+                return (
+                  <span className={`inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full border ${badge.className}`}>
+                    {badge.label}
+                  </span>
+                );
+              })()}
             </div>
 
             {/* Sub-label */}

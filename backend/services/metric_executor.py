@@ -42,6 +42,10 @@ class MetricRequest:
     filters: Optional[List[MetricFilter]] = None
     limit: int = 10
     tenant_id: Optional[int] = None
+    entity_grain: Optional[str] = None
+    unit: Optional[str] = None
+    date_field: Optional[str] = None
+    missing_value_policy: str = "zero"
 
 
 @dataclass

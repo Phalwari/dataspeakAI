@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 
 import models
 
+import pandas as pd
+
 from services.metric_executor import (
     MetricExecutor,
     MetricFilter,
@@ -18,6 +20,7 @@ from services.metric_recipes import (
     AtomicMetricRecipe,
     DifferenceMetricRecipe,
     MetricRecipe,
+    PeriodComparisonRecipe,
     RatioMetricRecipe,
     get_recipe_operands,
     validate_recipe_for_connection,
@@ -29,6 +32,9 @@ ExecutionStatus = Literal[
     "ok",
     "no_data",
     "undefined",
+    "no_prior_data",
+    "unavailable_zero_baseline",
+    "flat",
 ]
 
 ComponentRole = Literal[
@@ -37,6 +43,8 @@ ComponentRole = Literal[
     "denominator",
     "left",
     "right",
+    "current_period",
+    "prior_period",
 ]
 
 
@@ -488,7 +496,437 @@ def execute_metric_recipe(
             components=components,
         )
 
+    # ========================================================
+    # PERIOD COMPARISON
+    # ========================================================
+
+    if isinstance(validated_recipe, PeriodComparisonRecipe):
+        current_res = execute_metric_recipe(
+            recipe=validated_recipe.current_period_recipe,
+            connection_id=connection_id,
+            tenant_id=tenant_id,
+            db_conn=db_conn,
+            db=db,
+            filters=filters,
+        )
+        prior_res = execute_metric_recipe(
+            recipe=validated_recipe.prior_period_recipe,
+            connection_id=connection_id,
+            tenant_id=tenant_id,
+            db_conn=db_conn,
+            db=db,
+            filters=filters,
+        )
+
+        current_val = _ensure_numeric(current_res.value, role="current_period")
+        prior_val = _ensure_numeric(prior_res.value, role="prior_period")
+
+        curr_op = get_recipe_operands(validated_recipe.current_period_recipe)[0]
+        prior_op = get_recipe_operands(validated_recipe.prior_period_recipe)[0]
+
+        components = [
+            MetricComponentResult(
+                role="current_period",
+                target_ref=curr_op.target_ref,
+                aggregation=curr_op.aggregation,
+                value=current_res.value,
+            ),
+            MetricComponentResult(
+                role="prior_period",
+                target_ref=prior_op.target_ref,
+                aggregation=prior_op.aggregation,
+                value=prior_res.value,
+            ),
+        ]
+
+        if prior_val is None:
+            return MetricRecipeExecutionResult(
+                metric_id=validated_recipe.metric_id,
+                metric_type=validated_recipe.metric_type,
+                title=validated_recipe.title,
+                format=validated_recipe.format,
+                status="no_prior_data",
+                value=None,
+                components=components,
+            )
+
+        if current_val is None:
+            return MetricRecipeExecutionResult(
+                metric_id=validated_recipe.metric_id,
+                metric_type=validated_recipe.metric_type,
+                title=validated_recipe.title,
+                format=validated_recipe.format,
+                status="no_data",
+                value=None,
+                components=components,
+            )
+
+        if prior_val == 0:
+            if validated_recipe.comparison_type == "percentage_change":
+                if current_val == 0:
+                    return MetricRecipeExecutionResult(
+                        metric_id=validated_recipe.metric_id,
+                        metric_type=validated_recipe.metric_type,
+                        title=validated_recipe.title,
+                        format=validated_recipe.format,
+                        status="flat",
+                        value=0.0,
+                        components=components,
+                    )
+                return MetricRecipeExecutionResult(
+                    metric_id=validated_recipe.metric_id,
+                    metric_type=validated_recipe.metric_type,
+                    title=validated_recipe.title,
+                    format=validated_recipe.format,
+                    status="unavailable_zero_baseline",
+                    value=None,
+                    components=components,
+                )
+            else:
+                value = current_val - prior_val
+                return MetricRecipeExecutionResult(
+                    metric_id=validated_recipe.metric_id,
+                    metric_type=validated_recipe.metric_type,
+                    title=validated_recipe.title,
+                    format=validated_recipe.format,
+                    status="ok",
+                    value=value,
+                    components=components,
+                )
+
+        if validated_recipe.comparison_type == "percentage_change":
+            value = (current_val - prior_val) / abs(prior_val) * 100.0
+        else:
+            value = current_val - prior_val
+
+        if isinstance(value, float) and not math.isfinite(value):
+            raise DerivedMetricExecutionError(
+                "Period comparison calculation resulted in a non-finite value."
+            )
+
+        return MetricRecipeExecutionResult(
+            metric_id=validated_recipe.metric_id,
+            metric_type=validated_recipe.metric_type,
+            title=validated_recipe.title,
+            format=validated_recipe.format,
+            status="ok",
+            value=value,
+            components=components,
+        )
+
     raise DerivedMetricExecutionError(
         f"Unsupported MetricRecipe type: "
         f"{type(validated_recipe).__name__}"
     )
+
+
+# ============================================================
+# DATAFRAME METRIC EXECUTOR (NR-2.1-A-T02)
+# ============================================================
+
+class DataFrameMetricExecutor:
+    """
+    Executes MetricRecipe AST directly over Pandas DataFrame sources.
+    Provides mathematically exact parity with SQL MetricExecutor.
+    """
+
+    def __init__(self, data: pd.DataFrame | dict[str, pd.DataFrame]):
+        if isinstance(data, pd.DataFrame):
+            self.dfs = {"default": data}
+        elif isinstance(data, dict):
+            self.dfs = {str(k): v for k, v in data.items() if isinstance(v, pd.DataFrame)}
+            if not self.dfs:
+                raise ValueError("DataFrame dictionary cannot be empty.")
+        else:
+            raise ValueError("data must be a pandas DataFrame or a dict of DataFrames.")
+
+    def _resolve_df(self, table_name: str) -> pd.DataFrame:
+        if table_name in self.dfs:
+            return self.dfs[table_name]
+        if "default" in self.dfs:
+            return self.dfs["default"]
+        for k, v in self.dfs.items():
+            if k.lower() == table_name.lower():
+                return v
+        raise DerivedMetricExecutionError(f"Table '{table_name}' not found in DataFrame sources.")
+
+    def _apply_filters(self, df: pd.DataFrame, filters: Sequence[MetricFilter] | None) -> pd.DataFrame:
+        if not filters:
+            return df
+        filtered = df
+        for f in filters:
+            col = getattr(f, "column", None)
+            if not col:
+                continue
+            if "." in col:
+                col = col.split(".", 1)[1]
+            if col not in filtered.columns:
+                continue
+            op = (getattr(f, "operator", "=") or "=").strip().upper()
+            val = getattr(f, "value", None)
+
+            if op == "=":
+                filtered = filtered[filtered[col] == val]
+            elif op == "!=":
+                filtered = filtered[filtered[col] != val]
+            elif op == ">":
+                filtered = filtered[filtered[col] > val]
+            elif op == "<":
+                filtered = filtered[filtered[col] < val]
+            elif op == ">=":
+                filtered = filtered[filtered[col] >= val]
+            elif op == "<=":
+                filtered = filtered[filtered[col] <= val]
+            elif op == "LIKE":
+                pattern = str(val).replace("%", ".*")
+                filtered = filtered[filtered[col].astype(str).str.contains(pattern, regex=True, na=False)]
+            elif op == "IN":
+                val_list = val if isinstance(val, (list, tuple, set)) else [val]
+                filtered = filtered[filtered[col].isin(val_list)]
+        return filtered
+
+    def execute_atomic(
+        self,
+        operand: AtomicMetricOperand,
+        filters: Sequence[MetricFilter] | None = None,
+    ) -> Any | None:
+        table_name, column_name = parse_column_ref(operand.target_ref)
+        df = self._resolve_df(table_name)
+        filtered = self._apply_filters(df, filters)
+
+        if filtered.empty:
+            if operand.aggregation in ("COUNT", "COUNT_DISTINCT"):
+                return 0
+            return None
+
+        if column_name == "*":
+            if operand.aggregation == "COUNT":
+                return int(len(filtered))
+            raise DerivedMetricExecutionError("Wildcard target is only allowed with COUNT.")
+
+        if column_name not in filtered.columns:
+            raise DerivedMetricExecutionError(f"Column '{column_name}' not found in table '{table_name}'.")
+
+        series = filtered[column_name].dropna()
+        if series.empty:
+            if operand.aggregation in ("COUNT", "COUNT_DISTINCT"):
+                return 0
+            return None
+
+        agg = operand.aggregation.upper()
+        if agg == "COUNT":
+            return int(len(series))
+        elif agg == "COUNT_DISTINCT":
+            return int(series.nunique())
+        elif agg == "SUM":
+            val = float(series.sum())
+            return val if math.isfinite(val) else None
+        elif agg == "AVG":
+            val = float(series.mean())
+            return val if math.isfinite(val) else None
+        elif agg == "MIN":
+            val = series.min()
+            return float(val) if isinstance(val, (int, float)) and not isinstance(val, bool) else val
+        elif agg == "MAX":
+            val = series.max()
+            return float(val) if isinstance(val, (int, float)) and not isinstance(val, bool) else val
+        else:
+            raise DerivedMetricExecutionError(f"Unsupported aggregation '{agg}'")
+
+    def execute(
+        self,
+        recipe: MetricRecipe,
+        filters: Sequence[MetricFilter] | None = None,
+    ) -> MetricRecipeExecutionResult:
+        if isinstance(recipe, AtomicMetricRecipe):
+            value = self.execute_atomic(recipe.operand, filters=filters)
+            return MetricRecipeExecutionResult(
+                metric_id=recipe.metric_id,
+                metric_type=recipe.metric_type,
+                title=recipe.title,
+                format=recipe.format,
+                status="ok" if value is not None else "no_data",
+                value=value,
+                components=[
+                    _component(
+                        role="operand",
+                        operand=recipe.operand,
+                        value=value,
+                    )
+                ],
+            )
+
+        if isinstance(recipe, RatioMetricRecipe):
+            num_raw = self.execute_atomic(recipe.numerator, filters=filters)
+            den_raw = self.execute_atomic(recipe.denominator, filters=filters)
+            numerator = _ensure_numeric(num_raw, role="numerator")
+            denominator = _ensure_numeric(den_raw, role="denominator")
+            components = [
+                _component(role="numerator", operand=recipe.numerator, value=num_raw),
+                _component(role="denominator", operand=recipe.denominator, value=den_raw),
+            ]
+            if numerator is None or denominator is None:
+                return MetricRecipeExecutionResult(
+                    metric_id=recipe.metric_id,
+                    metric_type=recipe.metric_type,
+                    title=recipe.title,
+                    format=recipe.format,
+                    status="no_data",
+                    value=None,
+                    components=components,
+                )
+            if denominator == 0:
+                return MetricRecipeExecutionResult(
+                    metric_id=recipe.metric_id,
+                    metric_type=recipe.metric_type,
+                    title=recipe.title,
+                    format=recipe.format,
+                    status="undefined",
+                    value=None,
+                    components=components,
+                )
+            value = numerator / denominator
+            if not math.isfinite(value):
+                raise DerivedMetricExecutionError("Ratio calculation resulted in non-finite value.")
+            return MetricRecipeExecutionResult(
+                metric_id=recipe.metric_id,
+                metric_type=recipe.metric_type,
+                title=recipe.title,
+                format=recipe.format,
+                status="ok",
+                value=value,
+                components=components,
+            )
+
+        if isinstance(recipe, DifferenceMetricRecipe):
+            left_raw = self.execute_atomic(recipe.left, filters=filters)
+            right_raw = self.execute_atomic(recipe.right, filters=filters)
+            left = _ensure_numeric(left_raw, role="left")
+            right = _ensure_numeric(right_raw, role="right")
+            components = [
+                _component(role="left", operand=recipe.left, value=left_raw),
+                _component(role="right", operand=recipe.right, value=right_raw),
+            ]
+            if left is None or right is None:
+                return MetricRecipeExecutionResult(
+                    metric_id=recipe.metric_id,
+                    metric_type=recipe.metric_type,
+                    title=recipe.title,
+                    format=recipe.format,
+                    status="no_data",
+                    value=None,
+                    components=components,
+                )
+            value = left - right
+            if not math.isfinite(value):
+                raise DerivedMetricExecutionError("Difference calculation resulted in non-finite value.")
+            return MetricRecipeExecutionResult(
+                metric_id=recipe.metric_id,
+                metric_type=recipe.metric_type,
+                title=recipe.title,
+                format=recipe.format,
+                status="ok",
+                value=value,
+                components=components,
+            )
+
+        if isinstance(recipe, PeriodComparisonRecipe):
+            curr_res = self.execute(recipe.current_period_recipe, filters=filters)
+            prior_res = self.execute(recipe.prior_period_recipe, filters=filters)
+            current_val = _ensure_numeric(curr_res.value, role="current_period")
+            prior_val = _ensure_numeric(prior_res.value, role="prior_period")
+
+            curr_op = get_recipe_operands(recipe.current_period_recipe)[0]
+            prior_op = get_recipe_operands(recipe.prior_period_recipe)[0]
+
+            components = [
+                MetricComponentResult(
+                    role="current_period",
+                    target_ref=curr_op.target_ref,
+                    aggregation=curr_op.aggregation,
+                    value=curr_res.value,
+                ),
+                MetricComponentResult(
+                    role="prior_period",
+                    target_ref=prior_op.target_ref,
+                    aggregation=prior_op.aggregation,
+                    value=prior_res.value,
+                ),
+            ]
+
+            if prior_val is None:
+                return MetricRecipeExecutionResult(
+                    metric_id=recipe.metric_id,
+                    metric_type=recipe.metric_type,
+                    title=recipe.title,
+                    format=recipe.format,
+                    status="no_prior_data",
+                    value=None,
+                    components=components,
+                )
+
+            if current_val is None:
+                return MetricRecipeExecutionResult(
+                    metric_id=recipe.metric_id,
+                    metric_type=recipe.metric_type,
+                    title=recipe.title,
+                    format=recipe.format,
+                    status="no_data",
+                    value=None,
+                    components=components,
+                )
+
+            if prior_val == 0:
+                if recipe.comparison_type == "percentage_change":
+                    if current_val == 0:
+                        return MetricRecipeExecutionResult(
+                            metric_id=recipe.metric_id,
+                            metric_type=recipe.metric_type,
+                            title=recipe.title,
+                            format=recipe.format,
+                            status="flat",
+                            value=0.0,
+                            components=components,
+                        )
+                    return MetricRecipeExecutionResult(
+                        metric_id=recipe.metric_id,
+                        metric_type=recipe.metric_type,
+                        title=recipe.title,
+                        format=recipe.format,
+                        status="unavailable_zero_baseline",
+                        value=None,
+                        components=components,
+                    )
+                else:
+                    value = current_val - prior_val
+                    return MetricRecipeExecutionResult(
+                        metric_id=recipe.metric_id,
+                        metric_type=recipe.metric_type,
+                        title=recipe.title,
+                        format=recipe.format,
+                        status="ok",
+                        value=value,
+                        components=components,
+                    )
+
+            if recipe.comparison_type == "percentage_change":
+                value = (current_val - prior_val) / abs(prior_val) * 100.0
+            else:
+                value = current_val - prior_val
+
+            if isinstance(value, float) and not math.isfinite(value):
+                raise DerivedMetricExecutionError(
+                    "Period comparison calculation resulted in a non-finite value."
+                )
+
+            return MetricRecipeExecutionResult(
+                metric_id=recipe.metric_id,
+                metric_type=recipe.metric_type,
+                title=recipe.title,
+                format=recipe.format,
+                status="ok",
+                value=value,
+                components=components,
+            )
+
+        raise DerivedMetricExecutionError(f"Unsupported MetricRecipe type: {type(recipe).__name__}")

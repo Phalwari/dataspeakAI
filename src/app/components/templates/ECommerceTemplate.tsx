@@ -564,8 +564,38 @@ export const DataSpeakDashboard: React.FC<any> = ({
             {isDatabase ? (
               <span className="pill accent"><Database size={12} /> Deterministic Pipeline (Phase 2C)</span>
             ) : mlData?.automl_results?.best_model?.model ? (
-              <span className="pill accent"><Brain size={12} /> {mlData.automl_results.best_model.model} · {mlData.automl_results.best_model.score ? (mlData.automl_results.best_model.score * 100).toFixed(1) + '%' : 'N/A'}</span>
+              <span
+                className="pill accent"
+                title={mlData.automl_results.best_model.f1_score !== undefined
+                  ? `Holdout Test Accuracy: ${(mlData.automl_results.best_model.score * 100).toFixed(1)}% | Weighted F1: ${(mlData.automl_results.best_model.f1_score * 100).toFixed(1)}%`
+                  : undefined}
+              >
+                <Brain size={12} /> {mlData.automl_results.best_model.model} · {mlData.automl_results.best_model.score ? (mlData.automl_results.best_model.score * 100).toFixed(1) + '%' : 'N/A'}
+                {mlData.automl_results.best_model.f1_score !== undefined && (
+                  <span style={{ opacity: 0.85, marginLeft: '4px' }}>
+                    (F1: {(mlData.automl_results.best_model.f1_score * 100).toFixed(1)}%)
+                  </span>
+                )}
+              </span>
             ) : null}
+            {mlData?.automl_results?.class_imbalance_detected && (
+              <span
+                className="pill warning"
+                style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}
+                title={mlData.automl_results.class_imbalance_warning || `Severe class imbalance detected (>85% majority). Baseline: ${mlData.automl_results.majority_baseline ? (mlData.automl_results.majority_baseline * 100).toFixed(1) + '%' : 'N/A'}`}
+              >
+                <AlertTriangle size={12} /> Class Imbalance ({mlData.automl_results.majority_baseline ? `Baseline ${(mlData.automl_results.majority_baseline * 100).toFixed(0)}%` : 'Warning'})
+              </span>
+            )}
+            {mlData?.automl_results?.insufficient_data && (
+              <span
+                className="pill"
+                style={{ background: 'rgba(148,163,184,0.15)', color: '#94a3b8', border: '1px solid rgba(148,163,184,0.3)' }}
+                title="Dataset has fewer than 20 rows. Model training omitted to prevent false confidence."
+              >
+                <AlertTriangle size={12} /> Small Dataset (&lt;20 rows)
+              </span>
+            )}
             <span className="pill" style={{ background: 'rgba(245,158,11,0.12)', color: '#FBBF24', border: '1px solid rgba(245,158,11,0.3)' }}><Sparkles size={12} /> AI selected {charts.length} charts</span>
             {onRefresh && (
               <button

@@ -269,10 +269,6 @@ def test_probe_i09_control_kpi_total_sum():
     assert df["revenue"].sum() == 1000.0
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Issue I-09: KPI trend compares aggregate sum to row mean, inventing 900% growth; owned by NR-2.1-A"
-)
 def test_probe_i09_kpi_trend_does_not_compare_sum_to_mean():
     """
     Defect Assertion: 10 rows of 100 revenue (sum=1000, mean=100) MUST NOT compute

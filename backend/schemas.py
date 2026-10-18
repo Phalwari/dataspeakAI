@@ -1,6 +1,6 @@
 import re
 from pydantic import BaseModel, EmailStr, model_validator, field_validator, Field, ConfigDict
-from typing import Optional, List, Any, Dict
+from typing import Optional, List, Any, Dict, Literal
 from datetime import datetime
 from urllib.parse import urlparse, unquote
 
@@ -484,6 +484,60 @@ class KpiDefinitionResponse(BaseModel):
     default_chart_type: str
     priority: Optional[int] = 1
     reasoning: Optional[str] = None
+    entity_grain: Optional[str] = None
+    unit: Optional[str] = None
+    date_field: Optional[str] = None
+    missing_value_policy: Optional[str] = "zero"
+    trend_status: Optional[str] = None
+    provenance: Optional["MetricProvenanceResponse"] = None
+
+    class Config:
+        from_attributes = True
+
+
+class MetricRecipeSchema(BaseModel):
+    recipe_version: str = "1.0"
+    metric_id: str
+    title: str
+    description: Optional[str] = None
+    format: str = "number"
+    reasoning: Optional[str] = None
+    entity_grain: Optional[str] = None
+    unit: Optional[str] = None
+    date_field: Optional[str] = None
+    missing_value_policy: str = "zero"
+    metric_type: str
+    operand: Optional[Dict[str, Any]] = None
+    numerator: Optional[Dict[str, Any]] = None
+    denominator: Optional[Dict[str, Any]] = None
+    left: Optional[Dict[str, Any]] = None
+    right: Optional[Dict[str, Any]] = None
+    zero_division: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class MetricProvenanceResponse(BaseModel):
+    definition_version: str = "1.0"
+    source_type: str = "sql"
+    calculated_at: datetime = Field(default_factory=datetime.utcnow)
+    period_start: Optional[str] = None
+    period_end: Optional[str] = None
+    timezone: str = "UTC"
+    total_rows_evaluated: int = 0
+    is_sampled: bool = False
+    sample_ratio: float = 1.0
+
+
+class TrainingSpecification(BaseModel):
+    split_strategy: Literal["random", "stratified", "temporal"] = "random"
+    test_size: float = Field(default=0.2, ge=0.05, le=0.5)
+    validation_strategy: Literal["k_fold", "holdout", "time_series"] = "k_fold"
+    time_column: Optional[str] = None
+    random_state: int = 42
+    imbalance_threshold: float = Field(default=0.1, ge=0.01, le=0.5)
+    training_timeout_seconds: int = Field(default=30, ge=1, le=300)
 
     class Config:
         from_attributes = True

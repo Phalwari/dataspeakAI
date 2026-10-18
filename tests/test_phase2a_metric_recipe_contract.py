@@ -551,3 +551,50 @@ def test_validate_recipe_for_connection_unauthorized():
             tenant_id=1,
             db=mock_db,
         )
+
+
+# ============================================================
+# 22. EXTENDED METRIC SPECIFICATION (NR-2.1-A-T01)
+# ============================================================
+
+def test_extended_metric_recipe_attributes():
+    recipe = AtomicMetricRecipe(
+        metric_id="monthly_order_revenue",
+        title="Monthly Order Revenue",
+        format="currency",
+        entity_grain="order",
+        unit="USD",
+        date_field="orders.created_at",
+        missing_value_policy="zero",
+        operand=AtomicMetricOperand(
+            target_ref="orders.total_amount",
+            aggregation="SUM",
+        ),
+    )
+
+    assert recipe.entity_grain == "order"
+    assert recipe.unit == "USD"
+    assert recipe.date_field == "orders.created_at"
+    assert recipe.missing_value_policy == "zero"
+
+    payload = metric_recipe_to_dict(recipe)
+    restored = parse_metric_recipe(payload)
+
+    assert restored.entity_grain == "order"
+    assert restored.unit == "USD"
+    assert restored.date_field == "orders.created_at"
+    assert restored.missing_value_policy == "zero"
+
+
+def test_invalid_missing_value_policy_rejected():
+    with pytest.raises(ValidationError):
+        AtomicMetricRecipe(
+            metric_id="bad_policy_metric",
+            title="Bad Policy Metric",
+            missing_value_policy="ignore_and_crash",  # Not in ("zero", "drop", "error")
+            operand=AtomicMetricOperand(
+                target_ref="orders.total_amount",
+                aggregation="SUM",
+            ),
+        )
+

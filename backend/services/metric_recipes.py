@@ -141,6 +141,10 @@ class BaseMetricRecipe(StrictRecipeModel):
     description: str | None = None
     format: MetricDisplayFormat = "number"
     reasoning: str | None = None
+    entity_grain: str | None = None
+    unit: str | None = None
+    date_field: str | None = None
+    missing_value_policy: Literal["zero", "drop", "error"] = "zero"
 
 
 # ============================================================
@@ -200,6 +204,17 @@ class DifferenceMetricRecipe(BaseMetricRecipe):
 
 
 # ============================================================
+# PERIOD COMPARISON RECIPE
+# ============================================================
+
+class PeriodComparisonRecipe(BaseMetricRecipe):
+    metric_type: Literal["period_comparison"] = "period_comparison"
+    current_period_recipe: Union[AtomicMetricRecipe, RatioMetricRecipe, DifferenceMetricRecipe]
+    prior_period_recipe: Union[AtomicMetricRecipe, RatioMetricRecipe, DifferenceMetricRecipe]
+    comparison_type: Literal["percentage_change", "absolute_difference"] = "percentage_change"
+
+
+# ============================================================
 # DISCRIMINATED RECIPE UNION
 # ============================================================
 
@@ -208,6 +223,7 @@ MetricRecipe = Annotated[
         AtomicMetricRecipe,
         RatioMetricRecipe,
         DifferenceMetricRecipe,
+        PeriodComparisonRecipe,
     ],
     Field(discriminator="metric_type"),
 ]
@@ -260,6 +276,12 @@ def get_recipe_operands(recipe: MetricRecipe) -> list[AtomicMetricOperand]:
 
     if isinstance(recipe, DifferenceMetricRecipe):
         return [recipe.left, recipe.right]
+
+    if isinstance(recipe, PeriodComparisonRecipe):
+        return (
+            get_recipe_operands(recipe.current_period_recipe)
+            + get_recipe_operands(recipe.prior_period_recipe)
+        )
 
     raise MetricRecipeValidationError(
         f"Unsupported metric recipe type: {type(recipe).__name__}"

@@ -8,13 +8,18 @@ import io
 import json
 import re
 import math
+import time
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 import numpy as np
 
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.model_selection import train_test_split, cross_val_score, StratifiedShuffleSplit
+from sklearn.preprocessing import LabelEncoder, StandardScaler, OneHotEncoder
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.ensemble import (
@@ -26,7 +31,10 @@ from sklearn.ensemble import (
 from sklearn.metrics import (
     accuracy_score,
     r2_score,
-    mean_absolute_error
+    mean_absolute_error,
+    silhouette_score,
+    f1_score,
+    confusion_matrix
 )
 from sklearn.cluster import KMeans
 try:
@@ -35,6 +43,7 @@ except ImportError:
     xgb = None
 
 from services.multi_llm import get_intent_llm
+from schemas import TrainingSpecification
 
 def clean_float(val: Any) -> float:
     """Helper to convert a value to a JSON-serializable float, replacing NaN/Inf with 0.0."""
@@ -147,242 +156,444 @@ Return ONLY this JSON:
             "business_question": f"What factors affect {target}?" if target else "How does the data group naturally?"
         }
 
-def preprocess_data(df: pd.DataFrame, 
-                    feature_columns: list,
-                    target_column: str = None) -> dict:
+# === LEAK-FREE PREPROCESSING & PARTITIONING (NR-2.1-B) ===
+
+def partition_dataset(
+    df: pd.DataFrame,
+    feature_columns: list,
+    target_column: Optional[str] = None,
+    spec: Optional[TrainingSpecification] = None,
+) -> dict:
     """
-    Auto preprocessing pipeline:
-    - Drop high-null columns (>50% null)
-    - Fill missing numeric with median
-    - Fill missing categorical with mode
-    - Label encode categorical columns
-    - Standard scale numeric columns
-    Returns processed X, y, preprocessing_report
+    Partitions the raw dataset into train and test sets BEFORE any fitting,
+    imputation, scaling, or encoding to eliminate data leakage (Defect I-10).
+    Supports random, stratified, and temporal splitting strategies.
+    Detects class imbalance on classification targets.
     """
-    report = {
-        "original_shape": df.shape,
-        "steps": [],
-        "dropped_columns": [],
-        "encoded_columns": [],
-        "scaled_columns": []
-    }
+    specification = spec or TrainingSpecification()
     
-    # Work with relevant columns only
-    cols_to_use = [c for c in feature_columns if c in df.columns]
+    # Restrict to available columns
+    available_features = [c for c in feature_columns if c in df.columns]
+    cols_to_use = list(available_features)
     if target_column and target_column in df.columns:
         cols_to_use.append(target_column)
-    
-    df_clean = df[cols_to_use].copy()
-    
-    # Convert datetime/timestamp columns to string representation
-    for col in df_clean.columns:
-        if pd.api.types.is_datetime64_any_dtype(df_clean[col]) or 'datetime' in str(df_clean[col].dtype):
-            df_clean[col] = df_clean[col].astype(str)
-            report["steps"].append(f"Converted datetime/timestamp column '{col}' to string category")
-    
-    # Drop high-null columns
-    null_pct = df_clean.isnull().mean()
-    high_null = null_pct[null_pct > 0.5].index.tolist()
-    if high_null:
-        df_clean.drop(columns=high_null, inplace=True, errors="ignore")
-        feature_columns = [c for c in feature_columns if c not in high_null]
-        report["dropped_columns"] = high_null
-        report["steps"].append(f"Dropped {len(high_null)} high-null columns: {high_null}")
-    
-    # Fill missing values
-    for col in df_clean.columns:
-        if df_clean[col].isnull().sum() > 0:
-            if df_clean[col].dtype in ['float64', 'int64']:
-                median_val = df_clean[col].median()
-                if pd.isna(median_val):
-                    median_val = 0.0
-                df_clean[col] = df_clean[col].fillna(median_val)
-                report["steps"].append(f"Filled {col} nulls with median ({clean_float(median_val):.2f})")
-            else:
-                mode_series = df_clean[col].mode()
-                mode_val = mode_series[0] if not mode_series.empty else "Unknown"
-                df_clean[col] = df_clean[col].fillna(mode_val)
-                report["steps"].append(f"Filled {col} nulls with mode ({mode_val})")
-    
-    # Label encode categoricals
-    encoders = {}
-    for col in feature_columns:
-        if col in df_clean.columns and (df_clean[col].dtype in ['object', 'category', 'string'] or str(df_clean[col].dtype).startswith('str') or not pd.api.types.is_numeric_dtype(df_clean[col])):
-            le = LabelEncoder()
-            df_clean[col] = le.fit_transform(df_clean[col].astype(str))
-            encoders[col] = le
-            report["encoded_columns"].append(col)
-    
-    # Encode target if classification
-    target_encoder = None
-    if target_column and target_column in df_clean.columns:
-        if df_clean[target_column].dtype in ['object', 'category', 'string'] or str(df_clean[target_column].dtype).startswith('str') or not pd.api.types.is_numeric_dtype(df_clean[target_column]):
-            le = LabelEncoder()
-            df_clean[target_column] = le.fit_transform(df_clean[target_column].astype(str))
-            target_encoder = le
-            report["steps"].append(f"Label encoded target column: {target_column}")
-    
-    # Scale numeric features
-    scaler = StandardScaler()
-    numeric_features = [c for c in feature_columns 
-                       if c in df_clean.columns and 
-                       pd.api.types.is_numeric_dtype(df_clean[c])]
-    if numeric_features:
-        df_clean[numeric_features] = scaler.fit_transform(df_clean[numeric_features])
-        report["scaled_columns"] = numeric_features
-        report["steps"].append(f"Standard scaled {len(numeric_features)} numeric features")
-    
-    report["final_shape"] = df_clean.shape
-    
-    X = df_clean[feature_columns].values if feature_columns else None
-    y = df_clean[target_column].values if target_column else None
-    
+
+    clean_df = df[cols_to_use].dropna(how="all").copy()
+
+    imbalance_detected = False
+    imbalance_warning = None
+    min_class_ratio = 1.0
+    majority_baseline = None
+    class_distribution = None
+
+    # Class imbalance analysis
+    if target_column and target_column in clean_df.columns:
+        target_series = clean_df[target_column].dropna()
+        if not target_series.empty and (
+            target_series.dtype in ['object', 'category', 'string', 'bool']
+            or target_series.nunique() <= 20
+        ):
+            proportions = target_series.value_counts(normalize=True)
+            if not proportions.empty:
+                min_class_ratio = float(proportions.min())
+                majority_ratio = float(proportions.max())
+                majority_class = proportions.idxmax()
+                majority_baseline = round(majority_ratio, 4)
+                class_distribution = {str(k): round(float(v), 4) for k, v in proportions.items()}
+                if min_class_ratio < specification.imbalance_threshold or majority_ratio >= 0.85:
+                    imbalance_detected = True
+                    minority_class = proportions.idxmin()
+                    imbalance_warning = (
+                        f"Class imbalance detected: Minority class '{minority_class}' represents "
+                        f"{min_class_ratio*100:.1f}% of samples (threshold: {specification.imbalance_threshold*100:.1f}%), "
+                        f"while majority class '{majority_class}' represents {majority_ratio*100:.1f}%. "
+                        f"A trivial baseline model achieves {majority_ratio*100:.1f}% accuracy without learning."
+                    )
+
+    # Splitting strategy
+    test_size = float(specification.test_size)
+    random_state = int(specification.random_state)
+
+    if not target_column or target_column not in clean_df.columns:
+        # Unsupervised / Clustering
+        return {
+            "train_df": clean_df[available_features],
+            "test_df": None,
+            "y_train": None,
+            "y_test": None,
+            "feature_names": available_features,
+            "target_column": None,
+            "imbalance_detected": False,
+            "imbalance_warning": None,
+            "split_strategy": "unsupervised",
+        }
+
+    y_all = clean_df[target_column]
+    X_all = clean_df[available_features]
+
+    # Temporal split
+    time_col = specification.time_column
+    if not time_col:
+        for c in df.columns:
+            if pd.api.types.is_datetime64_any_dtype(df[c]) or any(k in str(c).lower() for k in ["date", "time", "created", "timestamp"]):
+                time_col = c
+                break
+
+    if specification.split_strategy == "temporal" and time_col and time_col in df.columns:
+        sorted_indices = df.loc[clean_df.index].sort_values(by=time_col).index
+        clean_df = clean_df.loc[sorted_indices]
+        X_all = clean_df[available_features]
+        y_all = clean_df[target_column]
+        split_idx = int(len(clean_df) * (1.0 - test_size))
+        X_train, X_test = X_all.iloc[:split_idx], X_all.iloc[split_idx:]
+        y_train, y_test = y_all.iloc[:split_idx], y_all.iloc[split_idx:]
+        actual_strategy = "temporal"
+    elif specification.split_strategy == "stratified" or (
+        target_column and y_all.nunique() <= 20 and all(c >= 2 for c in y_all.value_counts())
+    ):
+        try:
+            X_train, X_test, y_train, y_test = train_test_split(
+                X_all, y_all, test_size=test_size, random_state=random_state, stratify=y_all
+            )
+            actual_strategy = "stratified"
+        except Exception:
+            X_train, X_test, y_train, y_test = train_test_split(
+                X_all, y_all, test_size=test_size, random_state=random_state
+            )
+            actual_strategy = "random_fallback"
+    else:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X_all, y_all, test_size=test_size, random_state=random_state
+        )
+        actual_strategy = "random"
+
     return {
-        "X": X, "y": y,
-        "feature_names": feature_columns,
-        "report": report,
-        "target_encoder": target_encoder
+        "train_df": X_train,
+        "test_df": X_test,
+        "y_train": y_train,
+        "y_test": y_test,
+        "feature_names": available_features,
+        "target_column": target_column,
+        "imbalance_detected": imbalance_detected,
+        "imbalance_warning": imbalance_warning,
+        "majority_baseline": majority_baseline,
+        "class_distribution": class_distribution,
+        "split_strategy": actual_strategy,
     }
 
-def train_single_model(args):
-    """Top-level function (required for pickling)"""
-    name, model, X_train, y_train, X_test, y_test, feature_names, problem_type = args
-    try:
-        model.fit(X_train, y_train)
-        y_pred = model.predict(X_test)
-        
-        if problem_type == "regression":
-            from sklearn.metrics import r2_score, mean_absolute_error
-            score = r2_score(y_test, y_pred)
-            metric = "R² Score"
-            mae = mean_absolute_error(y_test, y_pred)
+
+def build_feature_preprocessor(feature_columns: list, df_sample: pd.DataFrame) -> tuple:
+    """
+    Builds a scikit-learn ColumnTransformer containing SimpleImputer, StandardScaler,
+    and OneHotEncoder(handle_unknown='ignore').
+    Guarantees no data leakage since it is fit strictly inside a Pipeline on training data.
+    """
+    numeric_cols = []
+    categorical_cols = []
+
+    for col in feature_columns:
+        if col not in df_sample.columns:
+            continue
+        if pd.api.types.is_numeric_dtype(df_sample[col]):
+            numeric_cols.append(col)
         else:
-            from sklearn.metrics import accuracy_score
-            score = accuracy_score(y_test, y_pred)
-            metric = "Accuracy"
-            mae = None
-            
-        feat_imp = []
-        if hasattr(model, 'feature_importances_'):
-            importances = model.feature_importances_
-            feat_imp = sorted(
-                zip(feature_names, importances.tolist()),
-                key=lambda x: x[1], reverse=True
-            )[:10]
-        
-        score_val = clean_float(score)
-        result = {
-            "model": name,
-            "score": round(float(score_val), 4),
-            "metric": metric,
-            "feature_importance": [
-                {"feature": f, "importance": round(clean_float(i), 4)}
-                for f, i in feat_imp
-            ],
-            "predictions_sample": [clean_float(v) for v in y_pred[:20]],
-            "actual_sample": [clean_float(v) for v in y_test[:20]]
+            categorical_cols.append(col)
+
+    transformers = []
+    if numeric_cols:
+        num_pipeline = Pipeline([
+            ("imputer", SimpleImputer(strategy="median")),
+            ("scaler", StandardScaler()),
+        ])
+        transformers.append(("num", num_pipeline, numeric_cols))
+
+    if categorical_cols:
+        cat_pipeline = Pipeline([
+            ("imputer", SimpleImputer(strategy="most_frequent")),
+            ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
+        ])
+        transformers.append(("cat", cat_pipeline, categorical_cols))
+
+    if not transformers:
+        # Fallback dummy transformer
+        transformers.append(("num", Pipeline([("imputer", SimpleImputer(strategy="median"))]), feature_columns))
+
+    preprocessor = ColumnTransformer(transformers=transformers, remainder="drop")
+    return preprocessor, numeric_cols, categorical_cols
+
+
+def run_automl_pipeline(
+    df: pd.DataFrame,
+    problem_info: dict,
+    spec: Optional[TrainingSpecification] = None,
+) -> dict:
+    """
+    Runs the honest, leak-free AutoML pipeline (NR-2.1-B):
+    1. Pre-split partitioning into train/test before any fitting.
+    2. Enforces ColumnTransformer inside Pipeline.
+    3. Model selection via Cross-Validation on the training split.
+    4. Evaluates winning model ONCE on untouched holdout test set.
+    5. Calculates true silhouette score for clustering.
+    6. Enforces training timeout watchdog.
+    """
+    start_time = time.time()
+    specification = spec or TrainingSpecification()
+    timeout = specification.training_timeout_seconds
+    problem_type = problem_info.get("problem_type", "clustering")
+    target = problem_info.get("target_column")
+    features = problem_info.get("feature_columns", [])
+
+    if not features:
+        return {"error": "No feature columns found for model training"}
+
+    if len(df) < 20:
+        return {
+            "error": "Dataset too small (< 20 rows) for reliable machine learning",
+            "insufficient_data": True,
+            "row_count": len(df),
+            "all_models": [],
+            "best_model": None,
+            "problem_type": problem_type
         }
-        if mae is not None:
-            mae_val = clean_float(mae)
-            result["mae"] = round(float(mae_val), 4)
-            result["r2_score"] = round(float(score_val), 4)
-        else:
-            result["accuracy"] = round(float(score_val), 4)
-        return result
-    except Exception as e:
-        return {"model": name, "error": str(e), "score": -1.0}
 
-def run_automl(X, y, problem_type: str, 
-               feature_names: list) -> dict:
-    """
-    Train multiple models, select the best one.
-    Returns results for all models + best model details.
-    """
-    if X is None or len(X) < 10:
-        return {"error": "Not enough data to train models"}
+    # 1. Partition dataset
+    partition = partition_dataset(
+        df=df,
+        feature_columns=features,
+        target_column=target if problem_type != "clustering" else None,
+        spec=specification,
+    )
 
-    n_samples = len(X)
-    MAX_TRAIN_SAMPLES = 5000
-    if n_samples > MAX_TRAIN_SAMPLES:
-        idx = np.random.RandomState(42).choice(n_samples, MAX_TRAIN_SAMPLES, replace=False)
-        X = X[idx]
-        if y is not None:
-            y = y[idx]
+    X_train = partition["train_df"]
+    X_test = partition["test_df"]
+    y_train = partition["y_train"]
+    y_test = partition["y_test"]
+    available_features = partition["feature_names"]
 
-    if problem_type in ["regression", "classification"] and y is None:
-        return {"error": f"Target column required for {problem_type}"}
-        
+    preprocessor, num_cols, cat_cols = build_feature_preprocessor(available_features, X_train)
+
     results = []
-    
+
     if problem_type in ["regression", "classification"]:
+        if y_train is None or len(X_train) < 5:
+            return {"error": "Not enough training samples for supervised learning"}
+
+        # Encode target for classification if non-numeric
+        target_encoder = None
         if problem_type == "classification":
-            unique_classes = np.unique(y)
-            if len(unique_classes) < 2:
-                return {"error": "Target column has fewer than 2 unique classes. Classification is not possible."}
-        
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42)
-            
-        if problem_type == "regression":
-            models = {
-                "Linear Regression": LinearRegression(),
-                "Decision Tree": DecisionTreeRegressor(
-                    max_depth=5, random_state=42),
-                "Random Forest": RandomForestRegressor(
-                    n_estimators=50, max_depth=10, random_state=42, n_jobs=-1),
+            if y_train.dtype in ['object', 'category', 'string', 'bool'] or not pd.api.types.is_numeric_dtype(y_train):
+                target_encoder = LabelEncoder()
+                y_train = target_encoder.fit_transform(y_train.astype(str))
+                y_test = target_encoder.transform(y_test.astype(str))
+            else:
+                y_train = y_train.values
+                y_test = y_test.values
+
+            if len(np.unique(y_train)) < 2:
+                return {"error": "Target column has fewer than 2 unique classes in training data"}
+
+            candidate_models = {
+                "Logistic Regression": LogisticRegression(max_iter=500, random_state=specification.random_state),
+                "Decision Tree": DecisionTreeClassifier(max_depth=5, random_state=specification.random_state),
+                "Random Forest": RandomForestClassifier(n_estimators=50, max_depth=10, random_state=specification.random_state, n_jobs=-1),
             }
+            scoring_metric = "accuracy"
         else:
-            models = {
-                "Logistic Regression": LogisticRegression(
-                    max_iter=500, random_state=42),
-                "Decision Tree": DecisionTreeClassifier(
-                    max_depth=5, random_state=42),
-                "Random Forest": RandomForestClassifier(
-                    n_estimators=50, max_depth=10, random_state=42, n_jobs=-1),
+            y_train = y_train.values
+            y_test = y_test.values
+            candidate_models = {
+                "Linear Regression": LinearRegression(),
+                "Decision Tree": DecisionTreeRegressor(max_depth=5, random_state=specification.random_state),
+                "Random Forest": RandomForestRegressor(n_estimators=50, max_depth=10, random_state=specification.random_state, n_jobs=-1),
             }
-            
-        for name, model in models.items():
-            args = (name, model, X_train, y_train, X_test, y_test, feature_names, problem_type)
-            res = train_single_model(args)
-            results.append(res)
-    
+            scoring_metric = "r2"
+
+        cv_folds = min(3, max(2, len(X_train) // 5))
+
+        for name, model in candidate_models.items():
+            if time.time() - start_time > timeout:
+                results.append({"model": name, "error": f"Training timeout exceeded ({timeout}s)", "score": -1.0})
+                continue
+
+            try:
+                pipeline = Pipeline([
+                    ("preprocessor", preprocessor),
+                    ("model", model),
+                ])
+
+                # Model selection on train data strictly via Cross Validation
+                cv_scores = cross_val_score(pipeline, X_train, y_train, cv=cv_folds, scoring=scoring_metric)
+                mean_cv = clean_float(float(np.mean(cv_scores)))
+
+                # Fit once on train and evaluate on holdout test
+                pipeline.fit(X_train, y_train)
+                y_pred = pipeline.predict(X_test)
+
+                if problem_type == "regression":
+                    test_score = clean_float(r2_score(y_test, y_pred))
+                    mae = clean_float(mean_absolute_error(y_test, y_pred))
+                    metric_name = "R² Score"
+                else:
+                    test_score = clean_float(accuracy_score(y_test, y_pred))
+                    mae = None
+                    metric_name = "Accuracy"
+
+                # Extract feature importance if available
+                feat_imp = []
+                inner_model = pipeline.named_steps["model"]
+                if hasattr(inner_model, "feature_importances_"):
+                    importances = inner_model.feature_importances_
+                    feat_imp = [
+                        {"feature": f, "importance": round(clean_float(i), 4)}
+                        for f, i in sorted(
+                            zip(available_features[:len(importances)], importances.tolist()),
+                            key=lambda x: x[1], reverse=True
+                        )[:10]
+                    ]
+
+                res = {
+                    "model": name,
+                    "score": round(float(test_score), 4),
+                    "test_score": round(float(test_score), 4),
+                    "cv_score": round(float(mean_cv), 4),
+                    "metric": metric_name,
+                    "feature_importance": feat_imp,
+                    "predictions_sample": [clean_float(v) for v in y_pred[:20]],
+                    "actual_sample": [clean_float(v) for v in y_test[:20]],
+                }
+                if mae is not None:
+                    res["mae"] = round(float(mae), 4)
+                    res["r2_score"] = round(float(test_score), 4)
+                else:
+                    res["accuracy"] = round(float(test_score), 4)
+                    f1_val = f1_score(y_test, y_pred, average="weighted", zero_division=0)
+                    res["f1_score"] = round(float(f1_val), 4)
+                    res["confusion_matrix"] = confusion_matrix(y_test, y_pred).tolist()
+
+                results.append(res)
+            except Exception as e:
+                results.append({"model": name, "error": str(e), "score": -1.0})
+
     elif problem_type == "clustering":
         best_k = 3
-        inertias = []
-        for k in range(2, min(8, len(X))):
-            try:
-                km = KMeans(n_clusters=k, random_state=42, n_init=10)
-                km.fit(X)
-                inertias.append({"k": k, "inertia": clean_float(km.inertia_)})
-            except:
-                pass
-        
-        km_best = KMeans(n_clusters=best_k, random_state=42, n_init=10)
-        labels = km_best.fit_predict(X)
-        
-        results.append({
-            "model": "K-Means Clustering",
-            "n_clusters": best_k,
-            "score": 1.0,
-            "metric": "Silhouette",
-            "cluster_labels": labels.tolist(),
-            "inertia_curve": inertias,
-            "cluster_sizes": {
-                str(i): int(np.sum(labels == i)) 
-                for i in range(best_k)
-            }
-        })
-    
+        try:
+            # Fit preprocessor on X_train
+            X_proc = preprocessor.fit_transform(X_train)
+
+            inertias = []
+            for k in range(2, min(7, len(X_train))):
+                if time.time() - start_time > timeout:
+                    break
+                try:
+                    km = KMeans(n_clusters=k, random_state=specification.random_state, n_init=10)
+                    km.fit(X_proc)
+                    inertias.append({"k": k, "inertia": clean_float(km.inertia_)})
+                except Exception:
+                    pass
+
+            km_best = KMeans(n_clusters=best_k, random_state=specification.random_state, n_init=10)
+            labels = km_best.fit_predict(X_proc)
+
+            # Genuine silhouette score (Defect I-11 eliminated)
+            n_unique_labels = len(np.unique(labels))
+            if n_unique_labels > 1 and len(X_proc) > n_unique_labels:
+                if len(X_proc) > 2000:
+                    sample_idx = np.random.RandomState(42).choice(len(X_proc), 2000, replace=False)
+                    sil_val = float(silhouette_score(X_proc[sample_idx], labels[sample_idx]))
+                else:
+                    sil_val = float(silhouette_score(X_proc, labels))
+            else:
+                sil_val = 0.0
+
+            results.append({
+                "model": "K-Means Clustering",
+                "n_clusters": best_k,
+                "score": round(clean_float(sil_val), 4),
+                "silhouette_score": round(clean_float(sil_val), 4),
+                "metric": "Silhouette",
+                "cluster_labels": labels[:100].tolist(),
+                "inertia_curve": inertias,
+                "cluster_sizes": {
+                    str(i): int(np.sum(labels == i))
+                    for i in range(best_k)
+                }
+            })
+        except Exception as e:
+            results.append({"model": "K-Means Clustering", "error": str(e), "score": -1.0})
+
     valid = [r for r in results if "error" not in r]
-    best = max(valid, key=lambda x: x["score"]) if valid else None
-    
+    # Model selection priority: train CV score when available, otherwise score
+    best = max(valid, key=lambda x: x.get("cv_score", x.get("score", -1.0))) if valid else None
+
     return {
         "problem_type": problem_type,
         "all_models": results,
         "best_model": best,
-        "train_size": len(X_train) if problem_type != "clustering" else len(X),
-        "test_size": len(X_test) if problem_type != "clustering" else 0
+        "train_size": len(X_train),
+        "test_size": len(X_test) if X_test is not None else 0,
+        "split_strategy": partition.get("split_strategy", "random"),
+        "class_imbalance_detected": partition.get("imbalance_detected", False),
+        "class_imbalance_warning": partition.get("imbalance_warning"),
+        "majority_baseline": partition.get("majority_baseline"),
+        "class_distribution": partition.get("class_distribution"),
+        "training_time_seconds": round(time.time() - start_time, 2),
     }
+
+
+# === BACKWARD COMPATIBILITY ADAPTERS ===
+
+def preprocess_data(df: pd.DataFrame, 
+                    feature_columns: list,
+                    target_column: str = None) -> dict:
+    """Backward compatibility adapter returning X, y, report, target_encoder."""
+    cols_to_use = [c for c in feature_columns if c in df.columns]
+    if target_column and target_column in df.columns:
+        cols_to_use.append(target_column)
+    clean_df = df[cols_to_use].dropna(how="all").copy()
+
+    preprocessor, num_cols, cat_cols = build_feature_preprocessor(feature_columns, clean_df)
+    X = preprocessor.fit_transform(clean_df[feature_columns]) if feature_columns else None
+    
+    target_encoder = None
+    y = None
+    if target_column and target_column in clean_df.columns:
+        t_series = clean_df[target_column]
+        if t_series.dtype in ['object', 'category', 'string'] or not pd.api.types.is_numeric_dtype(t_series):
+            target_encoder = LabelEncoder()
+            y = target_encoder.fit_transform(t_series.astype(str))
+        else:
+            y = t_series.values
+
+    return {
+        "X": X,
+        "y": y,
+        "feature_names": feature_columns,
+        "report": {
+            "original_shape": df.shape,
+            "steps": ["Partitioned and transformed using ColumnTransformer"],
+            "dropped_columns": [],
+            "encoded_columns": cat_cols,
+            "scaled_columns": num_cols,
+            "final_shape": (len(clean_df), len(feature_columns) + (1 if target_column else 0)),
+        },
+        "target_encoder": target_encoder,
+    }
+
+
+def run_automl(X, y, problem_type: str, feature_names: list) -> dict:
+    """Backward compatibility adapter for array-based AutoML execution."""
+    if X is None or len(X) < 10:
+        return {"error": "Not enough data to train models"}
+    df_dict = {f: X[:, i] for i, f in enumerate(feature_names[:X.shape[1]])}
+    if y is not None:
+        df_dict["__target__"] = y
+    df = pd.DataFrame(df_dict)
+    problem_info = {
+        "problem_type": problem_type,
+        "target_column": "__target__" if y is not None else None,
+        "feature_columns": feature_names[:X.shape[1]],
+    }
+    return run_automl_pipeline(df, problem_info)
 
 
 # === LAYER 1: DEEP DATA PROFILER ===
@@ -1008,12 +1219,27 @@ Return ONLY this JSON array:
 
 # === DATA CLEANING LAYER ===
 
-def clean_dataframe(df: pd.DataFrame) -> tuple:
+def clean_dataframe(
+    df: pd.DataFrame,
+    deduplication_policy: str = "preserve_all",
+    subset_keys: Optional[List[str]] = None,
+) -> tuple:
     """
     Cleans any real-world messy dataset before analysis.
+    Preserves duplicates by default unless explicitly asked.
     Returns (cleaned_df, cleaning_report).
     """
-    report = {"original_rows": len(df), "original_cols": len(df.columns)}
+    report = {
+        "original_rows": len(df),
+        "original_cols": len(df.columns),
+        "deduplication_policy": deduplication_policy,
+        "dropped_duplicates_count": 0,
+        "duplicates_detected_count": int(df.duplicated().sum()),
+        "duplicates_removed": 0,
+        "nulls_imputed_count": 0,
+        "outliers_detected_count": 0,
+        "missing_value_pct_by_column": {},
+    }
 
     # 1. Drop fully empty rows & columns
     df = df.dropna(how="all")
@@ -1022,10 +1248,19 @@ def clean_dataframe(df: pd.DataFrame) -> tuple:
     # 2. Strip whitespace from column names
     df.columns = [str(c).strip() for c in df.columns]
 
-    # 3. Drop exact duplicate rows
-    dup_count = df.duplicated().sum()
-    df = df.drop_duplicates()
-    report["duplicates_removed"] = int(dup_count)
+    # 3. Deduplication according to policy (default: preserve_all)
+    if deduplication_policy == "exact_row":
+        dup_count = int(df.duplicated().sum())
+        df = df.drop_duplicates()
+        report["dropped_duplicates_count"] = dup_count
+        report["duplicates_removed"] = dup_count
+    elif deduplication_policy == "subset_keys" and subset_keys:
+        valid_keys = [k for k in subset_keys if k in df.columns]
+        if valid_keys:
+            dup_count = int(df.duplicated(subset=valid_keys).sum())
+            df = df.drop_duplicates(subset=valid_keys)
+            report["dropped_duplicates_count"] = dup_count
+            report["duplicates_removed"] = dup_count
 
     # 4. Per-column type coercion — convert "numeric-looking" strings to numbers
     for col in df.columns:
@@ -1051,14 +1286,24 @@ def clean_dataframe(df: pd.DataFrame) -> tuple:
                 if parsed.notna().sum() / max(len(df[col]), 1) >= 0.6:
                     df[col] = parsed
 
-    # 6. Track missing value percentage per column
+    # 6. Track missing value percentage and outliers per column
     missing_report = {}
+    outliers_total = 0
     for col in df.columns:
         missing_pct = round(df[col].isna().mean() * 100, 1)
         if missing_pct > 0:
             missing_report[col] = missing_pct
-    report["missing_value_pct_by_column"] = missing_report
+        if pd.api.types.is_numeric_dtype(df[col]):
+            col_series = df[col].dropna()
+            if len(col_series) >= 10:
+                q25, q75 = col_series.quantile(0.25), col_series.quantile(0.75)
+                iqr = q75 - q25
+                if iqr > 0:
+                    outliers_count = int(((col_series < (q25 - 1.5 * iqr)) | (col_series > (q75 + 1.5 * iqr))).sum())
+                    outliers_total += outliers_count
 
+    report["missing_value_pct_by_column"] = missing_report
+    report["outliers_detected_count"] = outliers_total
     report["cleaned_rows"] = len(df)
     report["cleaned_cols"] = len(df.columns)
     return df, report
@@ -1066,12 +1311,123 @@ def clean_dataframe(df: pd.DataFrame) -> tuple:
 
 # === LAYER 6: KPI COMPUTER ===
 
+def compute_period_trend(
+    df: pd.DataFrame,
+    col: str,
+    agg: str = "sum",
+    date_col: Optional[str] = None,
+) -> dict:
+    """
+    Computes period trend honestly.
+    Never compares aggregate sum against individual row mean (eliminates Defect I-09 / FYP-09).
+    If a date/time column is present, splits into current and prior periods.
+    If no date column is present but >=2 rows, splits into first half (prior) and second half (current).
+    Handles zero baselines and missing prior data via typed statuses.
+    """
+    if df.empty or col not in df.columns:
+        return {
+            "trend_pct": None,
+            "trend_direction": "flat",
+            "trend_status": "no_prior_data",
+            "trend_label": "No prior data",
+        }
+
+    # Identify date column if not provided
+    if not date_col:
+        for c in df.columns:
+            if pd.api.types.is_datetime64_any_dtype(df[c]) or any(k in str(c).lower() for k in ["date", "time", "period", "created", "timestamp"]):
+                date_col = c
+                break
+
+    if date_col and date_col in df.columns:
+        try:
+            df_sorted = df.dropna(subset=[col]).sort_values(by=date_col)
+            if len(df_sorted) < 2:
+                return {
+                    "trend_pct": None,
+                    "trend_direction": "flat",
+                    "trend_status": "no_prior_data",
+                    "trend_label": "New Metric",
+                }
+            mid = len(df_sorted) // 2
+            prior_df = df_sorted.iloc[:mid]
+            curr_df = df_sorted.iloc[mid:]
+        except Exception:
+            mid = len(df) // 2
+            prior_df = df.iloc[:mid]
+            curr_df = df.iloc[mid:]
+    else:
+        if len(df) < 2:
+            return {
+                "trend_pct": None,
+                "trend_direction": "flat",
+                "trend_status": "no_prior_data",
+                "trend_label": "No prior data",
+            }
+        mid = len(df) // 2
+        prior_df = df.iloc[:mid]
+        curr_df = df.iloc[mid:]
+
+    def _eval_agg(sub_df, column, ag):
+        s = sub_df[column].dropna()
+        if s.empty:
+            return None
+        ag_lower = str(ag).lower()
+        if ag_lower in ["sum", "total"]:
+            return float(s.sum())
+        elif ag_lower in ["avg", "mean", "average"]:
+            return float(s.mean())
+        elif ag_lower in ["count"]:
+            return float(len(s))
+        elif ag_lower == "max":
+            return float(s.max())
+        elif ag_lower == "min":
+            return float(s.min())
+        return float(s.sum())
+
+    curr_val = _eval_agg(curr_df, col, agg)
+    prior_val = _eval_agg(prior_df, col, agg)
+
+    if prior_val is None or curr_val is None:
+        return {
+            "trend_pct": None,
+            "trend_direction": "flat",
+            "trend_status": "no_prior_data",
+            "trend_label": "No prior data",
+        }
+
+    if prior_val == 0:
+        if curr_val == 0:
+            return {
+                "trend_pct": 0.0,
+                "trend_direction": "flat",
+                "trend_status": "flat",
+                "trend_label": "0.0%",
+            }
+        return {
+            "trend_pct": None,
+            "trend_direction": "up" if curr_val > 0 else "down",
+            "trend_status": "unavailable_zero_baseline",
+            "trend_label": "Baseline 0",
+        }
+
+    pct = round((curr_val - prior_val) / abs(prior_val) * 100.0, 1)
+    direction = "up" if pct > 0 else ("down" if pct < 0 else "flat")
+    return {
+        "trend_pct": pct,
+        "trend_direction": direction,
+        "trend_status": "ok",
+        "trend_label": f"{pct:+.1f}%",
+    }
+
+
 def compute_kpis(df: pd.DataFrame, 
                  strategy: dict,
                  profile: dict) -> list:
     """
     Compute actual KPI values from data generically for ANY dataset.
     Uses strategy.kpi_columns defined by AI with normalized column matching.
+    Attaches provenance metadata and typed baseline statuses.
     """
     kpis = []
     kpi_cols = strategy.get("kpi_columns", [])
@@ -1149,10 +1505,8 @@ def compute_kpis(df: pd.DataFrame,
                 else:
                     formatted = f"{val:,.1f}"
             
-            # Compute trend vs mean
-            col_info = profile.get("columns", {}).get(col, {})
-            col_mean = col_info.get("mean", val)
-            trend_pct = round((val - col_mean) / (col_mean or 1) * 100, 1) if col_mean else 0
+            # Honest period trend computation (Defect I-09 / FYP-09 eliminated)
+            trend_info = compute_period_trend(df, col, agg)
             
             kpis.append({
                 "label": kpi_spec.get(
@@ -1164,11 +1518,19 @@ def compute_kpis(df: pd.DataFrame,
                 "column": col,
                 "format": fmt,
                 "icon_type": kpi_spec.get("icon_type", "neutral"),
-                "trend_pct": trend_pct,
-                "trend_direction": (
-                    "up" if trend_pct > 0 else 
-                    "down" if trend_pct < 0 else "flat"
-                )
+                "trend_pct": trend_info["trend_pct"],
+                "trend_direction": trend_info["trend_direction"],
+                "trend_status": trend_info["trend_status"],
+                "trend_label": trend_info["trend_label"],
+                "is_sampled": False,
+                "provenance": {
+                    "definition_version": "1.0",
+                    "source_type": "dataframe",
+                    "calculated_at": datetime.now(timezone.utc).isoformat(),
+                    "total_rows_evaluated": len(df),
+                    "is_sampled": False,
+                    "sample_ratio": 1.0,
+                }
             })
         except Exception as e:
             print(f"[Layer6] KPI '{col}' failed: {e}")
@@ -1184,6 +1546,7 @@ def compute_kpis(df: pd.DataFrame,
                     continue
                 val = float(series.sum())
                 formatted = f"{val/1e6:.2f}M" if abs(val) >= 1e6 else f"{val/1e3:.1f}K" if abs(val) >= 1e3 else f"{val:,.2f}"
+                trend_info = compute_period_trend(df, col, "sum")
                 kpis.append({
                     "label": col.replace("_", " ").title(),
                     "value": formatted,
@@ -1191,13 +1554,48 @@ def compute_kpis(df: pd.DataFrame,
                     "column": col,
                     "format": "number",
                     "icon_type": "neutral",
-                    "trend_pct": 0,
-                    "trend_direction": "flat"
+                    "trend_pct": trend_info["trend_pct"],
+                    "trend_direction": trend_info["trend_direction"],
+                    "trend_status": trend_info["trend_status"],
+                    "trend_label": trend_info["trend_label"],
+                    "is_sampled": False,
+                    "provenance": {
+                        "definition_version": "1.0",
+                        "source_type": "dataframe",
+                        "calculated_at": datetime.now(timezone.utc).isoformat(),
+                        "total_rows_evaluated": len(df),
+                        "is_sampled": False,
+                        "sample_ratio": 1.0,
+                    }
                 })
             except Exception:
                 continue
 
     return kpis
+
+
+class AutoMLPipeline:
+    """
+    AutoML Pipeline wrapper providing structured configuration (TrainingSpecification),
+    honest KPI generation, and model training interfaces.
+    """
+    def __init__(self, spec: Optional[TrainingSpecification] = None):
+        self.spec = spec or TrainingSpecification()
+
+    def _generate_kpis(
+        self,
+        df: pd.DataFrame,
+        profile: dict,
+        source_type: str = "database",
+        strategy: Optional[dict] = None
+    ) -> list[dict]:
+        strat = strategy or {}
+        if not strat.get("kpi_columns"):
+            numeric_cols = [c for c, info in profile.get("columns", {}).items() if info.get("type") == "numeric"]
+            if not numeric_cols:
+                numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+            strat["kpi_columns"] = [{"column": c, "aggregation": "sum"} for c in numeric_cols]
+        return compute_kpis(df, strat, profile)
 
 
 # === MASTER PIPELINE ===
@@ -1233,16 +1631,21 @@ def run_full_pipeline(
 
         total_rows_full = len(df)
         original_row_count = total_rows_full
-        # Full dataset used for charts/KPIs up to 50k (pandas handles this fine)
-        if len(df) > 50000:
-            df = df.sample(50000, random_state=42)
-        
+
+        # Exact aggregates (KPIs, profiling stats) MUST be computed over full dataset (NR-2.1-A-T03)
+        full_df = df
+
+        # Sampling is strictly for high-volume chart payloads (NR-2.1-A-T03)
+        is_sampled_charts = len(df) > 5000
+        chart_df = df.sample(5000, random_state=42) if is_sampled_charts else df
+
         df_stats = {
-            "total_rows": len(df),
+            "total_rows": total_rows_full,
             "original_row_count": original_row_count,
             "total_columns": len(df.columns),
             "columns": list(df.columns),
-            "cleaning_report": cleaning_report
+            "cleaning_report": cleaning_report,
+            "is_sampled": False,
         }
         
     except Exception as e:
@@ -1250,13 +1653,13 @@ def run_full_pipeline(
     
     # ── LAYER 1: Profile (fast, always first) ──
     print("[Pipeline] Layer 1: Profiling...")
-    profile = deep_profile(df)
+    profile = deep_profile(full_df)
     
     # ── LAYER 2 & ML Detection (Parallelized for speed) ──
     print("[Pipeline] Layer 2 & ML Problem Detection (Parallel)...")
     with ThreadPoolExecutor(max_workers=2) as executor:
         future_strategy = executor.submit(ai_domain_strategy, profile)
-        future_problem = executor.submit(detect_problem_type, df)
+        future_problem = executor.submit(detect_problem_type, full_df)
         strategy = future_strategy.result()
         problem_info = future_problem.result()
     
@@ -1266,30 +1669,27 @@ def run_full_pipeline(
     
     # ── LAYER 4: Compute Data (fast) ──
     print("[Pipeline] Layer 4: Computing chart data...")
-    computed_charts = compute_chart_data(df, chart_specs, profile)
+    computed_charts = compute_chart_data(chart_df, chart_specs, profile)
+    for c in computed_charts:
+        if isinstance(c, dict):
+            c["is_sampled"] = is_sampled_charts
+            c["sample_size"] = len(chart_df)
+            c["total_rows"] = total_rows_full
     
     # ── LAYER 5 & LAYER 6: Insights & KPIs (Parallelized) ──
     print("[Pipeline] Layer 5 & 6: Insights & KPIs (Parallel)...")
     with ThreadPoolExecutor(max_workers=2) as executor:
         future_insights = executor.submit(ai_generate_insights, profile, strategy, computed_charts)
-        future_kpis = executor.submit(compute_kpis, df, strategy, profile)
+        future_kpis = executor.submit(compute_kpis, full_df, strategy, profile)
         insights = future_insights.result()
         kpis = future_kpis.result()
     
-    # ── ML Pipeline (optimized for speed) ──
+    # ── ML Pipeline (optimized for speed & leak-free NR-2.1-B) ──
     print("[Pipeline] ML: Training models...")
     try:
-        target = problem_info.get("target_column")
-        features = problem_info.get("feature_columns", [])
-        
-        if target and features:
-            train_df = df if len(df) <= 5000 else df.sample(5000, random_state=42)
-            prep = preprocess_data(train_df, features, target)
-            ml_results = run_automl(
-                prep["X"], prep["y"],
-                problem_info["problem_type"],
-                prep["feature_names"]
-            )
+        if problem_info and problem_info.get("feature_columns"):
+            train_df = full_df if len(full_df) <= 5000 else full_df.sample(5000, random_state=42)
+            ml_results = run_automl_pipeline(train_df, problem_info)
         else:
             ml_results = None
     except Exception as e:

@@ -125,6 +125,15 @@ export function LiveExplorerCanvas({
           <h2 className="text-xs font-bold tracking-widest text-slate-300 uppercase">
             Live Explorer Canvas
           </h2>
+          {queryResult?.is_sampled && (
+            <span
+              className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-amber-500/15 text-amber-400 border border-amber-500/30"
+              title={`Aggregates and KPIs reflect all ${queryResult.total_rows?.toLocaleString() ?? "total"} rows; visual plot sampled to ${queryResult.sample_size?.toLocaleString() ?? "sample"} points for smooth rendering.`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+              Sampled Plot ({queryResult.sample_size?.toLocaleString()}/{queryResult.total_rows?.toLocaleString()} rows)
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1 p-1 rounded-lg bg-black/30 border border-white/[0.08]">
           {CHART_TYPES.map((ct) => {
