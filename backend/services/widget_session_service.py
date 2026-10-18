@@ -77,6 +77,8 @@ def create_widget_session_token(
     public_key: str,
     origin: str,
     conversation_id: int,
+    widget_key_id: Optional[int] = None,
+    visitor_id: Optional[str] = None,
     allow_sql: bool = False,
     expires_minutes: int = 60
 ) -> str:
@@ -85,6 +87,8 @@ def create_widget_session_token(
     payload = {
         "sub": "widget_session",
         "tenant_id": tenant_id,
+        "widget_key_id": widget_key_id,
+        "visitor_id": visitor_id or secrets.token_hex(16),
         "public_key": public_key,
         "origin": normalize_origin(origin),
         "conversation_id": conversation_id,
@@ -115,6 +119,14 @@ def verify_widget_session_token(token: str, expected_origin: Optional[str] = Non
             detail="Invalid token subject"
         )
 
+    required_claims = ["tenant_id", "conversation_id", "public_key"]
+    for claim in required_claims:
+        if claim not in payload:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Missing required session claim: {claim}"
+            )
+
     if expected_origin:
         token_origin = normalize_origin(payload.get("origin"))
         expected_norm = normalize_origin(expected_origin)
@@ -125,3 +137,35 @@ def verify_widget_session_token(token: str, expected_origin: Optional[str] = Non
             )
 
     return payload
+
+def create_widget_continuity_token(
+    tenant_id: int,
+    widget_key_id: int,
+    public_key: str,
+    visitor_id: str,
+    conversation_id: int,
+    expires_days: int = 30
+) -> str:
+    now = datetime.now(timezone.utc)
+    exp = now + timedelta(days=expires_days)
+    payload = {
+        "sub": "visitor_continuity",
+        "tenant_id": tenant_id,
+        "widget_key_id": widget_key_id,
+        "visitor_id": visitor_id,
+        "public_key": public_key,
+        "conversation_id": conversation_id,
+        "iat": int(now.timestamp()),
+        "exp": int(exp.timestamp()),
+        "jti": secrets.token_hex(16)
+    }
+    return jwt.encode(payload, get_widget_hmac_secret(), algorithm="HS256")
+
+def verify_widget_continuity_token(token: str) -> Optional[Dict[str, Any]]:
+    try:
+        payload = jwt.decode(token, get_widget_hmac_secret(), algorithms=["HS256"])
+        if payload.get("sub") != "visitor_continuity":
+            return None
+        return payload
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        return None

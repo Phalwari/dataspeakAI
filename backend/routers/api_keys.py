@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 import models, schemas
 from database import get_db
-from dependencies import get_current_user
+from dependencies import get_current_user, require_key_manager
 import uuid
 import string
 import random
@@ -25,7 +25,7 @@ def generate_public_widget_key():
 
 @router.get("", response_model=List[schemas.ApiKeyResponse])
 def get_api_keys(
-    current_user: models.User = Depends(get_current_user), 
+    current_user: models.User = Depends(require_key_manager), 
     db: Session = Depends(get_db)
 ):
     if not current_user.tenant_id:
@@ -37,7 +37,7 @@ def get_api_keys(
 @router.post("", response_model=schemas.ApiKeyResponse)
 def create_api_key(
     key_data: schemas.ApiKeyCreate,
-    current_user: models.User = Depends(get_current_user), 
+    current_user: models.User = Depends(require_key_manager), 
     db: Session = Depends(get_db)
 ):
     if not current_user.tenant_id:
@@ -57,7 +57,7 @@ def create_api_key(
 @router.put("/{key_id}/revoke", response_model=schemas.ApiKeyResponse)
 def revoke_api_key(
     key_id: int,
-    current_user: models.User = Depends(get_current_user), 
+    current_user: models.User = Depends(require_key_manager), 
     db: Session = Depends(get_db)
 ):
     if not current_user.tenant_id:
@@ -79,7 +79,7 @@ def revoke_api_key(
 @router.delete("/{key_id}")
 def delete_api_key(
     key_id: int,
-    current_user: models.User = Depends(get_current_user), 
+    current_user: models.User = Depends(require_key_manager), 
     db: Session = Depends(get_db)
 ):
     if not current_user.tenant_id:
@@ -104,7 +104,7 @@ def delete_api_key(
 
 @router.get("/widget", response_model=List[schemas.WidgetKeyResponse])
 def get_widget_keys(
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_key_manager),
     db: Session = Depends(get_db)
 ):
     if not current_user.tenant_id:
@@ -114,7 +114,7 @@ def get_widget_keys(
 @router.post("/widget", response_model=schemas.WidgetKeyResponse)
 def create_widget_key(
     key_data: schemas.WidgetKeyCreate,
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_key_manager),
     db: Session = Depends(get_db)
 ):
     if not current_user.tenant_id:
@@ -125,6 +125,15 @@ def create_widget_key(
     for o in key_data.allowed_origins:
         if o == "*":
             raise HTTPException(status_code=400, detail="Wildcard origins ('*') are strictly disallowed")
+
+    # Strict Tenant Scoping: Verify any assigned database IDs belong to the current tenant
+    if key_data.allowed_database_ids:
+        valid_db_count = db.query(models.DatabaseConnection.id).filter(
+            models.DatabaseConnection.id.in_(key_data.allowed_database_ids),
+            models.DatabaseConnection.tenant_id == current_user.tenant_id
+        ).count()
+        if valid_db_count != len(set(key_data.allowed_database_ids)):
+            raise HTTPException(status_code=404, detail="Database connection not found")
 
     new_key = models.WidgetKey(
         tenant_id=current_user.tenant_id,
@@ -146,7 +155,7 @@ def create_widget_key(
 def update_widget_key(
     key_id: int,
     key_data: schemas.WidgetKeyUpdate,
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_key_manager),
     db: Session = Depends(get_db)
 ):
     if not current_user.tenant_id:
@@ -174,6 +183,13 @@ def update_widget_key(
     if key_data.allow_sql is not None:
         widget_key.allow_sql = key_data.allow_sql
     if key_data.allowed_database_ids is not None:
+        if key_data.allowed_database_ids:
+            valid_db_count = db.query(models.DatabaseConnection.id).filter(
+                models.DatabaseConnection.id.in_(key_data.allowed_database_ids),
+                models.DatabaseConnection.tenant_id == current_user.tenant_id
+            ).count()
+            if valid_db_count != len(set(key_data.allowed_database_ids)):
+                raise HTTPException(status_code=404, detail="Database connection not found")
         widget_key.allowed_database_ids = key_data.allowed_database_ids
     if key_data.allowed_tables is not None:
         widget_key.allowed_tables = key_data.allowed_tables
@@ -185,7 +201,7 @@ def update_widget_key(
 @router.post("/widget/{key_id}/rotate", response_model=schemas.WidgetKeyRotateResponse)
 def rotate_widget_key(
     key_id: int,
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_key_manager),
     db: Session = Depends(get_db)
 ):
     if not current_user.tenant_id:
@@ -222,7 +238,7 @@ def rotate_widget_key(
 @router.put("/widget/{key_id}/revoke", response_model=schemas.WidgetKeyResponse)
 def revoke_widget_key(
     key_id: int,
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_key_manager),
     db: Session = Depends(get_db)
 ):
     if not current_user.tenant_id:
@@ -245,7 +261,7 @@ def revoke_widget_key(
 @router.delete("/widget/{key_id}")
 def delete_widget_key(
     key_id: int,
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_key_manager),
     db: Session = Depends(get_db)
 ):
     if not current_user.tenant_id:
@@ -265,4 +281,143 @@ def delete_widget_key(
     db.delete(widget_key)
     db.commit()
     return {"message": "Widget key deleted successfully"}
+
+
+@router.get("/widget/{key_id}/documents", response_model=schemas.WidgetKeyDocumentResponse)
+def get_widget_key_documents(
+    key_id: int,
+    current_user: models.User = Depends(require_key_manager),
+    db: Session = Depends(get_db)
+):
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=404, detail="User has no associated tenant")
+
+    widget_key = db.query(models.WidgetKey).filter(
+        models.WidgetKey.id == key_id,
+        models.WidgetKey.tenant_id == current_user.tenant_id
+    ).first()
+    if not widget_key:
+        raise HTTPException(status_code=404, detail="Widget key not found")
+
+    docs = db.query(models.WidgetKeyDocument.document_id).filter(
+        models.WidgetKeyDocument.widget_key_id == key_id
+    ).all()
+    return schemas.WidgetKeyDocumentResponse(
+        widget_key_id=key_id,
+        published_document_ids=[d[0] for d in docs]
+    )
+
+
+@router.post("/widget/{key_id}/documents", response_model=schemas.WidgetKeyDocumentResponse)
+def assign_widget_key_documents(
+    key_id: int,
+    assign_req: schemas.WidgetKeyDocumentAssignRequest,
+    current_user: models.User = Depends(require_key_manager),
+    db: Session = Depends(get_db)
+):
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=404, detail="User has no associated tenant")
+
+    widget_key = db.query(models.WidgetKey).filter(
+        models.WidgetKey.id == key_id,
+        models.WidgetKey.tenant_id == current_user.tenant_id
+    ).first()
+    if not widget_key:
+        raise HTTPException(status_code=404, detail="Widget key not found")
+
+    target_ids = list(assign_req.document_ids or [])
+    if assign_req.document_id is not None and assign_req.document_id not in target_ids:
+        target_ids.append(assign_req.document_id)
+
+    if not target_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="No document IDs provided to assign"
+        )
+
+    tenant_docs = db.query(models.Document.id).filter(
+        models.Document.id.in_(target_ids),
+        models.Document.tenant_id == current_user.tenant_id
+    ).all()
+    valid_doc_ids = {d[0] for d in tenant_docs}
+
+    for doc_id in target_ids:
+        if doc_id not in valid_doc_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Document ID {doc_id} does not belong to your tenant or does not exist"
+            )
+        existing = db.query(models.WidgetKeyDocument).filter(
+            models.WidgetKeyDocument.widget_key_id == key_id,
+            models.WidgetKeyDocument.document_id == doc_id
+        ).first()
+        if not existing:
+            assoc = models.WidgetKeyDocument(
+                widget_key_id=key_id,
+                document_id=doc_id
+            )
+            db.add(assoc)
+
+    db.commit()
+
+    docs = db.query(models.WidgetKeyDocument.document_id).filter(
+        models.WidgetKeyDocument.widget_key_id == key_id
+    ).all()
+    return schemas.WidgetKeyDocumentResponse(
+        widget_key_id=key_id,
+        published_document_ids=[d[0] for d in docs]
+    )
+
+
+@router.delete("/widget/{key_id}/documents")
+def unpublish_all_widget_key_documents(
+    key_id: int,
+    current_user: models.User = Depends(require_key_manager),
+    db: Session = Depends(get_db)
+):
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=404, detail="User has no associated tenant")
+
+    widget_key = db.query(models.WidgetKey).filter(
+        models.WidgetKey.id == key_id,
+        models.WidgetKey.tenant_id == current_user.tenant_id
+    ).first()
+    if not widget_key:
+        raise HTTPException(status_code=404, detail="Widget key not found")
+
+    deleted_count = db.query(models.WidgetKeyDocument).filter(
+        models.WidgetKeyDocument.widget_key_id == key_id
+    ).delete(synchronize_session=False)
+    db.commit()
+
+    return {"message": f"Unpublished {deleted_count} documents from widget key {key_id}", "deleted_count": deleted_count}
+
+
+@router.delete("/widget/{key_id}/documents/{document_id}")
+def unpublish_widget_key_document(
+    key_id: int,
+    document_id: int,
+    current_user: models.User = Depends(require_key_manager),
+    db: Session = Depends(get_db)
+):
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=404, detail="User has no associated tenant")
+
+    widget_key = db.query(models.WidgetKey).filter(
+        models.WidgetKey.id == key_id,
+        models.WidgetKey.tenant_id == current_user.tenant_id
+    ).first()
+    if not widget_key:
+        raise HTTPException(status_code=404, detail="Widget key not found")
+
+    assoc = db.query(models.WidgetKeyDocument).filter(
+        models.WidgetKeyDocument.widget_key_id == key_id,
+        models.WidgetKeyDocument.document_id == document_id
+    ).first()
+    if assoc:
+        db.delete(assoc)
+        db.commit()
+
+    return {"message": f"Document {document_id} unpublished from widget key {key_id}"}
+
 

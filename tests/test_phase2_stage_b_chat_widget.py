@@ -27,6 +27,8 @@ Verifies:
 import os
 import sys
 import time
+import json
+from unittest.mock import patch
 from datetime import datetime, timezone
 import pytest
 from sqlalchemy import create_engine
@@ -264,6 +266,7 @@ def test_widget_chat_json_response(stage_b_setup):
 def test_widget_chat_sse_streaming(stage_b_setup):
     client = stage_b_setup["client"]
     token_rag = stage_b_setup["token_rag"]
+    db = stage_b_setup["db"]
 
     payload = {
         "query": "Tell me about your services",
@@ -274,14 +277,50 @@ def test_widget_chat_sse_streaming(stage_b_setup):
         "Origin": "https://acme.com"
     }
 
-    resp = client.post("/api/chat/widget", json=payload, headers=headers)
-    assert resp.status_code == 200
-    assert "text/event-stream" in resp.headers["content-type"]
+    # NR-0.1-A-T04: Deterministic async generator double prevents live provider quota exhaustion
+    expected_chunks = ["We ", "provide ", "AI ", "analytics ", "services."]
 
-    body = resp.text
-    assert "data: {" in body
-    assert '"chunk":' in body
-    assert '"done": true' in body
+    async def fake_stream(prompt: str, *args, **kwargs):
+        for ch in expected_chunks:
+            yield ch
+
+    with patch("services.llm_generation_service.llm_gateway.generate_stream", side_effect=fake_stream):
+        resp = client.post("/api/chat/widget", json=payload, headers=headers)
+        assert resp.status_code == 200
+        assert "text/event-stream" in resp.headers["content-type"]
+
+        body = resp.text
+        assert "data: {" in body
+
+        # Parse SSE messages
+        events = []
+        for line in body.splitlines():
+            line = line.strip()
+            if line.startswith("data: "):
+                try:
+                    events.append(json.loads(line[6:]))
+                except Exception:
+                    pass
+
+        assert len(events) >= len(expected_chunks) + 1, "Expected chunk events plus terminal event"
+
+        # Verify content chunks arrived in order
+        received_content = "".join([e["chunk"] for e in events if not e.get("done")])
+        assert received_content == "".join(expected_chunks)
+
+        # Verify terminal event
+        terminal_event = events[-1]
+        assert terminal_event.get("done") is True
+        assert "message_id" in terminal_event
+        assert terminal_event["message_id"] is not None
+
+        # Verify persistence in database
+        persisted_msg = db.query(models.Message).filter(
+            models.Message.id == terminal_event["message_id"]
+        ).first()
+        assert persisted_msg is not None
+        assert persisted_msg.content == "".join(expected_chunks)
+        assert persisted_msg.sender_role == "assistant"
 
 
 # ---------------------------------------------------------------------------

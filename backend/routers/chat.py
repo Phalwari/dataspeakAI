@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Set
 import os
 import asyncio
 import requests
@@ -12,7 +12,7 @@ import numpy as np
 import models
 import schemas
 from database import get_db
-from dependencies import get_current_user
+from dependencies import get_current_user, require_query_executor
 from services.query_router import classify_query_route, auto_select_database
 from services.sql_engine import (
     get_connection_url, get_db_schema_context, generate_sql_from_nl,
@@ -63,11 +63,21 @@ def warmup_embeddings() -> bool:
     return False
 
 
-def retrieve_rag_chunks(query: str, tenant_id: int, db: Session, top_k: int = 5) -> List[Dict[str, Any]]:
+def retrieve_rag_chunks(
+    query: str,
+    tenant_id: int,
+    db: Session,
+    top_k: int = 5,
+    allowed_document_ids: Optional[Set[int]] = None
+) -> List[Dict[str, Any]]:
     """
     Executes hybrid dense-sparse search with RRF fusion across tenant documents.
     Uses versioned index path with fallback, and protects against vector dimension mismatches.
+    Applies publication filtering and live database verification (NR-1.1-B-T06 / Defect I-13).
     """
+    if allowed_document_ids is not None and len(allowed_document_ids) == 0:
+        return []
+
     from routers.documents import resolve_tenant_vector_index_path
     index_path, exists = resolve_tenant_vector_index_path(tenant_id, "all-MiniLM-L6-v2")
     if not exists or not os.path.exists(index_path):
@@ -109,6 +119,12 @@ def retrieve_rag_chunks(query: str, tenant_id: int, db: Session, top_k: int = 5)
                 content_str = doc
             else:
                 continue
+
+            doc_id = meta.get("document_id")
+            if allowed_document_ids is not None:
+                if doc_id is None or int(doc_id) not in allowed_document_ids:
+                    continue
+
             dense_results.append({
                 "content": content_str,
                 "metadata": meta,
@@ -123,10 +139,17 @@ def retrieve_rag_chunks(query: str, tenant_id: int, db: Session, top_k: int = 5)
         bm25_manager = BM25IndexManager(tenant_id=tenant_id)
         bm25_hits = bm25_manager.search(query, top_k=40)
         for hit in bm25_hits:
+            hit_doc_id = (hit.get("metadata") or {}).get("document_id")
+            if allowed_document_ids is not None:
+                if hit_doc_id is not None and int(hit_doc_id) not in allowed_document_ids:
+                    continue
             chunk_obj = db.query(models.DocumentChunk).filter(models.DocumentChunk.id == hit["chunk_id"]).first()
             if chunk_obj:
+                if allowed_document_ids is not None and chunk_obj.document_id not in allowed_document_ids:
+                    continue
                 meta = dict(hit.get("metadata") or {})
                 meta["chunk_id"] = chunk_obj.id
+                meta["document_id"] = chunk_obj.document_id
                 meta["parent_chunk_id"] = chunk_obj.parent_chunk_id
                 meta["hierarchy_level"] = chunk_obj.hierarchy_level
                 sparse_results.append({
@@ -147,7 +170,43 @@ def retrieve_rag_chunks(query: str, tenant_id: int, db: Session, top_k: int = 5)
         except Exception:
             top_results = top_results[:top_k]
 
-    return top_results
+    # 5. Live DB record & status revalidation (NR-1.1-B-T06 / Defect I-13)
+    validated_results = []
+    for r in top_results:
+        meta = r.get("metadata") or {}
+        chunk_id = meta.get("chunk_id")
+        doc_id = meta.get("document_id")
+
+        if chunk_id:
+            db_chunk = db.query(models.DocumentChunk).filter(models.DocumentChunk.id == chunk_id).first()
+            if not db_chunk:
+                continue
+            db_doc = db.query(models.Document).filter(
+                models.Document.id == db_chunk.document_id,
+                models.Document.tenant_id == tenant_id,
+                models.Document.status == "Completed"
+            ).first()
+            if not db_doc:
+                continue
+            if allowed_document_ids is not None and db_doc.id not in allowed_document_ids:
+                continue
+            validated_results.append(r)
+        elif doc_id:
+            db_doc = db.query(models.Document).filter(
+                models.Document.id == doc_id,
+                models.Document.tenant_id == tenant_id,
+                models.Document.status == "Completed"
+            ).first()
+            if not db_doc:
+                continue
+            if allowed_document_ids is not None and db_doc.id not in allowed_document_ids:
+                continue
+            validated_results.append(r)
+        else:
+            if allowed_document_ids is None:
+                validated_results.append(r)
+
+    return validated_results[:top_k]
 
 
 def build_grounded_rag_context(
@@ -213,6 +272,63 @@ def build_conversation_history_text(messages: List[models.Message], max_messages
     return ConversationMemoryManager.build_context(conversation, messages, max_recent_turns=max_messages)
 
 
+def get_accessible_conversation(
+    conversation_id: int,
+    current_user: models.User,
+    db: Session,
+    require_write: bool = False
+) -> Tuple[models.Conversation, bool, bool]:
+    """
+    Resolves conversation with strict tenant and creator privacy guardrails:
+    - Cross-tenant: Returns 404 (no information disclosure)
+    - Creator (conv.user_id == current_user.id): Full read/write access.
+    - Historic unowned (conv.user_id is None): Only tenant admins can access (read/write).
+      Non-admins get 404.
+    - Shared (record in conversation_shares for current_user.id): Read-only access.
+      If require_write is True, raises 403 Forbidden.
+    - Other tenant members (not creator, not shared, not unowned admin): Returns 404.
+
+    Returns (conversation, is_owner, is_shared).
+    """
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=404, detail="User has no associated tenant")
+
+    conv = db.query(models.Conversation).filter(
+        models.Conversation.id == conversation_id,
+        models.Conversation.tenant_id == current_user.tenant_id
+    ).first()
+
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # 1. Direct creator ownership
+    if conv.user_id == current_user.id:
+        return conv, True, False
+
+    # 2. Historic unowned conversations: accessible only to Tenant Admins
+    if conv.user_id is None:
+        if current_user.role == "Admin":
+            return conv, True, False
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # 3. Explicit read-only sharing grants
+    share = db.query(models.ConversationShare).filter(
+        models.ConversationShare.conversation_id == conv.id,
+        models.ConversationShare.shared_with_user_id == current_user.id
+    ).first()
+
+    if share:
+        if require_write:
+            raise HTTPException(
+                status_code=403,
+                detail="Read-only access: only the conversation creator can modify or post to this conversation"
+            )
+        return conv, False, True
+
+    # 4. Any other caller within tenant (including tenant admin seeking private member chats)
+    raise HTTPException(status_code=404, detail="Conversation not found")
+
+
 @router.get("/conversations", response_model=List[schemas.ConversationListItem])
 def list_conversations(
     current_user: models.User = Depends(get_current_user),
@@ -221,9 +337,39 @@ def list_conversations(
     if not current_user.tenant_id:
         raise HTTPException(status_code=404, detail="User has no associated tenant")
 
-    convs = db.query(models.Conversation).filter(
-        models.Conversation.tenant_id == current_user.tenant_id
-    ).order_by(models.Conversation.updated_at.desc()).all()
+    # 1. Fetch conversations owned by current user
+    owned_query = db.query(models.Conversation).filter(
+        models.Conversation.tenant_id == current_user.tenant_id,
+        models.Conversation.user_id == current_user.id
+    )
+
+    # 2. Fetch conversations shared with current user
+    shared_conv_ids_query = db.query(models.ConversationShare.conversation_id).filter(
+        models.ConversationShare.shared_with_user_id == current_user.id
+    )
+    shared_query = db.query(models.Conversation).filter(
+        models.Conversation.tenant_id == current_user.tenant_id,
+        models.Conversation.id.in_(shared_conv_ids_query)
+    )
+
+    # 3. If caller is Tenant Admin, also include historic unowned conversations
+    if current_user.role == "Admin":
+        unowned_query = db.query(models.Conversation).filter(
+            models.Conversation.tenant_id == current_user.tenant_id,
+            models.Conversation.user_id == None
+        )
+        combined_query = owned_query.union(unowned_query, shared_query)
+    else:
+        combined_query = owned_query.union(shared_query)
+
+    convs = combined_query.order_by(models.Conversation.updated_at.desc()).all()
+
+    # Pre-calculate shared conv ids for quick lookup
+    shared_ids = set(
+        r[0] for r in db.query(models.ConversationShare.conversation_id).filter(
+            models.ConversationShare.shared_with_user_id == current_user.id
+        ).all()
+    )
 
     results = []
     for c in convs:
@@ -239,6 +385,9 @@ def list_conversations(
         if last_msg:
             snippet = (last_msg.content[:75] + "...") if len(last_msg.content) > 75 else last_msg.content
 
+        is_shared_conv = c.id in shared_ids
+        is_owner_conv = (c.user_id == current_user.id) or (c.user_id is None and current_user.role == "Admin")
+
         results.append(schemas.ConversationListItem(
             id=c.id,
             title=c.title,
@@ -246,7 +395,10 @@ def list_conversations(
             created_at=c.created_at,
             updated_at=c.updated_at,
             last_message=snippet,
-            message_count=count
+            message_count=count,
+            user_id=c.user_id,
+            is_owner=is_owner_conv,
+            is_shared=is_shared_conv
         ))
 
     return results
@@ -258,17 +410,17 @@ def get_conversation(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    conv = db.query(models.Conversation).filter(
-        models.Conversation.id == conversation_id,
-        models.Conversation.tenant_id == current_user.tenant_id
-    ).first()
-
-    if not conv:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+    conv, is_owner, is_shared = get_accessible_conversation(
+        conversation_id, current_user, db, require_write=False
+    )
 
     messages = db.query(models.Message).filter(
         models.Message.conversation_id == conversation_id
     ).order_by(models.Message.created_at.asc()).all()
+
+    shares_data = [
+        schemas.ConversationShareResponse.model_validate(s) for s in conv.shares
+    ] if is_owner else []
 
     return schemas.ConversationResponse(
         id=conv.id,
@@ -278,6 +430,9 @@ def get_conversation(
         platform=conv.platform,
         created_at=conv.created_at,
         updated_at=conv.updated_at,
+        is_owner=is_owner,
+        is_shared=is_shared,
+        shares=shares_data,
         messages=[schemas.MessageResponse.model_validate(m) for m in messages]
     )
 
@@ -289,21 +444,43 @@ def update_conversation(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    conv = db.query(models.Conversation).filter(
-        models.Conversation.id == conversation_id,
-        models.Conversation.tenant_id == current_user.tenant_id
-    ).first()
+    conv, is_owner, is_shared = get_accessible_conversation(
+        conversation_id, current_user, db, require_write=True
+    )
 
-    if not conv:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+    if payload.title is not None:
+        conv.title = payload.title.strip()
 
-    conv.title = payload.title.strip()
+    if payload.user_id is not None:
+        if conv.user_id is None and current_user.role == "Admin":
+            target_user = db.query(models.User).filter(
+                models.User.id == payload.user_id,
+                models.User.tenant_id == current_user.tenant_id
+            ).first()
+            if not target_user:
+                raise HTTPException(status_code=404, detail="Target user not found in tenant")
+            conv.user_id = target_user.id
+        elif conv.user_id != payload.user_id:
+            if current_user.role != "Admin":
+                raise HTTPException(status_code=403, detail="Only tenant administrators can reassign conversation ownership")
+            target_user = db.query(models.User).filter(
+                models.User.id == payload.user_id,
+                models.User.tenant_id == current_user.tenant_id
+            ).first()
+            if not target_user:
+                raise HTTPException(status_code=404, detail="Target user not found in tenant")
+            conv.user_id = target_user.id
+
     db.commit()
     db.refresh(conv)
 
     messages = db.query(models.Message).filter(
         models.Message.conversation_id == conversation_id
     ).order_by(models.Message.created_at.asc()).all()
+
+    shares_data = [
+        schemas.ConversationShareResponse.model_validate(s) for s in conv.shares
+    ] if is_owner else []
 
     return schemas.ConversationResponse(
         id=conv.id,
@@ -313,6 +490,9 @@ def update_conversation(
         platform=conv.platform,
         created_at=conv.created_at,
         updated_at=conv.updated_at,
+        is_owner=is_owner,
+        is_shared=is_shared,
+        shares=shares_data,
         messages=[schemas.MessageResponse.model_validate(m) for m in messages]
     )
 
@@ -323,17 +503,95 @@ def delete_conversation(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    conv = db.query(models.Conversation).filter(
-        models.Conversation.id == conversation_id,
-        models.Conversation.tenant_id == current_user.tenant_id
-    ).first()
-
-    if not conv:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+    conv, is_owner, is_shared = get_accessible_conversation(
+        conversation_id, current_user, db, require_write=True
+    )
 
     db.delete(conv)
     db.commit()
     return {"message": "Conversation deleted successfully", "id": conversation_id}
+
+
+@router.post("/conversations/{conversation_id}/share", response_model=schemas.ConversationShareResponse)
+def share_conversation(
+    conversation_id: int,
+    payload: schemas.ConversationShareRequest,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    conv, is_owner, is_shared = get_accessible_conversation(
+        conversation_id, current_user, db, require_write=True
+    )
+
+    if payload.user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Cannot share conversation with yourself")
+
+    target_user = db.query(models.User).filter(
+        models.User.id == payload.user_id,
+        models.User.tenant_id == current_user.tenant_id
+    ).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Target user not found in tenant")
+
+    existing_share = db.query(models.ConversationShare).filter(
+        models.ConversationShare.conversation_id == conv.id,
+        models.ConversationShare.shared_with_user_id == payload.user_id
+    ).first()
+
+    if existing_share:
+        return schemas.ConversationShareResponse.model_validate(existing_share)
+
+    new_share = models.ConversationShare(
+        conversation_id=conv.id,
+        shared_with_user_id=target_user.id,
+        granted_by_user_id=current_user.id
+    )
+    db.add(new_share)
+    db.commit()
+    db.refresh(new_share)
+
+    return schemas.ConversationShareResponse.model_validate(new_share)
+
+
+@router.get("/conversations/{conversation_id}/shares", response_model=List[schemas.ConversationShareResponse])
+def list_conversation_shares(
+    conversation_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    conv, is_owner, is_shared = get_accessible_conversation(
+        conversation_id, current_user, db, require_write=False
+    )
+    shares = db.query(models.ConversationShare).filter(
+        models.ConversationShare.conversation_id == conv.id
+    ).all()
+    return [schemas.ConversationShareResponse.model_validate(s) for s in shares]
+
+
+@router.delete("/conversations/{conversation_id}/share/{target_user_id}")
+def revoke_conversation_share(
+    conversation_id: int,
+    target_user_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    conv, is_owner, is_shared = get_accessible_conversation(
+        conversation_id, current_user, db, require_write=False
+    )
+    if not is_owner and target_user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the conversation owner or recipient can revoke this share")
+
+    share = db.query(models.ConversationShare).filter(
+        models.ConversationShare.conversation_id == conv.id,
+        models.ConversationShare.shared_with_user_id == target_user_id
+    ).first()
+
+    if not share:
+        raise HTTPException(status_code=404, detail="Share record not found")
+
+    db.delete(share)
+    db.commit()
+    return {"message": "Share revoked successfully", "conversation_id": conversation_id, "user_id": target_user_id}
 
 
 @router.post("/chat", response_model=schemas.ChatResponse)
@@ -341,7 +599,7 @@ def chat_endpoint(
     req: schemas.ChatRequest,
     background_tasks: BackgroundTasks,
     request: Request,
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_query_executor),
     db: Session = Depends(get_db)
 ):
     """
@@ -364,12 +622,10 @@ def chat_endpoint(
     is_new_conversation = False
     initial_title = None
     if req.conversation_id:
-        conv = db.query(models.Conversation).filter(
-            models.Conversation.id == req.conversation_id,
-            models.Conversation.tenant_id == tenant_id
-        ).first()
-
-    if not conv:
+        conv, is_owner, is_shared = get_accessible_conversation(
+            req.conversation_id, current_user, db, require_write=True
+        )
+    else:
         is_new_conversation = True
         auto_title = generate_heuristic_title(user_query)
         initial_title = auto_title
@@ -382,8 +638,6 @@ def chat_endpoint(
         db.add(conv)
         db.commit()
         db.refresh(conv)
-    else:
-        initial_title = conv.title
 
     conv_id: int = int(conv.id)
 
@@ -429,6 +683,14 @@ def chat_endpoint(
                 pass
 
     # 4. Route Query (RAG vs SQL vs Hybrid)
+    if req.database_id is not None:
+        check_conn = db.query(models.DatabaseConnection).filter(
+            models.DatabaseConnection.id == req.database_id,
+            models.DatabaseConnection.tenant_id == tenant_id
+        ).first()
+        if not check_conn:
+            raise HTTPException(status_code=404, detail="Database connection not found")
+
     route_decision = classify_query_route(
         query=user_query,
         tenant_id=tenant_id,

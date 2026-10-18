@@ -176,7 +176,15 @@ def test_widget_key_crud_lifecycle(test_setup):
     assert len(keys) == 1
     assert keys[0]["id"] == key_id
 
-    # 3. Update widget key
+    # 3. Update widget key (with tenant scoped databases)
+    db = test_setup["db"]
+    t1 = test_setup["t1"]
+    db.add_all([
+        models.DatabaseConnection(id=10, tenant_id=t1.id, name="DB 10", db_type="sqlite", database="db10.sqlite"),
+        models.DatabaseConnection(id=12, tenant_id=t1.id, name="DB 12", db_type="sqlite", database="db12.sqlite"),
+    ])
+    db.commit()
+
     update_payload = {
         "name": "Renamed Widget",
         "allow_sql": True,

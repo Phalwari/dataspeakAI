@@ -38,3 +38,4 @@ groq
 langchain-groq
 pymongo
 sqlglot
+alembic>=1.13.0

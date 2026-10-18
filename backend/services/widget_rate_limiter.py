@@ -235,6 +235,44 @@ class WidgetRateLimiter:
 
         return True, 0
 
+    def check_session_handshake_rate_limits(
+        self,
+        public_key: str,
+        client_ip: str,
+        key_limit: Optional[int] = None,
+        ip_limit: Optional[int] = None
+    ) -> Tuple[bool, int]:
+        k_limit = key_limit or self.key_limit
+        i_limit = ip_limit or self.ip_limit
+
+        self._prune_inactive_buckets()
+
+        if self.redis_client:
+            ok, retry = self._check_redis_limit(f"widget_rl:handshake:key:{public_key}", k_limit, 60)
+            if not ok:
+                return False, retry
+            ok, retry = self._check_redis_limit(f"widget_rl:handshake:ip:{client_ip}", i_limit, 60)
+            if not ok:
+                return False, retry
+            return True, 0
+
+        # In-memory fallback
+        key_bucket = self._get_or_create_bucket(
+            self._key_buckets, f"hs_key_{public_key}", capacity=k_limit, fill_rate=k_limit / 60.0
+        )
+        ok, retry = key_bucket.consume(1)
+        if not ok:
+            return False, retry
+
+        ip_bucket = self._get_or_create_bucket(
+            self._ip_buckets, f"hs_ip_{client_ip}", capacity=i_limit, fill_rate=i_limit / 60.0
+        )
+        ok, retry = ip_bucket.consume(1)
+        if not ok:
+            return False, retry
+
+        return True, 0
+
     def acquire_stream(self, public_key: str, max_concurrent: Optional[int] = None) -> bool:
         """
         Attempts to acquire a concurrent streaming slot for the widget key.

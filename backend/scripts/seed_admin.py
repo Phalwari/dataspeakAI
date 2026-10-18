@@ -16,12 +16,18 @@ DEFAULT_ADMIN_NAME = os.getenv("DEFAULT_ADMIN_NAME", "Super Admin")
 DEFAULT_ORG_NAME = os.getenv("DEFAULT_ORG_NAME", "DataSpeak Enterprise")
 
 def seed_superadmin():
-    Base.metadata.create_all(bind=engine)
-    try:
-        from services.db_migration import run_schema_migrations
-        run_schema_migrations(engine)
-    except Exception as err:
-        print(f"[MIGRATION] Note during seed: {err}")
+    # Strict production gate: development seeding is strictly forbidden in production
+    if os.getenv("ENVIRONMENT", "development").lower() == "production":
+        raise RuntimeError("Development seeding is strictly disabled when ENVIRONMENT=production.")
+
+    # Only run DDL if explicitly in non-production development mode
+    if os.getenv("ENABLE_DEV_STARTUP_DDL", "true").lower() == "true":
+        Base.metadata.create_all(bind=engine)
+        try:
+            from services.db_migration import run_schema_migrations
+            run_schema_migrations(engine)
+        except Exception as err:
+            print(f"[MIGRATION] Note during seed: {err}")
     db = SessionLocal()
     try:
         # 1. Ensure default tenant exists
@@ -46,6 +52,7 @@ def seed_superadmin():
                 full_name=DEFAULT_ADMIN_NAME,
                 hashed_password=get_password_hash(DEFAULT_ADMIN_PASSWORD),
                 role="Admin",
+                is_platform_admin=True,
                 is_active=True,
                 is_verified=True,
                 tenant_id=tenant.id
@@ -55,18 +62,17 @@ def seed_superadmin():
             db.refresh(admin_user)
             print(f"[SEED] Successfully created Superadmin User:")
             print(f"       Email:    {DEFAULT_ADMIN_EMAIL}")
-            print(f"       Password: {DEFAULT_ADMIN_PASSWORD}")
-            print(f"       Role:     Admin (Verified: True)")
+            print(f"       Role:     Admin (Platform Admin: True, Verified: True)")
         else:
-            # Ensure admin is active and verified
+            # Ensure admin is active, verified, and granted platform authority WITHOUT overwriting password
+            admin_user.is_platform_admin = True
             admin_user.is_active = True
             admin_user.is_verified = True
             if not admin_user.tenant_id:
                 admin_user.tenant_id = tenant.id
-            # Reset password to default if specified
-            admin_user.hashed_password = get_password_hash(DEFAULT_ADMIN_PASSWORD)
             db.commit()
-            print(f"[SEED] Superadmin User '{DEFAULT_ADMIN_EMAIL}' already exists. Status verified & active.")
+            db.refresh(admin_user)
+            print(f"[SEED] Superadmin User '{DEFAULT_ADMIN_EMAIL}' already exists. Platform authority verified & active (existing password preserved).")
 
         # 3. Ensure default ChatbotConfig exists for tenant
         cb_config = db.query(models.ChatbotConfig).filter(models.ChatbotConfig.tenant_id == tenant.id).first()
@@ -136,6 +142,7 @@ def seed_superadmin():
             db.add(membership)
             db.commit()
 
+        db.refresh(admin_user)
         db.expunge_all()
         return admin_user
     finally:

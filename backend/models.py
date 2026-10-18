@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Float, JSON, Index
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Float, JSON, Index, UniqueConstraint
 from sqlalchemy.orm import relationship
 from database import Base
 from datetime import datetime, timezone
@@ -50,6 +50,8 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     full_name = Column(String)
     role = Column(String, default="Admin") # Admin, Business Owner, Developer
+    is_platform_admin = Column(Boolean, default=False, nullable=False)
+    token_version = Column(Integer, default=1, nullable=False)
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
     tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True)
@@ -251,6 +253,22 @@ class WidgetKey(Base):
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
     tenant = relationship("Tenant")
+    document_associations = relationship("WidgetKeyDocument", back_populates="widget_key", cascade="all, delete-orphan")
+
+class WidgetKeyDocument(Base):
+    __tablename__ = "widget_key_documents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    widget_key_id = Column(Integer, ForeignKey("widget_keys.id", ondelete="CASCADE"), nullable=False)
+    document_id = Column(Integer, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime, default=utc_now)
+
+    __table_args__ = (
+        UniqueConstraint("widget_key_id", "document_id", name="uq_widget_key_document"),
+    )
+
+    widget_key = relationship("WidgetKey", back_populates="document_associations")
+    document = relationship("Document", backref="widget_key_associations")
 
 class ChatbotConfig(Base):
     __tablename__ = "chatbot_configs"
@@ -518,6 +536,23 @@ class Conversation(Base):
     tenant = relationship("Tenant")
     user = relationship("User")
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
+    shares = relationship("ConversationShare", back_populates="conversation", cascade="all, delete-orphan")
+
+class ConversationShare(Base):
+    __tablename__ = "conversation_shares"
+    __table_args__ = (
+        UniqueConstraint("conversation_id", "shared_with_user_id", name="uq_conversation_shares_conv_user"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
+    shared_with_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    granted_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+
+    conversation = relationship("Conversation", back_populates="shares")
+    shared_with_user = relationship("User", foreign_keys=[shared_with_user_id])
+    granted_by_user = relationship("User", foreign_keys=[granted_by_user_id])
 
 class Message(Base):
     __tablename__ = "messages"

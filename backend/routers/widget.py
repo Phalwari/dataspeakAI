@@ -14,10 +14,13 @@ from services.widget_session_service import (
     extract_request_origin,
     is_origin_allowed,
     create_widget_session_token,
-    verify_widget_session_token
+    verify_widget_session_token,
+    create_widget_continuity_token,
+    verify_widget_continuity_token
 )
 from services.widget_rate_limiter import widget_limiter
 from services.sql_engine import validate_widget_sql, generate_sql_from_nl, execute_safe_sql
+import secrets
 
 router = APIRouter(prefix="/api/widget", tags=["widget"])
 
@@ -151,6 +154,19 @@ def create_widget_session(
             detail="Missing or invalid Origin / Referer header"
         )
 
+    # SEC-04 / NR-1.1-B-T04: Pre-allocation handshake rate limit per IP and per public key
+    client_ip = extract_client_ip(request)
+    allowed, retry_after = widget_limiter.check_session_handshake_rate_limits(
+        public_key=session_req.public_key,
+        client_ip=client_ip
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Rate limit exceeded for widget session handshake",
+            headers={"Retry-After": str(retry_after)}
+        )
+
     now = datetime.now(timezone.utc)
     widget_key = db.query(models.WidgetKey).filter(
         (models.WidgetKey.public_key == session_req.public_key) |
@@ -178,13 +194,26 @@ def create_widget_session(
             detail="Origin not permitted for this widget key"
         )
 
+    visitor_id = session_req.visitor_id.strip() if (session_req.visitor_id and len(session_req.visitor_id.strip()) >= 8) else secrets.token_hex(16)
     conv = None
-    if session_req.conversation_id:
-        conv = db.query(models.Conversation).filter(
-            models.Conversation.id == session_req.conversation_id,
-            models.Conversation.tenant_id == widget_key.tenant_id
-        ).first()
 
+    if session_req.conversation_id and session_req.continuity_token:
+        cont_claims = verify_widget_continuity_token(session_req.continuity_token)
+        if (
+            cont_claims
+            and cont_claims.get("conversation_id") == session_req.conversation_id
+            and cont_claims.get("public_key") == widget_key.public_key
+            and cont_claims.get("tenant_id") == widget_key.tenant_id
+        ):
+            # Verified visitor continuity proof
+            visitor_id = cont_claims.get("visitor_id") or visitor_id
+            conv = db.query(models.Conversation).filter(
+                models.Conversation.id == session_req.conversation_id,
+                models.Conversation.tenant_id == widget_key.tenant_id,
+                models.Conversation.platform == "widget"
+            ).first()
+
+    # If no valid continuity proof or conversation not found, safely start fresh conversation
     if not conv:
         conv = models.Conversation(
             tenant_id=widget_key.tenant_id,
@@ -202,8 +231,18 @@ def create_widget_session(
         public_key=widget_key.public_key,
         origin=origin,
         conversation_id=conv_id,
+        widget_key_id=widget_key.id,
+        visitor_id=visitor_id,
         allow_sql=bool(widget_key.allow_sql),
         expires_minutes=expires_minutes
+    )
+
+    continuity_token = create_widget_continuity_token(
+        tenant_id=widget_key.tenant_id,
+        widget_key_id=widget_key.id,
+        public_key=widget_key.public_key,
+        visitor_id=visitor_id,
+        conversation_id=conv_id
     )
 
     response.headers["Vary"] = "Origin"
@@ -212,7 +251,9 @@ def create_widget_session(
         session_token=session_token,
         expires_in=expires_minutes * 60,
         tenant_id=widget_key.tenant_id,
-        conversation_id=conv_id
+        conversation_id=conv_id,
+        visitor_id=visitor_id,
+        continuity_token=continuity_token
     )
 
 
@@ -368,14 +409,18 @@ def process_widget_chat(
             headers={"Retry-After": "86400"}
         )
 
-    # 5. Conversation resolution
-    conv = None
-    target_conv_id = req.conversation_id or session_conv_id
-    if target_conv_id:
-        conv = db.query(models.Conversation).filter(
-            models.Conversation.id == target_conv_id,
-            models.Conversation.tenant_id == tenant_id
-        ).first()
+    # 5. Conversation resolution & Anti-switching Guard (I-02 / NR-1.1-B-T03)
+    if req.conversation_id is not None and int(req.conversation_id) != int(session_conv_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Conversation ID mismatch: cannot switch conversation outside the signed session token"
+        )
+
+    conv = db.query(models.Conversation).filter(
+        models.Conversation.id == session_conv_id,
+        models.Conversation.tenant_id == tenant_id,
+        models.Conversation.platform == "widget"
+    ).first()
 
     if not conv:
         conv = models.Conversation(
@@ -421,7 +466,7 @@ def process_widget_chat(
     rows_summary = ""
     context_text = ""
 
-    # 6. SQL Security Policy Evaluation
+    # 6. SQL Security Policy Evaluation (NR-1.1-B-T07)
     allow_sql = bool(widget_key.allow_sql)
     sql_executed = False
 
@@ -429,51 +474,83 @@ def process_widget_chat(
     db_keywords = ["sql", "database", "table", "records", "query", "select", "rows"]
     is_asking_db = any(kw in user_query.lower() for kw in db_keywords)
 
-    if allow_sql and is_asking_db and widget_key.allowed_database_ids:
-        # Check if database is in allowed_database_ids
-        allowed_db_ids = widget_key.allowed_database_ids
-        db_conn = db.query(models.DatabaseConnection).filter(
-            models.DatabaseConnection.id.in_(allowed_db_ids),
-            models.DatabaseConnection.tenant_id == tenant_id
-        ).first()
+    if is_asking_db and not allow_sql:
+        route_type = "sql"
+        assistant_answer = "Database querying is disabled for this widget. Please ask questions about our knowledge base documentation."
+    elif allow_sql and is_asking_db:
+        allowed_db_ids = widget_key.allowed_database_ids or []
+        if not allowed_db_ids:
+            route_type = "sql"
+            assistant_answer = "No database connections are permitted for this widget."
+        else:
+            db_conn = db.query(models.DatabaseConnection).filter(
+                models.DatabaseConnection.id.in_(allowed_db_ids),
+                models.DatabaseConnection.tenant_id == tenant_id
+            ).first()
 
-        if db_conn:
-            nl_res = generate_sql_from_nl(db_conn, user_query, db_session=db)
-            gen_sql = nl_res.get("sql", "")
-            is_valid, validation_err = validate_widget_sql(gen_sql, allowed_tables=widget_key.allowed_tables)
+            if not db_conn:
+                route_type = "sql"
+                assistant_answer = "The permitted database connection is unavailable."
+            else:
+                nl_res = generate_sql_from_nl(
+                    db_conn,
+                    user_query,
+                    db_session=db,
+                    tenant_id=tenant_id,
+                    allowed_tables=widget_key.allowed_tables
+                )
+                gen_sql = nl_res.get("sql", "")
+                is_valid, validation_err = validate_widget_sql(gen_sql, allowed_tables=widget_key.allowed_tables)
 
-            if is_valid and gen_sql:
-                try:
-                    exec_res = execute_safe_sql(db_conn, gen_sql, max_rows=50)
-                    sql_executed = True
+                if not is_valid:
                     route_type = "sql"
+                    assistant_answer = "I'm sorry, access to the requested table or data is not permitted for this widget."
+                elif gen_sql:
+                    try:
+                        exec_res = execute_safe_sql(db_conn, gen_sql, max_rows=50)
+                        sql_executed = True
+                        route_type = "sql"
 
-                    # Mask PII from rows before LLM synthesis
-                    masked_rows = mask_pii_rows(exec_res.get("rows", []))
-                    rows_summary = json.dumps(masked_rows[:10], indent=2)
+                        # Mask PII from rows before LLM synthesis
+                        masked_rows = mask_pii_rows(exec_res.get("rows", []))
+                        rows_summary = json.dumps(masked_rows[:10], indent=2)
 
-                    if gemini_api_key:
-                        prompt = (
-                            "You are DataSpeakAI, a secure conversational assistant.\n"
-                            f"{history_text}\n"
-                            f"User Question: {user_query}\n"
-                            f"Query Result ({exec_res.get('row_count', 0)} matching records):\n{rows_summary}\n\n"
-                            "Summarize the key findings directly and clearly for the user. Do not expose internal database table names or raw queries."
-                        )
-                        ans = call_gemini_api(prompt, gemini_api_key)
-                        if ans:
-                            assistant_answer = ans
+                        if gemini_api_key:
+                            prompt = (
+                                "You are DataSpeakAI, a secure conversational assistant.\n"
+                                f"{history_text}\n"
+                                f"User Question: {user_query}\n"
+                                f"Query Result ({exec_res.get('row_count', 0)} matching records):\n{rows_summary}\n\n"
+                                "Summarize the key findings directly and clearly for the user. Do not expose internal database table names or raw queries."
+                            )
+                            ans = call_gemini_api(prompt, gemini_api_key)
+                            if ans:
+                                assistant_answer = ans
 
-                    if not assistant_answer:
-                        assistant_answer = f"Found {exec_res.get('row_count', 0)} matching records for your question."
+                        if not assistant_answer:
+                            assistant_answer = f"Found {exec_res.get('row_count', 0)} matching records for your question."
 
-                except Exception as ex:
-                    print(f"Widget SQL execution error: {ex}")
+                    except Exception as ex:
+                        print(f"Widget SQL execution error: {ex}")
+                        route_type = "sql"
+                        assistant_answer = "An error occurred while executing the query. Please try again or rephrase your request."
 
-    # Fallback to RAG if SQL was not executed
-    if not sql_executed:
+    # Fallback to RAG if SQL was not executed and no answer set
+    if not sql_executed and not assistant_answer:
         route_type = "rag"
-        rag_hits = retrieve_rag_chunks(user_query, tenant_id=tenant_id, db=db, top_k=4)
+        # Fetch document publication assignments for this widget key (NR-1.1-B-T05 / NR-1.1-B-T06)
+        published_doc_rows = db.query(models.WidgetKeyDocument.document_id).filter(
+            models.WidgetKeyDocument.widget_key_id == widget_key.id
+        ).all()
+        allowed_doc_ids = {r[0] for r in published_doc_rows}
+
+        rag_hits = retrieve_rag_chunks(
+            user_query,
+            tenant_id=tenant_id,
+            db=db,
+            top_k=4,
+            allowed_document_ids=allowed_doc_ids
+        )
 
         if rag_hits:
             context_parts = []
@@ -559,7 +636,7 @@ def process_widget_chat(
             f"Visitor Question: {user_query}\n\n"
             f"Context:\n{context_text}"
         )
-    else:
+    elif not assistant_answer:
         prompt = (
             "You are DataSpeakAI, a helpful, secure, and professional conversational AI assistant embedded on a website.\n"
             f"{history_text}\n"
@@ -631,7 +708,7 @@ def process_widget_chat(
         )
 
     # Non-streaming synchronous path
-    if gemini_api_key and prompt:
+    if gemini_api_key and prompt and not assistant_answer:
         ans = call_gemini_api(prompt, gemini_api_key)
         if ans:
             assistant_answer = ans

@@ -1,5 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
-import { parseSseBlock, SseStreamParser, streamWidgetChat } from '../api';
+import {
+  parseSseBlock,
+  SseStreamParser,
+  streamWidgetChat,
+  isSessionNearingExpiry,
+  ensureActiveWidgetSession,
+  SessionData,
+} from '../api';
 
 describe('SSE Parser and Streaming Contract (Task 7.1.2)', () => {
   describe('parseSseBlock', () => {
@@ -202,6 +209,106 @@ describe('SSE Parser and Streaming Contract (Task 7.1.2)', () => {
       );
 
       expect(reportedError).toBe('AI service quota exhausted');
+    });
+  });
+
+  describe('Widget Session Renewal & Expiry Contract (NR-1.1-B-T08)', () => {
+    it('detects session nearing expiry at the 50-minute mark (within 10 min)', () => {
+      const now = Date.now();
+      // Fresh token: 60 minutes remaining -> not nearing expiry
+      const freshSession: SessionData = {
+        sessionToken: 'fresh-token',
+        expiresAt: now + 60 * 60 * 1000,
+        tenantId: 1,
+        conversationId: 10,
+        continuityToken: 'continuity-1',
+      };
+      expect(isSessionNearingExpiry(freshSession)).toBe(false);
+
+      // 51 minutes old: 9 minutes remaining -> nearing expiry
+      const expiringSession: SessionData = {
+        sessionToken: 'expiring-token',
+        expiresAt: now + 9 * 60 * 1000,
+        tenantId: 1,
+        conversationId: 10,
+        continuityToken: 'continuity-1',
+      };
+      expect(isSessionNearingExpiry(expiringSession)).toBe(true);
+
+      // Already expired token -> nearing expiry
+      const expiredSession: SessionData = {
+        sessionToken: 'expired-token',
+        expiresAt: now - 1000,
+        tenantId: 1,
+        conversationId: 10,
+        continuityToken: 'continuity-1',
+      };
+      expect(isSessionNearingExpiry(expiredSession)).toBe(true);
+    });
+
+    it('proactively renews session via continuityToken when nearing expiry', async () => {
+      const now = Date.now();
+      const expiringSession: SessionData = {
+        sessionToken: 'old-session-token',
+        expiresAt: now + 5 * 60 * 1000, // 5 min remaining
+        tenantId: 1,
+        conversationId: 42,
+        continuityToken: 'continuity-proof-abc',
+      };
+
+      const mockResponse = new Response(
+        JSON.stringify({
+          session_token: 'new-renewed-token',
+          expires_in: 3600,
+          tenant_id: 1,
+          conversation_id: 42,
+          continuity_token: 'continuity-proof-abc',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+
+      const mockFetch = vi.fn().mockResolvedValue(mockResponse);
+      globalThis.fetch = mockFetch;
+
+      const renewed = await ensureActiveWidgetSession(
+        'http://localhost:8000',
+        'pk_live_test_key',
+        expiringSession
+      );
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const requestBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(requestBody.public_key).toBe('pk_live_test_key');
+      expect(requestBody.conversation_id).toBe(42);
+      expect(requestBody.continuity_token).toBe('continuity-proof-abc');
+
+      expect(renewed.sessionToken).toBe('new-renewed-token');
+      expect(renewed.conversationId).toBe(42);
+      expect(renewed.continuityToken).toBe('continuity-proof-abc');
+      expect(renewed.expiresAt).toBeGreaterThan(now + 3500 * 1000);
+    });
+
+    it('returns existing session without renewal if fresh and far from expiry', async () => {
+      const now = Date.now();
+      const freshSession: SessionData = {
+        sessionToken: 'fresh-active-token',
+        expiresAt: now + 55 * 60 * 1000, // 55 min remaining
+        tenantId: 1,
+        conversationId: 42,
+        continuityToken: 'continuity-proof-abc',
+      };
+
+      const mockFetch = vi.fn();
+      globalThis.fetch = mockFetch;
+
+      const result = await ensureActiveWidgetSession(
+        'http://localhost:8000',
+        'pk_live_test_key',
+        freshSession
+      );
+
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(result.sessionToken).toBe('fresh-active-token');
     });
   });
 });

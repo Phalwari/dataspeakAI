@@ -53,6 +53,7 @@ import { ScrollArea } from "../../components/ui/scroll-area";
 export function KnowledgeBasePage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [documents, setDocuments] = useState<any[]>([]);
+  const [publishedDocIds, setPublishedDocIds] = useState<number[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
   const [selectedDocument, setSelectedDocument] = useState<any>(null);
@@ -127,6 +128,26 @@ export function KnowledgeBasePage() {
       if (response.ok) {
         const data = await response.json();
         setDocuments(data);
+      }
+
+      // Check published status against active widget key
+      const keysRes = await fetch(`${API_BASE_URL}/api/keys/widget`, {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (keysRes.ok) {
+        const keys = await keysRes.json();
+        if (keys && keys.length > 0) {
+          const pubRes = await fetch(`${API_BASE_URL}/api/keys/widget/${keys[0].id}/documents`, {
+            headers: { "Authorization": `Bearer ${token}` }
+          });
+          if (pubRes.ok) {
+            const pubData = await pubRes.json();
+            const ids = Array.isArray(pubData)
+              ? pubData.map((d: any) => (typeof d === "number" ? d : d.id))
+              : (pubData?.published_document_ids || []);
+            setPublishedDocIds(ids);
+          }
+        }
       }
     } catch (error) {
       console.error("Failed to fetch documents:", error);
@@ -378,8 +399,17 @@ export function KnowledgeBasePage() {
                   <TableCell className="font-medium">
                     <div>
                       <div className="flex items-center gap-2">
-                        <FileText className="w-4 h-4 text-gray-400" />
-                        {doc.name}
+                        <FileText className="w-4 h-4 text-gray-400 shrink-0" />
+                        <span className="truncate max-w-xs">{doc.name}</span>
+                        {publishedDocIds.includes(doc.id) ? (
+                          <Badge variant="outline" className="text-[10px] py-0 px-1.5 bg-blue-50 text-blue-700 border-blue-200">
+                            Widget Published
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-[10px] py-0 px-1.5 bg-slate-50 text-slate-500 border-slate-200">
+                            Private
+                          </Badge>
+                        )}
                       </div>
                       {doc.status === "Failed" && doc.error_message && (
                         <p className="text-xs text-red-500 font-normal mt-0.5 max-w-xs truncate" title={doc.error_message}>

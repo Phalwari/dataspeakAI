@@ -64,7 +64,8 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
             full_name=user.full_name,
             hashed_password=hashed_password,
             tenant_id=tenant_id,
-            role=role
+            role=role,
+            is_platform_admin=False
         )
         db.add(new_user)
         db.flush() # Populate new_user.id
@@ -106,6 +107,7 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
             "email": new_user.email,
             "full_name": new_user.full_name,
             "role": new_user.role,
+            "is_platform_admin": getattr(new_user, "is_platform_admin", False),
             "is_active": new_user.is_active,
             "is_verified": new_user.is_verified,
             "tenant_id": new_user.tenant_id
@@ -129,12 +131,15 @@ def login_user(user: schemas.UserLogin, db: Session = Depends(get_db)):
             headers={"WWW-Authenticate": "Bearer"},
         )
     
+    if not getattr(db_user, "is_active", True):
+        raise HTTPException(status_code=403, detail="User account is inactive or disabled")
+
     if not db_user.is_verified:
         raise HTTPException(status_code=403, detail="Please verify your email before logging in.")
     
     access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = auth.create_access_token(
-        data={"sub": db_user.email}, expires_delta=access_token_expires
+        data={"sub": db_user.email, "tv": getattr(db_user, "token_version", 1)}, expires_delta=access_token_expires
     )
     
     return {"access_token": access_token, "token_type": "bearer", "user": db_user}
@@ -206,15 +211,19 @@ def github_login(data: schemas.GithubLoginRequest, db: Session = Depends(get_db)
                 hashed_password=dummy_password,
                 tenant_id=new_tenant.id,
                 role="Admin",
+                is_platform_admin=False,
                 is_verified=True
             )
             db.add(db_user)
             db.commit()
             db.refresh(db_user)
             
+        if not getattr(db_user, "is_active", True):
+            raise HTTPException(status_code=403, detail="User account is inactive or disabled")
+
         access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = auth.create_access_token(
-            data={"sub": db_user.email}, expires_delta=access_token_expires
+            data={"sub": db_user.email, "tv": getattr(db_user, "token_version", 1)}, expires_delta=access_token_expires
         )
         
         return {"access_token": access_token, "token_type": "bearer", "user": db_user}
@@ -235,6 +244,8 @@ def change_password(data: schemas.UserChangePassword, db: Session = Depends(get_
         raise HTTPException(status_code=400, detail="Incorrect current password")
     
     setattr(current_user, "hashed_password", auth.get_password_hash(data.new_password))
+    # Bump token version to invalidate all other active sessions (Task NR-1.1-A-T05)
+    current_user.token_version = getattr(current_user, "token_version", 1) + 1
     db.commit()
     return {"message": "Password updated successfully"}
 
@@ -299,7 +310,10 @@ def send_otp_email(email: str, otp_code: str, subject: str, message: str):
         except Exception as e:
             print(f"ERROR: Resend Failed: {str(e)}", flush=True)
     else:
-        print(f"CRITICAL: No email provider configured! OTP for {email} is: {otp_code}", flush=True)
+        if os.getenv("ENVIRONMENT", "development").lower() != "production":
+            print(f"DEV NOTE: No email provider configured! Development OTP for {email} is: {otp_code}", flush=True)
+        else:
+            print(f"CRITICAL: No email provider configured! Failed to deliver OTP to {email}", flush=True)
 
 
 @router.post("/forgot-password")
@@ -365,6 +379,8 @@ def reset_password(data: schemas.ResetPasswordRequest, db: Session = Depends(get
         raise HTTPException(status_code=404, detail="User not found")
     
     db_user.hashed_password = auth.get_password_hash(data.new_password)
+    # Bump token version to invalidate all active sessions upon password reset (Task NR-1.1-A-T05)
+    db_user.token_version = getattr(db_user, "token_version", 1) + 1
     
     # Clean up OTP after use
     db.delete(otp_entry)

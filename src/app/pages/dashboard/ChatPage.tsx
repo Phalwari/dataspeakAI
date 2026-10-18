@@ -22,7 +22,9 @@ import {
   Clock,
   ArrowRight,
   RefreshCw,
-  Table as TableIcon
+  Table as TableIcon,
+  Users,
+  Lock,
 } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -35,6 +37,10 @@ import {
   DialogTitle,
   DialogDescription,
 } from "../../components/ui/dialog";
+import {
+  canModifyConversation,
+  getConversationAccessBadge,
+} from "../../utils/permissions";
 
 interface SourceCitation {
   document_name: string;
@@ -100,6 +106,9 @@ interface ConversationItem {
   updated_at: string;
   last_message?: string;
   message_count: number;
+  user_id?: number | null;
+  is_owner?: boolean;
+  is_shared?: boolean;
 }
 
 export function ChatPage() {
@@ -110,6 +119,9 @@ export function ChatPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [sourcePreference, setSourcePreference] = useState<"auto" | "documents" | "database">("auto");
   const [searchFilter, setSearchFilter] = useState("");
+
+  const activeConv = conversations.find((c) => c.id === activeConvId);
+  const isSharedReadOnly = Boolean(activeConv && activeConv.is_shared && !activeConv.is_owner);
 
   // Editing Title
   const [editingConvId, setEditingConvId] = useState<number | null>(null);
@@ -220,6 +232,11 @@ export function ChatPage() {
 
   // Handle Send Message with True Token Streaming
   const handleSendMessage = async (customPrompt?: string) => {
+    if (isSharedReadOnly) {
+      toast.error("This conversation is shared with you as read-only. Only the creator can send messages.");
+      return;
+    }
+
     const textToSend = customPrompt || inputText;
     if (!textToSend.trim() || isLoading) return;
 
@@ -387,6 +404,12 @@ export function ChatPage() {
   // Delete Conversation
   const handleDeleteConversation = async (e: React.MouseEvent, id: number) => {
     e.stopPropagation();
+    const targetConv = conversations.find((c) => c.id === id);
+    if (targetConv && !canModifyConversation(targetConv)) {
+      toast.error("Permission denied: You cannot delete a shared conversation.");
+      return;
+    }
+
     try {
       const res = await fetch(`${API_BASE_URL}/api/conversations/${id}`, {
         method: "DELETE",
@@ -403,6 +426,9 @@ export function ChatPage() {
             handleNewChat();
           }
         }
+      } else {
+        const errJson = await res.json().catch(() => null);
+        toast.error(errJson?.detail || "Failed to delete conversation");
       }
     } catch (err) {
       toast.error("Failed to delete conversation");
@@ -412,6 +438,13 @@ export function ChatPage() {
   // Save Renamed Title
   const handleSaveRename = async (e: React.MouseEvent, id: number) => {
     e.stopPropagation();
+    const targetConv = conversations.find((c) => c.id === id);
+    if (targetConv && !canModifyConversation(targetConv)) {
+      toast.error("Permission denied: You cannot rename a shared conversation.");
+      setEditingConvId(null);
+      return;
+    }
+
     if (!editTitleText.trim()) return;
 
     try {
@@ -429,6 +462,9 @@ export function ChatPage() {
           prev.map((c) => (c.id === id ? { ...c, title: editTitleText.trim() } : c))
         );
         setEditingConvId(null);
+      } else {
+        const errJson = await res.json().catch(() => null);
+        toast.error(errJson?.detail || "Failed to rename conversation");
       }
     } catch (err) {
       toast.error("Failed to rename conversation");
@@ -530,32 +566,39 @@ export function ChatPage() {
                       </div>
                     ) : (
                       <>
-                        <div className="flex items-center gap-2 min-w-0">
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
                           <MessageSquare className={`w-3.5 h-3.5 flex-shrink-0 ${isActive ? "text-blue-600" : "text-gray-400"}`} />
                           <span className="text-xs font-semibold text-gray-800 truncate">
                             {conv.title}
                           </span>
                         </div>
-                        <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setEditingConvId(conv.id);
-                              setEditTitleText(conv.title);
-                            }}
-                            className="p-1 hover:bg-gray-200 text-gray-500 rounded"
-                            title="Rename"
-                          >
-                            <Edit2 className="w-3 h-3" />
-                          </button>
-                          <button
-                            onClick={(e) => handleDeleteConversation(e, conv.id)}
-                            className="p-1 hover:bg-red-100 text-red-500 rounded"
-                            title="Delete"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        </div>
+                        {canModifyConversation(conv) ? (
+                          <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingConvId(conv.id);
+                                setEditTitleText(conv.title);
+                              }}
+                              className="p-1 hover:bg-gray-200 text-gray-500 rounded"
+                              title="Rename"
+                            >
+                              <Edit2 className="w-3 h-3" />
+                            </button>
+                            <button
+                              onClick={(e) => handleDeleteConversation(e, conv.id)}
+                              className="p-1 hover:bg-red-100 text-red-500 rounded"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 text-[10px] text-amber-700 font-medium transition-opacity">
+                            <Lock className="w-2.5 h-2.5 text-amber-600" />
+                            <span>Read-only</span>
+                          </div>
+                        )}
                       </>
                     )}
                   </div>
@@ -588,8 +631,25 @@ export function ChatPage() {
               <Bot className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-sm font-bold text-gray-900 flex items-center gap-2">
-                {conversations.find((c) => c.id === activeConvId)?.title || "Unified Conversational Assistant"}
+              <h2 className="text-sm font-bold text-gray-900 flex items-center gap-2 flex-wrap">
+                <span>{activeConv?.title || "Unified Conversational Assistant"}</span>
+                {isSharedReadOnly && (
+                  <Badge variant="outline" className="text-[11px] bg-amber-50 text-amber-800 border-amber-200 gap-1 font-medium">
+                    <Users className="w-3 h-3 text-amber-600" />
+                    Shared (Read-Only)
+                  </Badge>
+                )}
+                {activeConv?.is_shared && activeConv?.is_owner && (
+                  <Badge variant="outline" className="text-[11px] bg-blue-50 text-blue-700 border-blue-200 gap-1 font-medium">
+                    <Users className="w-3 h-3 text-blue-600" />
+                    Shared with Team
+                  </Badge>
+                )}
+                {activeConv && !activeConv.is_shared && (
+                  <Badge variant="outline" className="text-[10px] text-gray-500 border-gray-200 font-normal">
+                    Private
+                  </Badge>
+                )}
               </h2>
               <p className="text-[11px] text-gray-500">
                 Grounded Multi-Modal RAG &amp; NL-to-SQL Query Engine
@@ -919,42 +979,51 @@ export function ChatPage() {
 
         {/* 3. Bottom Chat Input Box */}
         <div className="p-4 border-t border-gray-200 bg-white flex-shrink-0">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSendMessage();
-            }}
-            className="relative flex items-center max-w-4xl mx-auto"
-          >
-            <Input
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              placeholder="Ask anything about your documents or databases... (Press Enter to send)"
-              disabled={isLoading}
-              className="pr-12 py-3 h-12 rounded-xl text-xs bg-gray-50 border-gray-200 focus:bg-white shadow-xs"
-            />
-            {isLoading ? (
-              <Button
-                type="button"
-                size="sm"
-                onClick={handleStopGeneration}
-                title="Stop generation"
-                className="absolute right-1.5 top-1.5 bottom-1.5 px-3 h-9 rounded-lg bg-red-600 hover:bg-red-700 text-white shadow-xs flex items-center gap-1.5 text-xs font-medium transition-all"
-              >
-                <div className="w-2.5 h-2.5 bg-white rounded-xs" />
-                <span>Stop</span>
-              </Button>
-            ) : (
-              <Button
-                type="submit"
-                size="sm"
-                disabled={!inputText.trim()}
-                className="absolute right-1.5 top-1.5 bottom-1.5 h-9 w-9 p-0 rounded-lg bg-blue-600 hover:bg-blue-700 text-white shadow-xs"
-              >
-                <Send className="w-4 h-4" />
-              </Button>
-            )}
-          </form>
+          {isSharedReadOnly ? (
+            <div className="max-w-4xl mx-auto p-3 rounded-xl bg-amber-50/90 border border-amber-200 text-center flex items-center justify-center gap-2.5 text-xs text-amber-900 shadow-xs">
+              <Lock className="w-4 h-4 text-amber-700 flex-shrink-0" />
+              <span>
+                <strong>Read-Only Conversation:</strong> This thread was shared with you. You can review all answers, source citations, and query results, but only the creator can submit new messages.
+              </span>
+            </div>
+          ) : (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSendMessage();
+              }}
+              className="relative flex items-center max-w-4xl mx-auto"
+            >
+              <Input
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                placeholder="Ask anything about your documents or databases... (Press Enter to send)"
+                disabled={isLoading}
+                className="pr-12 py-3 h-12 rounded-xl text-xs bg-gray-50 border-gray-200 focus:bg-white shadow-xs"
+              />
+              {isLoading ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleStopGeneration}
+                  title="Stop generation"
+                  className="absolute right-1.5 top-1.5 bottom-1.5 px-3 h-9 rounded-lg bg-red-600 hover:bg-red-700 text-white shadow-xs flex items-center gap-1.5 text-xs font-medium transition-all"
+                >
+                  <div className="w-2.5 h-2.5 bg-white rounded-xs" />
+                  <span>Stop</span>
+                </Button>
+              ) : (
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={!inputText.trim()}
+                  className="absolute right-1.5 top-1.5 bottom-1.5 h-9 w-9 p-0 rounded-lg bg-blue-600 hover:bg-blue-700 text-white shadow-xs"
+                >
+                  <Send className="w-4 h-4" />
+                </Button>
+              )}
+            </form>
+          )}
           <div className="text-center mt-2">
             <span className="text-[10px] text-gray-400">
               Answers are generated with Google Gemini 2.5 Flash grounded on your tenant's indexed data.

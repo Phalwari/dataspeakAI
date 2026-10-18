@@ -4,7 +4,7 @@ from typing import Tuple, List, Optional, Dict, Any
 import re
 import models, schemas
 from database import get_db
-from dependencies import get_current_user
+from dependencies import get_current_user, require_source_manager, require_query_executor
 import os
 import io
 
@@ -375,7 +375,7 @@ async def upload_document(
     chunk_size: int = Form(512),
     chunk_overlap: int = Form(50),
     chunking_strategy: str = Form("fixed"),
-    current_user: models.User = Depends(get_current_user), 
+    current_user: models.User = Depends(require_source_manager), 
     db: Session = Depends(get_db)
 ):
     if not current_user.tenant_id:
@@ -409,6 +409,20 @@ async def upload_document(
     db.add(doc)
     db.commit()
     db.refresh(doc)
+
+    # Auto-publish newly uploaded document to all active widget keys in the tenant (Grill-Me decision)
+    active_widget_keys = db.query(models.WidgetKey).filter(
+        models.WidgetKey.tenant_id == current_user.tenant_id,
+        models.WidgetKey.enabled == True
+    ).all()
+    for wk in active_widget_keys:
+        assoc = models.WidgetKeyDocument(
+            widget_key_id=wk.id,
+            document_id=doc.id
+        )
+        db.add(assoc)
+    if active_widget_keys:
+        db.commit()
     
     if os.getenv("CELERY_BROKER_URL"):
         from ingestion.task_queue import process_document_task
@@ -423,7 +437,7 @@ async def upload_document(
 @router.delete("/{document_id}")
 def delete_document(
     document_id: int,
-    current_user: models.User = Depends(get_current_user), 
+    current_user: models.User = Depends(require_source_manager), 
     db: Session = Depends(get_db)
 ):
     if not current_user.tenant_id:
@@ -463,7 +477,7 @@ def delete_document(
 def reindex_document(
     document_id: int,
     background_tasks: BackgroundTasks,
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_source_manager),
     db: Session = Depends(get_db)
 ):
     if not current_user.tenant_id:
@@ -519,11 +533,20 @@ def get_document_chunks(
 @router.post("/search", response_model=schemas.SearchSynthesisResponse)
 def search_documents(
     query: schemas.SearchQuery,
-    current_user: models.User = Depends(get_current_user), 
+    current_user: models.User = Depends(require_query_executor), 
     db: Session = Depends(get_db)
 ):
     if not current_user.tenant_id:
         raise HTTPException(status_code=404, detail="User has no associated tenant")
+
+    # Strict Tenant Scoping: Verify any requested document_ids strictly belong to current tenant
+    if query.document_ids:
+        valid_doc_count = db.query(models.Document.id).filter(
+            models.Document.id.in_(query.document_ids),
+            models.Document.tenant_id == current_user.tenant_id
+        ).count()
+        if valid_doc_count != len(set(query.document_ids)):
+            raise HTTPException(status_code=404, detail="Document not found")
         
     try:
         global embeddings_model

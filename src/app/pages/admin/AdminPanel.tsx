@@ -16,6 +16,8 @@ import {
   RefreshCw,
   Cpu,
   Layers,
+  ShieldAlert,
+  Lock,
 } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
@@ -46,6 +48,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
+import { canAccessPlatformAdmin, formatRoleName } from "../../utils/permissions";
 
 interface AdminStatCard {
   title: string;
@@ -103,6 +106,7 @@ export function AdminPanel() {
   const navigate = useNavigate();
   const [authChecking, setAuthChecking] = useState(true);
   const [authorized, setAuthorized] = useState(false);
+  const [permissionError, setPermissionError] = useState<string | null>(null);
 
   const [stats, setStats] = useState<AdminStatsResponse | null>(null);
   const [tenants, setTenants] = useState<TenantItem[]>([]);
@@ -110,13 +114,13 @@ export function AdminPanel() {
   const [loadingData, setLoadingData] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
 
-  // 1. Role verification check
+  // 1. Role verification check with explicit platform authority check
   useEffect(() => {
     const checkAdminAccess = async () => {
       const token = localStorage.getItem("token");
       if (!token) {
-        toast.error("Please sign in as Admin to access this area");
-        navigate("/dashboard");
+        toast.error("Please sign in as Platform Administrator to access this area");
+        navigate("/login");
         return;
       }
       try {
@@ -124,18 +128,26 @@ export function AdminPanel() {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) {
-          navigate("/dashboard");
+          setPermissionError("Session expired or invalid credentials. Please sign in again.");
+          setAuthorized(false);
           return;
         }
         const user = await res.json();
-        if (user.role !== "Admin") {
-          toast.error("Admin privilege required for Platform Management");
-          navigate("/dashboard");
+        
+        // Strict platform admin authority boundary check (Sprint NR-1.1-A-T01)
+        if (!canAccessPlatformAdmin(user)) {
+          setPermissionError(
+            `Platform Administrator Privileges Required. Your account is authenticated with tenant role "${formatRoleName(user.role)}", which is restricted to organization resources and does not have platform-level governance authority.`
+          );
+          setAuthorized(false);
           return;
         }
+
         setAuthorized(true);
+        setPermissionError(null);
       } catch (err) {
-        navigate("/dashboard");
+        setPermissionError("Network connection error while validating platform administrative authority.");
+        setAuthorized(false);
       } finally {
         setAuthChecking(false);
       }
@@ -157,6 +169,15 @@ export function AdminPanel() {
         fetch(`${API_BASE_URL}/api/admin/tenants`, { headers }),
         fetch(`${API_BASE_URL}/api/analytics/admin/system-health`, { headers }),
       ]);
+
+      // Check for security policy boundary enforcement (HTTP 403 Forbidden)
+      if (statsRes.status === 403 || tenantsRes.status === 403 || healthRes.status === 403) {
+        setPermissionError(
+          "Access denied by security gateway (HTTP 403 Forbidden): Platform Administrator credentials are required to inspect multi-tenant telemetry and diagnostics."
+        );
+        toast.error("Permission denied: Platform Administrator access required");
+        return;
+      }
 
       if (statsRes.ok) {
         const statsData = await statsRes.json();
@@ -199,6 +220,61 @@ export function AdminPanel() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 text-gray-600 font-medium">
         Checking admin authorization...
+      </div>
+    );
+  }
+
+  // Graceful Permission Error Banner (Sprint NR-1.1-A-T09)
+  if (permissionError) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col justify-center items-center p-6">
+        <Card className="max-w-lg w-full shadow-lg border-red-200">
+          <CardHeader className="text-center pb-2">
+            <div className="w-14 h-14 bg-red-100 border border-red-200 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-xs">
+              <ShieldAlert className="w-8 h-8" />
+            </div>
+            <CardTitle className="text-xl font-bold text-gray-900">
+              Platform Permission Boundary
+            </CardTitle>
+            <div className="flex justify-center mt-1">
+              <Badge variant="outline" className="text-xs bg-red-50 text-red-700 border-red-200 font-semibold gap-1">
+                <Lock className="w-3 h-3" />
+                HTTP 403 Forbidden
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4 pt-2 text-center">
+            <p className="text-sm text-gray-600 leading-relaxed">
+              {permissionError}
+            </p>
+
+            <div className="p-3 bg-gray-100 rounded-lg text-left text-xs text-gray-600 border border-gray-200 space-y-1">
+              <div className="font-semibold text-gray-800">Security Policy Notice:</div>
+              <p>
+                Platform administrator control centers are strictly isolated from tenant operations. General organization administrators cannot access global cross-tenant telemetry.
+              </p>
+            </div>
+
+            <div className="pt-2 flex flex-col sm:flex-row gap-2 justify-center">
+              <Button
+                onClick={() => navigate("/dashboard")}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-medium"
+              >
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Return to Dashboard
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  localStorage.removeItem("token");
+                  navigate("/login");
+                }}
+              >
+                Sign in as Operator
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     );
   }

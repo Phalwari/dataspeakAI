@@ -8,7 +8,12 @@ import models, schemas
 
 import logging
 from database import get_db
-from dependencies import get_current_user, get_current_admin_user
+from dependencies import (
+    get_current_user,
+    get_current_admin_user,
+    require_source_manager,
+    require_query_executor,
+)
 from services.schema_profiler import profile_database_schema, get_table_profiles_for_agents
 from services.kpi_chart_engine import generate_kpis_and_chart_specs
 from services.query_builder import build_aggregated_chart_query, validate_column, quote_ident, cast_text_expr
@@ -415,7 +420,7 @@ async def _profiling_job_runner(tenant_id: int, connection_id: int):
 @router.post("/connections/{connection_id}/profile")
 async def trigger_schema_profile(
     connection_id: int,
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_source_manager),
     db: Session = Depends(get_db)
 ):
     if not current_user.tenant_id:
@@ -709,7 +714,7 @@ def execute_unified_source_query(
     source_type: str,
     source_id: int,
     query_req: schemas.DashboardQueryRequest,
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_query_executor),
     db: Session = Depends(get_db),
 ):
     """
@@ -963,7 +968,7 @@ def get_dashboard_data(
 def execute_dashboard_query(
     connection_id: int,
     req: schemas.DashboardQueryRequest,
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_query_executor),
     db: Session = Depends(get_db)
 ):
     if not current_user.tenant_id:
@@ -1317,7 +1322,7 @@ def get_supported_domains():
 def get_mapping_suggestions(
     connection_id: int,
     request: schemas.SuggestMappingRequest,
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_source_manager),
     db: Session = Depends(get_db)
 ):
     """
@@ -1345,7 +1350,7 @@ def get_mapping_suggestions(
 def apply_user_confirmed_mapping(
     connection_id: int,
     request: schemas.ApplyMappingRequest,
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_source_manager),
     db: Session = Depends(get_db)
 ):
     """
@@ -2058,7 +2063,15 @@ def get_admin_tenants(
     current_user: models.User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
-    tenants = db.query(models.Tenant).all()
+    if not getattr(current_user, "is_platform_admin", False):
+        if not current_user.tenant_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Platform administrator access required"
+            )
+        tenants = db.query(models.Tenant).filter(models.Tenant.id == current_user.tenant_id).all()
+    else:
+        tenants = db.query(models.Tenant).all()
     result = []
     for t in tenants:
         users_count = db.query(models.User).filter(models.User.tenant_id == t.id).count()
