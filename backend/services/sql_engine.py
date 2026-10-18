@@ -17,6 +17,7 @@ if backend_dir not in sys.path:
 
 import models
 from crypto import decrypt_password
+from services.connection_factory import DatabaseConnectionFactory
 from services.llm_generation_service import llm_gateway
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.pool import NullPool
@@ -43,28 +44,12 @@ class SafeExecutionResult(BaseModel):
 def get_connection_url(db_conn: models.DatabaseConnection) -> str | None:
     """
     Constructs a SQLAlchemy connection string from a DatabaseConnection model,
-    decrypting the stored password or explicit connection string.
+    delegating to DatabaseConnectionFactory for SSRF defense, sandbox enforcement,
+    and credential decryption.
     """
     if not db_conn:
         return None
-    conn_str = getattr(db_conn, "connection_string", None)
-    if conn_str:
-        raw_conn = decrypt_password(conn_str)
-        if raw_conn and str(raw_conn).startswith(("sqlite:", "postgresql:", "mysql:")):
-            return str(raw_conn)
-
-    raw_password = decrypt_password(db_conn.password)
-    if db_conn.db_type == "postgresql":
-        return f"postgresql://{db_conn.username}:{raw_password}@{db_conn.host}/{db_conn.database}"
-    elif db_conn.db_type in ("mysql", "mariadb"):
-        return f"mysql+pymysql://{db_conn.username}:{raw_password}@{db_conn.host}/{db_conn.database}"
-    elif db_conn.db_type == "sqlite":
-        path = (db_conn.database if db_conn.database else getattr(db_conn, "host", "")) or ""
-        path = str(path).strip('"\'').replace("\\", "/")
-        if path.startswith("sqlite:///"):
-            return path
-        return f"sqlite:///{path}"
-    return None
+    return DatabaseConnectionFactory.get_connection_url(db_conn)
 
 
 def sync_database_catalog(db_conn: models.DatabaseConnection, db_session) -> Optional[models.DatabaseSchema]:
@@ -306,18 +291,19 @@ def get_db_schema_context(
     return "\n".join(schema_lines)
 
 
-def validate_read_only_sql(sql_query: str) -> Tuple[bool, str]:
+def validate_read_only_sql(sql_query: str, dialect: Optional[str] = None) -> Tuple[bool, str]:
     """
-    Enforces strict read-only SELECT guardrails:
-    1. Rejects DDL / DML write keywords (INSERT, UPDATE, DELETE, DROP, ALTER, etc.).
-    2. Rejects statement chaining via semicolons to prevent stacked query injection.
-    3. Requires statement to start with SELECT or WITH (for CTEs leading to SELECT).
-    4. Rejects file writes (INTO OUTFILE/DUMPFILE), administrative calls, and copy commands.
+    Enforces strict read-only SELECT guardrails via sqlglot AST parsing:
+    1. Rejects empty queries or syntax parse failures.
+    2. Rejects multiple statements (preventing stacked queries via semicolons).
+    3. Requires root statement to be a SELECT or UNION (including CTEs).
+    4. Rejects all write expression nodes (INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, MERGE, etc.).
+    5. Rejects file writes (INTO OUTFILE/DUMPFILE, SELECT INTO) and administrative commands.
     """
     if not sql_query or not sql_query.strip():
         return False, "Query cannot be empty."
 
-    # Strip inline comments (replacing with a space to prevent token-stitching tricks)
+    # Strip inline and block comments to prevent semicolon-hiding tricks
     clean_sql = re.sub(r'--.*$', ' ', sql_query, flags=re.MULTILINE)
     clean_sql = re.sub(r'/\*.*?\*/', ' ', clean_sql, flags=re.DOTALL).strip()
 
@@ -328,20 +314,63 @@ def validate_read_only_sql(sql_query: str) -> Tuple[bool, str]:
 
     clean_sql_no_semi = clean_sql.rstrip(';').strip()
 
-    # Must begin with SELECT or WITH
-    upper_sql = clean_sql_no_semi.upper()
-    if not (upper_sql.startswith("SELECT") or upper_sql.startswith("WITH")):
-        return False, "Only read-only SELECT or WITH (CTE) queries are permitted."
+    # Parse with sqlglot
+    import sqlglot
+    from sqlglot import exp
+    from sqlglot.errors import ParseError
 
-    # Forbidden DDL / DML / Admin operations (including inside CTEs and subqueries)
-    forbidden_pattern = (
-        r'\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|RENAME|GRANT|REVOKE|'
-        r'REPLACE|EXEC|EXECUTE|SHUTDOWN|MERGE|UPSERT|ATTACH|DETACH|INTO|CALL|'
-        r'DECLARE|COPY|LOAD|OUTFILE|DUMPFILE|PRAGMA)\b'
+    dialect_clean = (dialect or "").lower()
+    glot_dialect = None
+    if "postgres" in dialect_clean:
+        glot_dialect = "postgres"
+    elif "mysql" in dialect_clean or "mariadb" in dialect_clean:
+        glot_dialect = "mysql"
+    elif "sqlite" in dialect_clean:
+        glot_dialect = "sqlite"
+
+    try:
+        statements = sqlglot.parse(clean_sql_no_semi, read=glot_dialect)
+    except ParseError as err:
+        try:
+            statements = sqlglot.parse(clean_sql_no_semi)
+        except Exception:
+            return False, f"SQL parse error: {str(err)}"
+    except Exception as e:
+        return False, f"SQL validation error: {str(e)}"
+
+    statements = [s for s in statements if s is not None]
+    if not statements:
+        return False, "Query contains no executable SQL statements."
+    if len(statements) > 1:
+        return False, "Multiple SQL statements separated by semicolons are strictly forbidden."
+
+    root_stmt = statements[0]
+
+    # Must be a Select or Union
+    if not isinstance(root_stmt, (exp.Select, exp.Union)):
+        op_label = root_stmt.key.upper() if hasattr(root_stmt, "key") else type(root_stmt).__name__.upper()
+        return False, f"Only read-only SELECT or WITH (CTE) queries are permitted. Got statement type: {op_label}."
+
+    # Check for INTO clause (e.g. SELECT ... INTO table)
+    if root_stmt.args.get("into"):
+        return False, "SELECT INTO table operations are forbidden."
+
+    # Traverse AST to ensure no write operations are present in subqueries, CTEs, or expressions
+    FORBIDDEN_EXPRESSIONS = (
+        exp.Insert,
+        exp.Update,
+        exp.Delete,
+        exp.Drop,
+        exp.Alter,
+        exp.Create,
+        exp.Merge,
+        exp.Command,
     )
-    match = re.search(forbidden_pattern, upper_sql)
-    if match:
-        return False, f"Forbidden keyword detected: '{match.group(1)}'. Read-only SELECT operations only."
+
+    for node in root_stmt.walk():
+        if isinstance(node, FORBIDDEN_EXPRESSIONS):
+            op_name = node.key.upper() if hasattr(node, "key") else type(node).__name__.upper()
+            return False, f"Forbidden write expression detected: '{op_name}'. Read-only SELECT operations only."
 
     return True, ""
 
@@ -585,7 +614,7 @@ def execute_safe_sql(
     fetch_limit = max_rows + 1
     capped_sql = f"SELECT * FROM ({clean_sql}) AS _dataspeak_bounded_q LIMIT {fetch_limit}"
 
-    connection_url = get_connection_url(db_conn)
+    connection_url = DatabaseConnectionFactory.get_connection_url(db_conn)
     if not connection_url:
         raise RuntimeError(
             f"Database connection unavailable or unsupported dialect for database "
@@ -599,7 +628,12 @@ def execute_safe_sql(
         connect_args = {"timeout": 10.0}
     elif "postgres" in db_type:
         connect_args = {"options": "-c default_transaction_read_only=on -c statement_timeout=10000"}
-    elif "mysql" in db_type or "mariadb" in db_type:
+    elif "mariadb" in db_type:
+        connect_args = {
+            "connect_timeout": 10,
+            "init_command": "SET SESSION max_statement_time=10.0"
+        }
+    elif "mysql" in db_type:
         connect_args = {
             "connect_timeout": 10,
             "init_command": "SET SESSION max_execution_time=10000"
@@ -613,17 +647,33 @@ def execute_safe_sql(
             elif "postgres" in db_type:
                 conn_handle.execute(text("SET statement_timeout = 10000;"))
                 conn_handle.execute(text("SET TRANSACTION READ ONLY;"))
-            elif "mysql" in db_type or "mariadb" in db_type:
+            elif "mariadb" in db_type:
                 conn_handle.execute(text("SET SESSION TRANSACTION READ ONLY;"))
-                conn_handle.execute(text("SET SESSION max_execution_time = 10000;"))
+                try:
+                    conn_handle.execute(text("SET SESSION max_statement_time = 10.0;"))
+                except Exception as var_err:
+                    logger.warning(f"Could not set MariaDB max_statement_time: {var_err}")
+            elif "mysql" in db_type:
+                conn_handle.execute(text("SET SESSION TRANSACTION READ ONLY;"))
+                try:
+                    conn_handle.execute(text("SET SESSION max_execution_time = 10000;"))
+                except Exception as var_err:
+                    logger.warning(f"Could not set MySQL max_execution_time: {var_err}")
         except Exception as err:
             logger.error(f"[SECURITY GUARDRAIL ERROR] Dialect guardrail failure ({db_type}): {err}")
             raise RuntimeError(f"Database security guardrail application failed: {str(err)}")
 
+    active_conn_info = {"dbapi": None, "engine": None}
+
     def _run_query_internal():
         try:
             engine = create_engine(connection_url, poolclass=NullPool, connect_args=connect_args)
+            active_conn_info["engine"] = engine
             with engine.connect() as conn:
+                try:
+                    active_conn_info["dbapi"] = conn.connection.dbapi_connection
+                except Exception:
+                    pass
                 _apply_dialect_guardrails(conn)
 
                 result = conn.execute(text(capped_sql))
@@ -654,7 +704,12 @@ def execute_safe_sql(
             # Fallback if outer subquery wrapper encounters dialect syntax limitation
             try:
                 engine = create_engine(connection_url, poolclass=NullPool, connect_args=connect_args)
+                active_conn_info["engine"] = engine
                 with engine.connect() as conn:
+                    try:
+                        active_conn_info["dbapi"] = conn.connection.dbapi_connection
+                    except Exception:
+                        pass
                     _apply_dialect_guardrails(conn)
                     m = re.search(r'\bLIMIT\s+(\d+)', clean_sql, re.IGNORECASE)
                     if m:
@@ -699,6 +754,23 @@ def execute_safe_sql(
         future = executor.submit(_run_query_internal)
         return future.result(timeout=timeout_ceiling)
     except concurrent.futures.TimeoutError:
+        raw_dbapi = active_conn_info.get("dbapi")
+        if raw_dbapi:
+            try:
+                if hasattr(raw_dbapi, "interrupt"):
+                    raw_dbapi.interrupt()
+                elif hasattr(raw_dbapi, "cancel"):
+                    raw_dbapi.cancel()
+            except Exception as cancel_err:
+                logger.warning(f"Failed to cancel timed out database connection: {cancel_err}")
+        
+        eng = active_conn_info.get("engine")
+        if eng:
+            try:
+                eng.dispose()
+            except Exception:
+                pass
+
         executor.shutdown(wait=False, cancel_futures=True)
         raise RuntimeError(
             f"Database execution timeout exceeded (10s dialect statement limit / {int(timeout_ceiling)}s watchdog for {db_type})"

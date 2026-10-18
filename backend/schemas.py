@@ -180,12 +180,16 @@ class DatabaseConnectionResponse(DatabaseConnectionBase):
     status: str
     tables_metadata: Optional[Any] = None
     created_at: Optional[datetime] = None
+    password: Optional[str] = None
     
     @model_validator(mode="after")
     def redact_credentials(self):
+        # Scrub stored passwords completely
+        self.password = None
         if self.connection_string:
-            from services.crypto_service import redact_connection_url
-            self.connection_string = redact_connection_url(self.connection_string)
+            from services.crypto_service import redact_connection_url, decrypt_secret
+            raw_url = decrypt_secret(self.connection_string) if str(self.connection_string).startswith("v1:") else self.connection_string
+            self.connection_string = redact_connection_url(raw_url)
         return self
 
     class Config:

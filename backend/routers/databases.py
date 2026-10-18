@@ -8,6 +8,7 @@ import time
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 from services.db_utils import get_connection_url, encrypt_password, decrypt_password
+from services.connection_factory import DatabaseConnectionFactory
 from services.db_pool import get_engine
 
 router = APIRouter(prefix="/api/databases", tags=["databases"])
@@ -76,9 +77,10 @@ def add_database(
     if not current_user.tenant_id:
         raise HTTPException(status_code=404, detail="User has no associated tenant")
     
-    from services.connection_factory import DatabaseConnectionFactory
     try:
-        if db_conn.db_type.lower() == "sqlite":
+        if db_conn.connection_string:
+            DatabaseConnectionFactory.validate_connection_string(db_conn.connection_string)
+        elif db_conn.db_type.lower() == "sqlite":
             if db_conn.database:
                 DatabaseConnectionFactory.validate_sqlite_path(db_conn.database)
         elif db_conn.host:
@@ -95,7 +97,7 @@ def add_database(
         username=db_conn.username,
         password=encrypt_password(db_conn.password),
         database=db_conn.database,
-        connection_string=db_conn.connection_string,
+        connection_string=encrypt_password(db_conn.connection_string) if db_conn.connection_string else None,
         description=db_conn.description,
         status="connected"
     )
@@ -135,9 +137,9 @@ def get_database_tables(
 ):
     db_conn = get_accessible_connection(db_id, current_user, db)
 
-    connection_url = get_connection_url(db_conn)
+    connection_url = DatabaseConnectionFactory.get_connection_url(db_conn)
     if not connection_url:
-        return ["users", "orders", "products", "customers"]
+        raise HTTPException(status_code=400, detail="Database connection URL is unavailable or invalid")
 
     try:
         engine = get_engine(connection_url)
@@ -158,9 +160,9 @@ def get_table_data(
 
     from services.sql_engine import execute_safe_sql
     try:
-        connection_url = get_connection_url(db_conn)
+        connection_url = DatabaseConnectionFactory.get_connection_url(db_conn)
         if not connection_url:
-            raise HTTPException(status_code=400, detail="Database connection URL is unavailable")
+            raise HTTPException(status_code=400, detail="Database connection URL is unavailable or invalid")
 
         engine = get_engine(connection_url)
         inspector = inspect(engine)
@@ -185,17 +187,9 @@ def get_database_stats(
 ):
     db_conn = get_accessible_connection(db_id, current_user, db)
 
-    connection_url = get_connection_url(db_conn)
+    connection_url = DatabaseConnectionFactory.get_connection_url(db_conn)
     if not connection_url:
-        return {
-            "table_count": 4,
-            "tables": [
-                {"name": "users", "rows": 1250, "columns": 8},
-                {"name": "orders", "rows": 5420, "columns": 12},
-                {"name": "products", "rows": 850, "columns": 6},
-                {"name": "customers", "rows": 1100, "columns": 10},
-            ]
-        }
+        raise HTTPException(status_code=400, detail="Database connection URL is unavailable or invalid")
 
     try:
         engine = get_engine(connection_url)
@@ -229,9 +223,9 @@ def get_table_stats(
 ):
     db_conn = get_accessible_connection(db_id, current_user, db)
 
-    connection_url = get_connection_url(db_conn)
+    connection_url = DatabaseConnectionFactory.get_connection_url(db_conn)
     if not connection_url:
-        return {"rows": 0, "columns": 0}
+        raise HTTPException(status_code=400, detail="Database connection URL is unavailable or invalid")
 
     try:
         engine = get_engine(connection_url)
@@ -262,8 +256,6 @@ def test_database_connection(
     if not current_user.tenant_id:
         raise HTTPException(status_code=404, detail="User has no associated tenant")
         
-    from services.connection_factory import DatabaseConnectionFactory
-    
     success, error_msg = DatabaseConnectionFactory.test_connection(
         db_type=db_conn.db_type,
         host=db_conn.host,
@@ -271,6 +263,7 @@ def test_database_connection(
         database=db_conn.database,
         username=db_conn.username,
         password=db_conn.password,
+        connection_string=db_conn.connection_string,
     )
     if not success:
         raise HTTPException(status_code=400, detail=error_msg or "Connection test failed")

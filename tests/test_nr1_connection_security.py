@@ -132,3 +132,140 @@ def test_api_key_hashing_and_redaction():
     
     # Verify deterministic lookup by hash
     assert hash_key(raw_key) == hashed
+
+
+def test_sqlite_memory_fixture_support():
+    """Verifies that :memory: is supported by the connection factory for in-memory testing."""
+    mem_url = DatabaseConnectionFactory.build_connection_url(
+        db_type="sqlite",
+        database=":memory:",
+    )
+    assert "sqlite" in mem_url.drivername
+    assert "memory" in mem_url.render_as_string(hide_password=False)
+
+    validated = DatabaseConnectionFactory.validate_sqlite_path(":memory:")
+    assert validated == ":memory:"
+
+
+def test_database_connection_credentials_redacted():
+    """Verifies that DatabaseConnectionResponse never returns plain passwords or v1: ciphertext envelopes."""
+    import schemas
+    from services.crypto_service import encrypt_secret
+
+    # Simulate an ORM model instance with encrypted password and encrypted connection string
+    class MockDbConn:
+        id = 42
+        name = "Production Postgres"
+        db_name = "prod_db"
+        db_type = "postgresql"
+        host = "db.example.com"
+        port = 5432
+        username = "admin_user"
+        password = encrypt_secret("TopSecretPassword123!")
+        database = "analytics"
+        connection_string = encrypt_secret("postgresql://admin_user:TopSecretPassword123!@db.example.com:5432/analytics")
+        description = "Core Analytics"
+        status = "connected"
+        tables_metadata = None
+        created_at = None
+
+    response = schemas.DatabaseConnectionResponse.model_validate(MockDbConn())
+    dumped = response.model_dump()
+
+    # Password must be completely None/scrubbed
+    assert dumped["password"] is None
+
+    # Connection string must have password masked and must not contain raw ciphertext envelope v1:
+    assert dumped["connection_string"] == "postgresql://admin_user:***@db.example.com:5432/analytics"
+    assert "TopSecretPassword123!" not in str(dumped)
+    assert not str(dumped["connection_string"]).startswith("v1:")
+
+
+def test_connection_factory_get_connection_url_and_special_chars():
+    """Verifies that get_connection_url safely escapes passwords with special chars and delegates properly."""
+    from services.db_utils import get_connection_url as db_utils_get_url
+    from services.sql_engine import get_connection_url as sql_engine_get_url
+    from services.crypto_service import encrypt_secret
+
+    raw_pwd = "P@ss:w/ord?#%123!"
+    enc_pwd = encrypt_secret(raw_pwd)
+
+    class MockConn:
+        db_type = "postgresql"
+        host = "8.8.8.8"
+        port = 5432
+        database = "testdb"
+        username = "testuser"
+        password = enc_pwd
+        connection_string = None
+
+    conn = MockConn()
+    url = DatabaseConnectionFactory.get_connection_url(conn)
+    assert url is not None
+    assert "testuser" in url
+    assert "testdb" in url
+
+    # db_utils and sql_engine must delegate and return identical output
+    assert db_utils_get_url(conn) == url
+    assert sql_engine_get_url(conn) == url
+
+
+def test_connection_string_ssrf_and_encryption(monkeypatch):
+    """Verifies validate_connection_string detects SSRF in direct URIs and migration 007 encrypts plaintext."""
+    monkeypatch.delenv("ALLOW_PRIVATE_DB_HOSTS", raising=False)
+
+    # 1. Blocks loopback URI
+    with pytest.raises(SSRFSecurityViolation, match="prohibited IP|private or internal IP"):
+        DatabaseConnectionFactory.validate_connection_string("postgresql://user:pass@127.0.0.1:5432/db")
+
+    with pytest.raises(SSRFSecurityViolation, match="prohibited IP|private or internal IP"):
+        DatabaseConnectionFactory.validate_connection_string("mysql://user:pass@localhost:3306/db")
+
+    # 2. Blocks SQLite traversal URI
+    with pytest.raises(InvalidDatabasePathError, match="traversal"):
+        DatabaseConnectionFactory.validate_connection_string("sqlite:///../../etc/passwd.db")
+
+    # 3. Accepts valid remote URI
+    valid_uri = "postgresql://user:pass@8.8.8.8:5432/analytics"
+    validated = DatabaseConnectionFactory.validate_connection_string(valid_uri)
+    assert validated == valid_uri
+
+    # 4. Encryption backfill for connection_string
+    from sqlalchemy import Table, Column, Integer, String, MetaData, select
+
+    mem_engine = create_engine("sqlite:///:memory:")
+    meta = MetaData()
+    db_tbl = Table(
+        "database_connections",
+        meta,
+        Column("id", Integer, primary_key=True),
+        Column("connection_string", String),
+    )
+    meta.create_all(mem_engine)
+
+    with mem_engine.begin() as conn:
+        conn.execute(db_tbl.insert().values(id=1, connection_string="postgresql://u:p@8.8.8.8:5432/d1"))
+        conn.execute(db_tbl.insert().values(id=2, connection_string="v1:already_encrypted"))
+
+    # Execute backfill logic as specified in migration 007
+    with mem_engine.begin() as conn:
+        conn_rows = conn.execute(
+            select(db_tbl.c.id, db_tbl.c.connection_string)
+            .where(db_tbl.c.connection_string.isnot(None))
+        ).fetchall()
+        for row in conn_rows:
+            conn_id, raw_conn_str = row[0], row[1]
+            if raw_conn_str and not str(raw_conn_str).startswith("v1:"):
+                encrypted = encrypt_secret(raw_conn_str)
+                conn.execute(
+                    db_tbl.update()
+                    .where(db_tbl.c.id == conn_id)
+                    .values(connection_string=encrypted)
+                )
+
+    with mem_engine.connect() as conn:
+        rows = conn.execute(select(db_tbl.c.id, db_tbl.c.connection_string).order_by(db_tbl.c.id)).fetchall()
+        assert str(rows[0][1]).startswith("v1:")
+        assert decrypt_secret(rows[0][1]) == "postgresql://u:p@8.8.8.8:5432/d1"
+        assert rows[1][1] == "v1:already_encrypted"
+

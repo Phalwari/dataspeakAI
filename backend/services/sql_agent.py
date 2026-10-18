@@ -17,6 +17,7 @@ from sqlalchemy import text, inspect, create_engine
 from sqlalchemy.pool import NullPool
 
 import models
+from services.connection_factory import DatabaseConnectionFactory
 from services.llm_generation_service import llm_gateway
 from services.sql_engine import (
     get_db_schema_context,
@@ -81,7 +82,7 @@ class SQLAgent:
                 logger.debug(f"SchemaRegistry lookup note: {e}")
 
         # 3. Live reflection fallback
-        conn_url = get_connection_url(db_conn)
+        conn_url = DatabaseConnectionFactory.get_connection_url(db_conn)
         if conn_url:
             try:
                 engine = create_engine(conn_url, poolclass=NullPool)
@@ -221,7 +222,7 @@ class SQLAgent:
             except Exception as parse_err:
                 return False, f"Dry-run table validation failed: {parse_err}"
 
-        conn_url = get_connection_url(db_conn)
+        conn_url = DatabaseConnectionFactory.get_connection_url(db_conn)
         if not conn_url:
             return True, None
 

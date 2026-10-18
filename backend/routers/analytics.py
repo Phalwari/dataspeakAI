@@ -19,6 +19,7 @@ from services.kpi_chart_engine import generate_kpis_and_chart_specs
 from services.query_builder import build_aggregated_chart_query, validate_column, quote_ident, cast_text_expr
 from services.cache_service import cache_service
 from services.db_utils import get_connection_url
+from services.connection_factory import DatabaseConnectionFactory
 from services.db_pool import get_engine
 from services.ai_insights_service import generate_ai_insights_from_stats
 from services.dashboard_agents import generate_dashboard_via_agents

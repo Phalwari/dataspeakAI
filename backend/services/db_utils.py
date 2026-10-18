@@ -18,17 +18,5 @@ def decrypt_password(enc_pwd: str) -> str:
 def get_connection_url(db_conn: models.DatabaseConnection) -> str | None:
     if not db_conn:
         return None
-    try:
-        url = DatabaseConnectionFactory.build_connection_url(
-            db_type=db_conn.db_type,
-            host=db_conn.host,
-            port=db_conn.port,
-            database=db_conn.database,
-            username=db_conn.username,
-            password=db_conn.password,
-        )
-        return url.render_as_string(hide_password=False)
-    except Exception:
-        # Fallback for unconfigured or custom endpoints
-        return None
+    return DatabaseConnectionFactory.get_connection_url(db_conn)
 

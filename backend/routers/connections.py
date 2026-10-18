@@ -15,6 +15,7 @@ import models, schemas
 from database import get_db, SessionLocal
 from dependencies import get_current_user
 from services.db_utils import encrypt_password, decrypt_password, get_connection_url
+from services.connection_factory import DatabaseConnectionFactory
 from services.db_pool import get_engine
 from services.database_connection_service import db_connection_service
 
@@ -146,7 +147,7 @@ def get_connection_tables(
         except Exception:
             pass
 
-    conn_url = get_connection_url(c)
+    conn_url = DatabaseConnectionFactory.get_connection_url(c)
     if not conn_url:
         return []
 

@@ -14,8 +14,9 @@ import schemas
 from database import get_db
 from dependencies import get_current_user, require_query_executor
 from services.query_router import classify_query_route, auto_select_database
+from services.connection_factory import DatabaseConnectionFactory
 from services.sql_engine import (
-    get_connection_url, get_db_schema_context, generate_sql_from_nl,
+    get_db_schema_context, generate_sql_from_nl,
     execute_safe_sql
 )
 from search.bm25_index import BM25IndexManager

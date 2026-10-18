@@ -32,6 +32,8 @@ export function ApiKeysPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [newGeneratedKey, setNewGeneratedKey] = useState<string | null>(null);
+  const [copiedNewKey, setCopiedNewKey] = useState(false);
 
   const fetchApiKeys = async () => {
     const token = localStorage.getItem("token");
@@ -71,7 +73,8 @@ export function ApiKeysPage() {
       });
 
       if (response.ok) {
-        setIsDialogOpen(false);
+        const data = await response.json();
+        setNewGeneratedKey(data.key);
         setName("");
         setDescription("");
         fetchApiKeys();
@@ -154,58 +157,137 @@ export function ApiKeysPage() {
           </p>
         </div>
 
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <Dialog
+          open={isDialogOpen}
+          onOpenChange={(open) => {
+            setIsDialogOpen(open);
+            if (!open) {
+              setNewGeneratedKey(null);
+              setCopiedNewKey(false);
+            }
+          }}
+        >
           <DialogTrigger asChild>
             <Button className="gap-2">
               <Plus className="w-4 h-4" />
               Generate API Key
             </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[500px]">
-            <DialogHeader>
-              <DialogTitle>Generate New API Key</DialogTitle>
-              <DialogDescription>
-                Create a new API key to integrate with your applications
-              </DialogDescription>
-            </DialogHeader>
+          <DialogContent className="sm:max-w-[520px]">
+            {newGeneratedKey ? (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="text-green-700 flex items-center gap-2">
+                    <Check className="w-5 h-5 text-green-600" />
+                    API Key Generated Successfully
+                  </DialogTitle>
+                  <DialogDescription>
+                    Please copy your new API key now. For your security, this key will <strong>never be shown again</strong>.
+                  </DialogDescription>
+                </DialogHeader>
 
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label htmlFor="key-name">Key Name</Label>
-                <Input
-                  id="key-name"
-                  placeholder="e.g., Production Key"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                />
-              </div>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="generated-key">Your Secret API Key</Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="generated-key"
+                        readOnly
+                        value={newGeneratedKey}
+                        className="font-mono text-sm bg-gray-50 select-all"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="gap-1.5 shrink-0"
+                        onClick={() => {
+                          navigator.clipboard.writeText(newGeneratedKey);
+                          setCopiedNewKey(true);
+                          setTimeout(() => setCopiedNewKey(false), 3000);
+                        }}
+                      >
+                        {copiedNewKey ? (
+                          <>
+                            <Check className="w-4 h-4 text-green-600" />
+                            Copied
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-4 h-4" />
+                            Copy
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="key-description">Description (Optional)</Label>
-                <Input
-                  id="key-description"
-                  placeholder="What will this key be used for?"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                />
-              </div>
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                    <p className="text-sm text-amber-800">
+                      <strong>Warning:</strong> You will not be able to view this key again after closing this dialog. If you lose this key, you will need to revoke it and generate a new one.
+                    </p>
+                  </div>
+                </div>
 
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <p className="text-sm text-blue-800">
-                  <strong>Important:</strong> Your API key will only be shown once.
-                  Make sure to copy and store it securely.
-                </p>
-              </div>
-            </div>
+                <DialogFooter>
+                  <Button
+                    onClick={() => {
+                      setNewGeneratedKey(null);
+                      setCopiedNewKey(false);
+                      setIsDialogOpen(false);
+                    }}
+                  >
+                    I Have Saved My Key
+                  </Button>
+                </DialogFooter>
+              </>
+            ) : (
+              <>
+                <DialogHeader>
+                  <DialogTitle>Generate New API Key</DialogTitle>
+                  <DialogDescription>
+                    Create a new API key to integrate with your applications
+                  </DialogDescription>
+                </DialogHeader>
 
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleGenerateKey} disabled={!name}>
-                Generate Key
-              </Button>
-            </DialogFooter>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="key-name">Key Name</Label>
+                    <Input
+                      id="key-name"
+                      placeholder="e.g., Production Key"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="key-description">Description (Optional)</Label>
+                    <Input
+                      id="key-description"
+                      placeholder="What will this key be used for?"
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <p className="text-sm text-blue-800">
+                      <strong>Important:</strong> Your API key will only be shown once immediately upon creation.
+                      Make sure to copy and store it securely.
+                    </p>
+                  </div>
+                </div>
+
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button onClick={handleGenerateKey} disabled={!name}>
+                    Generate Key
+                  </Button>
+                </DialogFooter>
+              </>
+            )}
           </DialogContent>
         </Dialog>
       </div>

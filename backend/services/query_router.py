@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.pool import NullPool
 import models
+from services.connection_factory import DatabaseConnectionFactory
 from services.sql_engine import get_connection_url
 
 SQL_KEYWORDS = {
@@ -63,7 +64,7 @@ def auto_select_database(query: str, tenant_id: int, db: Session) -> Optional[mo
     best_score = 0
 
     for conn in connections:
-        conn_url = get_connection_url(conn)
+        conn_url = DatabaseConnectionFactory.get_connection_url(conn)
         if not conn_url:
             continue
         try:
@@ -145,7 +146,7 @@ def classify_query_route(
     # Check if query matches table names in tenant databases
     selected_db = auto_select_database(query, tenant_id, db)
     if selected_db:
-        conn_url = get_connection_url(selected_db)
+        conn_url = DatabaseConnectionFactory.get_connection_url(selected_db)
         if conn_url:
             try:
                 engine = create_engine(conn_url, poolclass=NullPool)
