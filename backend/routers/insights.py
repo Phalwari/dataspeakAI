@@ -432,10 +432,13 @@ def export_insights(
         key_metrics = insights_data["business_summary"].get("key_metrics", [])
 
     for m in key_metrics:
+        metric_value = m.get("value")
+        if m.get("status") in ("unavailable", "error") or metric_value is None:
+            metric_value = "N/A"
         metrics_html += f"""
         <div class="metric-card">
             <div class="metric-title">{esc(m.get('label', 'Metric'))}</div>
-            <div class="metric-value">{esc(m.get('value', 'N/A'))}</div>
+            <div class="metric-value">{esc(metric_value)}</div>
             <div class="metric-desc">{esc(m.get('description', ''))}</div>
         </div>
         """
