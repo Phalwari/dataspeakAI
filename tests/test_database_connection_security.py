@@ -79,6 +79,21 @@ def test_sqlite_path_sandbox_rejects_traversal(monkeypatch, tmp_path):
         DatabaseConnectionFactory.validate_sqlite_path("../outside.db")
 
 
+def test_direct_sqlite_service_paths_enforce_sandbox(monkeypatch, tmp_path):
+    import sqlite3
+
+    monkeypatch.setattr(connection_factory, "DEFAULT_SQLITE_ROOT", tmp_path / "managed")
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setattr(sqlite3, "connect", lambda *_args, **_kwargs: pytest.fail("sandboxed path reached SQLite"))
+
+    assert DatabaseConnectionService.test_sqlite("../outside.db")[0] is False
+    assert "error" in DatabaseConnectionService.get_sqlite_schema("../outside.db")
+    assert "error" in DatabaseConnectionService.get_tables("sqlite", database="../outside.db")[0]
+    assert "error" in DatabaseConnectionService.preview_table(
+        "sqlite", database="../outside.db", table_name="orders"
+    )
+
+
 def test_sqlite_connection_lists_tables_and_rejects_writes(monkeypatch, tmp_path):
     import sqlite3
 

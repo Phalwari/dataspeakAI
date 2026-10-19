@@ -141,6 +141,26 @@ class DatabaseConnectionService:
     """Handles all database connection operations"""
 
     @staticmethod
+    def _validate_connection_target(
+        db_type: str,
+        host: Optional[str] = None,
+        port: Optional[int] = None,
+        database: Optional[str] = None,
+        connection_string: Optional[str] = None,
+    ):
+        """Apply shared SSRF and SQLite sandbox checks before direct-driver access."""
+        from services.connection_factory import DatabaseConnectionFactory
+
+        dialect = (db_type or "").strip().lower()
+        if connection_string:
+            return DatabaseConnectionFactory.validate_connection_string(connection_string)
+        if dialect == "sqlite":
+            return DatabaseConnectionFactory.validate_sqlite_path(database or host or "")
+        if dialect in {"postgresql", "mysql", "mariadb", "mongodb"}:
+            return DatabaseConnectionFactory.validate_host_ssrf(host, port)
+        raise ValueError("Unsupported database type.")
+
+    @staticmethod
     def _validate_table_name(table_name: str) -> str:
         if not table_name or not re.match(r'^[A-Za-z0-9_]+$', table_name):
             raise ValueError(f"Invalid table name: {table_name}")
@@ -272,6 +292,7 @@ class DatabaseConnectionService:
     def test_postgresql(host: Optional[str] = None, port: Optional[int] = 5432, username: Optional[str] = None, password: Optional[str] = None, database: Optional[str] = "postgres", connection_string: Optional[str] = None) -> Tuple[bool, str]:
         """Test PostgreSQL connection"""
         try:
+            DatabaseConnectionService._validate_connection_target("postgresql", host, port, database, connection_string)
             if connection_string:
                 conn = psycopg2.connect(connection_string, connect_timeout=20)
             elif host and username and password:
@@ -305,6 +326,7 @@ class DatabaseConnectionService:
     def test_mongodb(connection_string: str) -> Tuple[bool, str]:
         """Test MongoDB connection — creates a disposable client so the shared pool is not closed."""
         try:
+            DatabaseConnectionService._validate_connection_target("mongodb", connection_string=connection_string)
             # Create a fresh temporary client just for the ping test.
             # Do NOT reuse the pooled client (get_mongo_client) and then close it
             # as that would destroy PyMongo's internal connection pool.
@@ -319,6 +341,7 @@ class DatabaseConnectionService:
     def test_mysql(host: str, port: int, username: str, password: str, database: Optional[str] = None) -> Tuple[bool, str]:
         """Test MySQL/MariaDB connection"""
         try:
+            DatabaseConnectionService._validate_connection_target("mysql", host, port, database)
             conn = pymysql.connect(
                 host=host,
                 port=port,
@@ -336,7 +359,7 @@ class DatabaseConnectionService:
         """Test SQLite connection"""
         try:
             import os
-            db_path = (database_path or "").strip().strip('"\'')
+            db_path = DatabaseConnectionService._validate_connection_target("sqlite", database=database_path)
             if not db_path:
                 return False, "SQLite file path is empty"
             if not os.path.exists(db_path):
@@ -351,6 +374,7 @@ class DatabaseConnectionService:
     def get_postgresql_schema(host: Optional[str] = None, port: Optional[int] = 5432, username: Optional[str] = None, password: Optional[str] = None, database: Optional[str] = "postgres", connection_string: Optional[str] = None) -> Dict[str, Any]:
         """Fetch PostgreSQL schema information"""
         try:
+            DatabaseConnectionService._validate_connection_target("postgresql", host, port, database, connection_string)
             if connection_string:
                 conn = psycopg2.connect(connection_string, connect_timeout=20)
             else:
@@ -423,6 +447,7 @@ class DatabaseConnectionService:
     def get_mongodb_schema(connection_string: Optional[str] = None) -> Dict[str, Any]:
         """Fetch MongoDB schema — collections mapped to their fields and row count."""
         try:
+            DatabaseConnectionService._validate_connection_target("mongodb", connection_string=connection_string)
             client = pymongo.MongoClient(connection_string, serverSelectionTimeoutMS=5000)
             schema = {}
 
@@ -464,6 +489,7 @@ class DatabaseConnectionService:
     def get_mysql_schema(host: Optional[str] = "localhost", port: Optional[int] = 3306, username: Optional[str] = "", password: Optional[str] = "", database: Optional[str] = "") -> Dict[str, Any]:
         """Fetch MySQL schema information"""
         try:
+            DatabaseConnectionService._validate_connection_target("mysql", host, port, database)
             conn = pymysql.connect(
                 host=host or "localhost",
                 port=port or 3306,
@@ -494,7 +520,7 @@ class DatabaseConnectionService:
     def get_sqlite_schema(database_path: str) -> Dict[str, Any]:
         """Fetch SQLite schema information"""
         try:
-            db_path = database_path.strip('"').strip("'")
+            db_path = DatabaseConnectionService._validate_connection_target("sqlite", database=database_path)
             conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
             
@@ -523,6 +549,15 @@ class DatabaseConnectionService:
         """Fetch list of tables and their row counts"""
         tables_info = []
         try:
+            validated_path = None
+            if db_type.lower() == "sqlite":
+                validated_path = DatabaseConnectionService._validate_connection_target(
+                    db_type, host, port, database, connection_string
+                )
+            else:
+                DatabaseConnectionService._validate_connection_target(
+                    db_type, host, port, database, connection_string
+                )
             if db_type.lower() == "postgresql":
                 conn = psycopg2.connect(host=host, port=port, user=username, password=password, database=database or "postgres")
                 cursor = conn.cursor()
@@ -563,8 +598,7 @@ class DatabaseConnectionService:
                         tables_info.append({"name": c, "rows": count})
                 client.close()
             elif db_type.lower() == "sqlite":
-                db_path = (database or host or "").strip('"\'')
-                conn = sqlite3.connect(db_path)
+                conn = sqlite3.connect(validated_path)
                 cursor = conn.cursor()
                 cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
                 tables = [row[0] for row in cursor.fetchall()]
@@ -589,6 +623,15 @@ class DatabaseConnectionService:
     def preview_table(db_type: str, host: Optional[str] = None, port: Optional[int] = None, username: Optional[str] = None, password: Optional[str] = None, database: Optional[str] = None, connection_string: Optional[str] = None, table_name: Optional[str] = None, limit: int = 50, filter_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Fetch preview data for a specific table"""
         try:
+            validated_path = None
+            if db_type.lower() == "sqlite":
+                validated_path = DatabaseConnectionService._validate_connection_target(
+                    db_type, host, port, database, connection_string
+                )
+            else:
+                DatabaseConnectionService._validate_connection_target(
+                    db_type, host, port, database, connection_string
+                )
             safe_table_name = DatabaseConnectionService._validate_table_name(table_name or "")
             where_clause = ""
             params = []
@@ -693,8 +736,7 @@ class DatabaseConnectionService:
                 client.close()
                 return {"columns": columns, "rows": rows}
             elif db_type.lower() == "sqlite":
-                db_path = (database or host or "").strip('"\'')
-                conn = sqlite3.connect(db_path)
+                conn = sqlite3.connect(validated_path)
                 cursor = conn.cursor()
                 query = f'SELECT * FROM "{safe_table_name}" {where_clause} LIMIT ?'
                 cursor.execute(query, tuple(params + [limit]))
