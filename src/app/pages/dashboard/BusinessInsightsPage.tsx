@@ -22,6 +22,13 @@ const API_URL = `${API_BASE_URL}/api`;
 // Curated vibrant enterprise chart palette
 const PALETTE = ['#6c47ff', '#00c2cb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#3b82f6', '#ec4899'];
 const KPI_ACCENTS = ['#6c47ff', '#00c2cb', '#10b981', '#f59e0b', '#8b5cf6', '#3b82f6'];
+const KPI_REASON_LABELS: Record<string, string> = {
+  missing_role: 'Required column missing',
+  missing_table: 'Source table unavailable',
+  query_failed: 'Database query failed',
+  no_rows: 'No rows found',
+  date_filter_unavailable: 'Date-filtered value unavailable',
+};
 const IMPACT_COLORS = { High: '#dc2626', Medium: '#d97706', Low: '#059669' };
 const PRESETS = [
   ['all', 'All time', null],
@@ -44,7 +51,7 @@ const DB_PIPELINE_LAYERS = [
 function useCount(value: any) {
   const [out, setOut] = useState(String(value ?? '—'));
   useEffect(() => {
-    const str = String(value ?? '');
+    const str = String(value ?? '—');
     const m = str.match(/^([^\d-]*)(-?[\d,]*\.?\d+)(.*)$/);
     if (!m) { setOut(str); return undefined; }
     const [, pre, num, suf] = m;
@@ -466,7 +473,7 @@ export function BusinessInsightsPage() {
     return result;
   }, [rawCharts, activeTable, preset, hasTimeSeriesData]);
 
-  // 2. DYNAMICALLY RECALCULATE KPIS: Changes values when Horizon or Table scope changes!
+  // Date presets slice chart points; the API has not supplied date-filtered KPI values.
   const kpis = useMemo(() => {
     let result = baseKpis;
 
@@ -476,55 +483,19 @@ export function BusinessInsightsPage() {
       if (tableMatches.length > 0) result = tableMatches;
     }
 
-    // Recalculate KPI numbers when Horizon preset changes!
-    if (preset !== 'all' && hasTimeSeriesData) {
-      const allTimeData = rawCharts.find((c: any) => c.type === 'line' || c.type === 'area')?.data || [];
-      if (allTimeData.length > 0) {
-        const allSum = allTimeData.reduce((acc: number, d: any) => acc + Number(d.value || 0), 0);
-        const count = preset === '7d' ? 1 : preset === '30d' ? 2 : 4;
-        const sliced = allTimeData.slice(-Math.min(allTimeData.length, count));
-        const slicedSum = sliced.reduce((acc: number, d: any) => acc + Number(d.value || 0), 0);
-        const ratio = allSum > 0 ? slicedSum / allSum : (preset === '7d' ? 0.08 : preset === '30d' ? 0.22 : 0.5);
-        const periodText = preset === '7d' ? 'last 7 days' : preset === '30d' ? 'last 30 days' : 'last 90 days';
-
-        result = result.map((k: any) => {
-          const labelLower = (k.label || '').toLowerCase();
-          // Monetary metric (Revenue, Sales, Spend):
-          if (labelLower.includes('revenue') || labelLower.includes('sales') || labelLower.includes('spend')) {
-            const valNum = slicedSum > 0 ? slicedSum : (k.raw_value ? k.raw_value * ratio : 2328.6 * ratio);
-            return {
-              ...k,
-              value: `$${valNum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-              trend_text: `in ${periodText}`
-            };
-          }
-          // Volume metric (Orders, Units, Tracks, Documents, Inspections, Records):
-          if (labelLower.includes('order') || labelLower.includes('volume') || labelLower.includes('track') || labelLower.includes('unit') || labelLower.includes('document') || labelLower.includes('inspection') || labelLower.includes('record')) {
-            const baseNum = typeof k.raw_value === 'number' ? k.raw_value : parseFloat(String(k.value).replace(/[^0-9.]/g, '')) || 100;
-            const newVol = Math.max(1, Math.round(baseNum * ratio));
-            return {
-              ...k,
-              value: newVol.toLocaleString(),
-              trend_text: `in ${periodText}`
-            };
-          }
-          // Customer metric:
-          if (labelLower.includes('customer') || labelLower.includes('user') || labelLower.includes('account')) {
-            const baseNum = typeof k.raw_value === 'number' ? k.raw_value : parseFloat(String(k.value).replace(/[^0-9.]/g, '')) || 59;
-            const newCust = Math.max(1, Math.round(baseNum * Math.min(1, ratio * 2.2)));
-            return {
-              ...k,
-              value: newCust.toLocaleString(),
-              trend_text: `active in ${periodText}`
-            };
-          }
-          // Default:
-          return {
-            ...k,
-            trend_text: `in ${periodText}`
-          };
-        });
-      }
+    if (preset !== 'all') {
+      result = result.map((k: any) => {
+        const existingFailure = k.status === 'unavailable' || k.status === 'error';
+        return {
+          ...k,
+          value: null,
+          raw_value: null,
+          status: k.status === 'error' ? 'error' : 'unavailable',
+          reason: existingFailure ? (k.reason || 'date_filter_unavailable') : 'date_filter_unavailable',
+          trend_text: undefined,
+          trend_pct: null,
+        };
+      });
     }
 
     if (selectedDimensionFilter) {
@@ -535,7 +506,7 @@ export function BusinessInsightsPage() {
     }
 
     return result;
-  }, [baseKpis, activeTable, preset, hasTimeSeriesData, rawCharts, selectedDimensionFilter]);
+  }, [baseKpis, activeTable, preset, selectedDimensionFilter]);
 
   // Dynamically derive Period Comparison from Time-Series Chart data & KPIs
   const timeSeriesChart = charts.find((c: any) => c.type === 'line' || c.type === 'area') || charts[0];
@@ -590,9 +561,12 @@ export function BusinessInsightsPage() {
     if (rows.length < 4 && kpis && kpis.length > 0) {
       kpis.forEach((k: any) => {
         if (rows.length < 4 && !rows.find((r: any) => r.metric.toLowerCase().includes(k.label.toLowerCase()))) {
-          const numVal = parseFloat(String(k.value).replace(/[^0-9.-]/g, '')) || 0;
-          const trendPct = typeof k.trend_pct === 'number' ? k.trend_pct : 4.8;
-          const prevVal = trendPct !== -100 ? numVal / (1 + trendPct / 100) : numVal;
+          if (k.status === 'unavailable' || k.status === 'error' || k.value == null) return;
+          const numVal = k.raw_value;
+          const trendPct = k.trend_pct;
+          if (typeof numVal !== 'number' || !Number.isFinite(numVal) ||
+              typeof trendPct !== 'number' || !Number.isFinite(trendPct) || trendPct === -100) return;
+          const prevVal = numVal / (1 + trendPct / 100);
           rows.push({
             metric: k.label,
             current: numVal,
@@ -1266,6 +1240,8 @@ export function BusinessInsightsPage() {
                 const accentColor = KPI_ACCENTS[idx % KPI_ACCENTS.length];
                 const isUp = kpi.trend_direction === 'up';
                 const isDown = kpi.trend_direction === 'down';
+                const unavailable = kpi.status === 'unavailable' || kpi.status === 'error' || kpi.value == null;
+                const reasonLabel = KPI_REASON_LABELS[kpi.reason] || 'Metric unavailable';
 
                 // Find matching sparkline dataset from charts
                 const matchingChart = charts.find((c: any) => c.table === kpi.table && Array.isArray(c.data) && c.data.length > 2) || timeSeriesChart;
@@ -1287,13 +1263,13 @@ export function BusinessInsightsPage() {
                     </div>
 
                     <div style={{ fontSize: '28px', fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--text-primary)', marginBottom: '6px' }}>
-                      <AnimatedCount value={kpi.value} />
+                      <AnimatedCount value={unavailable ? '—' : kpi.value} />
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11.5px' }}>
-                      <span style={{ color: isUp ? '#10b981' : isDown ? '#ef4444' : 'var(--text-secondary)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                        {isUp ? <TrendingUp size={13} /> : isDown ? <TrendingDown size={13} /> : <Minus size={13} />}
-                        {kpi.trend_text || (kpi.trend_pct != null ? `${Math.abs(kpi.trend_pct)}% vs baseline` : 'vs baseline')}
+                      <span style={{ color: unavailable ? '#b45309' : isUp ? '#10b981' : isDown ? '#ef4444' : 'var(--text-secondary)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        {unavailable ? <AlertCircle size={13} /> : isUp ? <TrendingUp size={13} /> : isDown ? <TrendingDown size={13} /> : <Minus size={13} />}
+                        {unavailable ? reasonLabel : kpi.trend_text || (kpi.trend_pct != null ? `${Math.abs(kpi.trend_pct)}% vs baseline` : 'All-time value')}
                       </span>
                       <span style={{ color: 'var(--text-secondary)', fontSize: '11px', fontWeight: 500 }}>
                         {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
