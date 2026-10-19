@@ -155,7 +155,7 @@ def sync_database_catalog(db_conn: models.DatabaseConnection, db_session) -> Opt
         return db_schema
     except Exception as err:
         db_session.rollback()
-        print(f"[CATALOG SYNC] Failed to sync schema catalog for {db_conn.name}: {err}")
+        logger.error("Failed to sync database schema catalog (%s)", type(err).__name__)
         return None
 
 
@@ -252,12 +252,12 @@ def get_db_schema_context(
                 try:
                     sync_database_catalog(db_conn, db_session)
                 except Exception as sync_err:
-                    print(f"[CATALOG SYNC] Opportunistic sync note: {sync_err}")
+                    logger.error("Opportunistic database catalog sync failed (%s)", type(sync_err).__name__)
 
             return "\n".join(schema_lines)
         except Exception as err:
             # Inspection fallback if physical DB connection fails
-            print(f"Database introspection warning for {db_conn.name}: {err}")
+            logger.error("Database introspection failed (%s)", type(err).__name__)
 
     # Fallback simulated schema for demo / non-relational / unreachable DBs
     simulated_tables = {
@@ -511,7 +511,7 @@ def generate_sql_from_nl(
             conversation_history=conversation_history
         )
     except Exception as agent_err:
-        logger.error(f"[SQL Engine] SQLAgent run failed, using standard fallback: {agent_err}")
+        logger.error("SQLAgent failed; using standard fallback (%s)", type(agent_err).__name__)
         schema_ctx = get_db_schema_context(db_conn, db_session, allowed_tables=allowed_tables)
         fallback_table = "users"
         if allowed_tables:
@@ -760,14 +760,17 @@ def execute_safe_sql(
             except Exception as e:
                 raise RuntimeError(f"Database execution error: {str(sqle)}")
         except Exception as e:
-            raise RuntimeError(f"Execution error: {str(e)}")
+            logger.error("Read-only SQL execution failed (%s)", type(e).__name__)
+            raise RuntimeError("Database execution failed") from None
 
     # Execute query within strict fail-safe execution watchdog
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     try:
-        future = executor.submit(_run_query_internal)
+        future = _SQL_EXECUTOR.submit(_run_query_internal)
         return future.result(timeout=timeout_ceiling)
     except concurrent.futures.TimeoutError:
+        # If this task has not acquired a worker yet, keep it from running after
+        # the HTTP request has already timed out.
+        future.cancel()
         raw_dbapi = active_conn_info.get("dbapi")
         if raw_dbapi:
             try:
@@ -776,7 +779,7 @@ def execute_safe_sql(
                 elif hasattr(raw_dbapi, "cancel"):
                     raw_dbapi.cancel()
             except Exception as cancel_err:
-                logger.warning(f"Failed to cancel timed out database connection: {cancel_err}")
+                logger.warning("Database query cancellation failed (%s)", type(cancel_err).__name__)
         
         # Engines are shared across requests; disposing here can interrupt
         # unrelated work. Driver timeouts and cancellation handle this query.

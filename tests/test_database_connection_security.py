@@ -49,6 +49,18 @@ def test_ssrf_guard_rejects_private_dns_resolution(monkeypatch):
         DatabaseConnectionFactory.validate_host_ssrf("private.example.test")
 
 
+@pytest.mark.parametrize("private_ip", ["127.0.0.1", "10.20.30.40", "172.20.1.2", "192.168.1.5", "169.254.1.2"])
+def test_ssrf_guard_rejects_private_ip_literals(monkeypatch, private_ip):
+    monkeypatch.setattr(DatabaseConnectionFactory, "allow_private_networks", classmethod(lambda _cls: False))
+    monkeypatch.setattr(
+        "services.connection_factory.socket.getaddrinfo",
+        lambda host, *_args, **_kwargs: [(2, 1, 6, "", (host, 5432))],
+    )
+
+    with pytest.raises(SSRFSecurityViolation):
+        DatabaseConnectionFactory.validate_host_ssrf(private_ip)
+
+
 def test_connection_uri_validates_query_parameter_host(monkeypatch):
     monkeypatch.setattr(DatabaseConnectionFactory, "allow_private_networks", classmethod(lambda _cls: False))
 

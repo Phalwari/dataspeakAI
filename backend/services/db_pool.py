@@ -9,7 +9,7 @@ from typing import Any, Mapping
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 
-_ENGINE_CACHE_LIMIT = 128
+_ENGINE_CACHE_LIMIT = 32
 _engine_cache: OrderedDict[str, Engine] = OrderedDict()
 _engine_url_fingerprints: dict[str, str] = {}
 _lock = threading.RLock()
@@ -43,11 +43,11 @@ def get_engine(url: str, connect_args: Mapping[str, Any] | None = None) -> Engin
                 "sqlite:", "sqlite+pysqlite:"
             }
             if not is_memory:
-                options.update({"pool_size": 5, "max_overflow": 5, "pool_timeout": 10})
+                options.update({"pool_size": 2, "max_overflow": 3, "pool_timeout": 10})
             options["connect_args"].setdefault("check_same_thread", False)
             options["connect_args"].setdefault("timeout", 10.0)
         else:
-            options.update({"pool_size": 5, "max_overflow": 5, "pool_timeout": 10})
+            options.update({"pool_size": 2, "max_overflow": 3, "pool_timeout": 10})
 
         engine = create_engine(url, **options)
         _engine_cache[key] = engine
