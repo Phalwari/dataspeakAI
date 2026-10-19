@@ -9,6 +9,7 @@ from sqlalchemy import inspect
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 import re
+import logging
 from urllib.parse import urlparse, unquote
 
 import models, schemas
@@ -20,6 +21,7 @@ from services.db_pool import get_engine
 from services.database_connection_service import db_connection_service
 
 router = APIRouter(prefix="/api/connections", tags=["Database Connections"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("/list")
@@ -364,16 +366,24 @@ def execute_connection_query(
         raise HTTPException(status_code=404, detail="Database connection not found.")
 
     decrypted_password = decrypt_password(c.password) if c.password else ""
-    return db_connection_service.execute_query(
-        db_type=c.db_type,
-        host=c.host,
-        port=c.port,
-        username=c.username,
-        password=decrypted_password,
-        database=c.database,
-        connection_string=c.connection_string,
-        query=query_req.query
-    )
+    raw_conn = c.connection_string or (c.host if c.host and ("://" in str(c.host) or "mongodb" in str(c.host)) else None)
+    decrypted_conn = (decrypt_password(raw_conn) if raw_conn else None) or raw_conn or ""
+    try:
+        return db_connection_service.execute_query(
+            db_type=c.db_type,
+            host=c.host,
+            port=c.port,
+            username=c.username,
+            password=decrypted_password,
+            database=c.database,
+            connection_string=decrypted_conn,
+            query=query_req.query
+        )
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Query was rejected by the read-only policy or is invalid.") from None
+    except Exception:
+        logger.exception("Database query execution failed")
+        raise HTTPException(status_code=500, detail="Database query failed.") from None
 
 
 @router.post("/{connection_id}/ai-query")

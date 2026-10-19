@@ -734,213 +734,85 @@ class DatabaseConnectionService:
 
     @staticmethod
     def execute_query(db_type: str, host: str = "localhost", port: Optional[int] = None, username: str = "", password: Optional[str] = None, database: Optional[str] = None, connection_string: Optional[str] = None, query: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Execute a raw SQL/Mongo query and return results (max 1000 rows)"""
-        if not query:
-            return [{"error": "Empty query provided"}]
-        try:
-            if db_type.lower() == "postgresql":
-                safe, error_msg = DatabaseConnectionService.is_safe_sql(query)
-                if not safe:
-                    return [{"error": f"Security Blocked: {error_msg}"}]
-                pg_pool_conn = get_pg_pool(host, port, username, password, database)
-                if pg_pool_conn:
-                    conn = pg_pool_conn.getconn()
-                    try:
-                        cursor = conn.cursor()
-                        # Enforce 30-second statement timeout to prevent runaway queries
-                        cursor.execute("SET statement_timeout = '30s'")
-                        cursor.execute(query)
-                        if cursor.description:
-                            columns = [desc[0] for desc in cursor.description]
-                            rows = [
-                                DatabaseConnectionService._serialize_row(dict(zip(columns, row)))
-                                for row in cursor.fetchmany(1000)
-                            ]
-                        else:
-                            conn.commit()
-                            rows = [{"status": "Success", "rows_affected": cursor.rowcount}]
-                        cursor.close()
-                        return rows
-                    finally:
-                        pg_pool_conn.putconn(conn)  # always return to pool
-                else:
-                    # Fallback: direct connection
-                    conn = psycopg2.connect(
-                        host=host, port=port, user=username,
-                        password=password, database=database or "postgres"
-                    )
-                    cursor = conn.cursor()
-                    cursor.execute("SET statement_timeout = '30s'")
-                    cursor.execute(query)
-                    if cursor.description:
-                        columns = [desc[0] for desc in cursor.description]
-                        rows = [
-                            DatabaseConnectionService._serialize_row(dict(zip(columns, row)))
-                            for row in cursor.fetchmany(1000)
-                        ]
-                    else:
-                        conn.commit()
-                        rows = [{"status": "Success", "rows_affected": cursor.rowcount}]
-                    cursor.close()
-                    conn.close()
-                    return rows
-            elif db_type.lower() == "mysql":
-                safe, error_msg = DatabaseConnectionService.is_safe_sql(query)
-                if not safe:
-                    return [{"error": f"Security Blocked: {error_msg}"}]
-                pooled = get_mysql_pool(host, port, username, password, database)
-                if pooled:
-                    cursor = pooled.cursor()
-                    try:
-                        cursor.execute(query)
-                        if cursor.description:
-                            columns = [desc[0] for desc in cursor.description]
-                            rows = [DatabaseConnectionService._serialize_row(dict(zip(columns, row))) for row in cursor.fetchmany(1000)]
-                        else:
-                            rows = [{"status": "Success", "rows_affected": cursor.rowcount}]
-                        return rows
-                    finally:
-                        cursor.close()
-                else:
-                    # Fallback: direct connection
-                    conn = pymysql.connect(host=host, port=port, user=username, password=password, database=database)
-                    cursor = conn.cursor()
-                    cursor.execute(query)
-                    if cursor.description:
-                        columns = [desc[0] for desc in cursor.description]
-                        rows = [DatabaseConnectionService._serialize_row(dict(zip(columns, row))) for row in cursor.fetchmany(1000)]
-                    else:
-                        conn.commit()
-                        rows = [{"status": "Success", "rows_affected": cursor.rowcount}]
-                    cursor.close()
-                    conn.close()
-                    return rows
-            elif db_type.lower() == "sqlite":
-                safe, error_msg = DatabaseConnectionService.is_safe_sql(query)
-                if not safe:
-                    return [{"error": f"Security Blocked: {error_msg}"}]
-                db_path = (database or host).strip('"').strip("'")
-                conn = sqlite3.connect(db_path, timeout=30)  # 30-second connection timeout
-                cursor = conn.cursor()
-                cursor.execute(query)
-                if cursor.description:
-                    columns = [desc[0] for desc in cursor.description]
-                    rows = [DatabaseConnectionService._serialize_row(dict(zip(columns, row))) for row in cursor.fetchmany(1000)]
-                else:
-                    conn.commit()
-                    rows = [{"status": "Success", "rows_affected": cursor.rowcount}]
-                cursor.close()
-                conn.close()
-                return rows
-            elif db_type.lower() == "mongodb":
-                client = pymongo.MongoClient(connection_string, serverSelectionTimeoutMS=5000)
-                # ✅ FIX: Safely get database - try default from URI, then fall back to 'database' param
+        """Execute a bounded read-only SQL query or a constrained Mongo read operation."""
+        if not query or not query.strip():
+            return [{"error": "A query is required."}]
+
+        dialect = (db_type or "").strip().lower()
+        if dialect in {"sqlite", "postgresql", "mysql", "mariadb"}:
+            from types import SimpleNamespace
+            from services.sql_engine import execute_safe_sql, validate_read_only_sql
+
+            is_valid, _reason = validate_read_only_sql(query, dialect=dialect)
+            if not is_valid:
+                raise ValueError("Only read-only SELECT queries are permitted.")
+
+            connection = SimpleNamespace(
+                db_type=dialect,
+                host=host,
+                port=port,
+                username=username,
+                password=password,
+                database=database,
+                connection_string=connection_string,
+                name="database connection",
+            )
+            result = execute_safe_sql(connection, query, max_rows=1000)
+            return result["rows"]
+
+        if dialect == "mongodb":
+            from services.connection_factory import DatabaseConnectionFactory
+
+            if connection_string:
+                validated_uri = DatabaseConnectionFactory.validate_connection_string(connection_string)
+            else:
+                DatabaseConnectionFactory.validate_host_ssrf(host, port)
+                raise ValueError("A validated MongoDB connection URI is required.")
+
+            import json
+            from pymongo import MongoClient
+
+            try:
+                request = json.loads(query)
+            except (TypeError, json.JSONDecodeError):
+                raise ValueError("MongoDB read query must be valid JSON.") from None
+            if not isinstance(request, dict) or len(request) != 1 or not ("find" in request or "aggregate" in request):
+                raise ValueError("Only MongoDB find and aggregate reads are permitted.")
+
+            collection_name = request.get("find", request.get("aggregate"))
+            if not isinstance(collection_name, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", collection_name):
+                raise ValueError("A valid MongoDB collection is required.")
+
+            client = MongoClient(validated_uri, serverSelectionTimeoutMS=5000)
+            try:
                 try:
-                    db_obj = client.get_default_database()
+                    mongo_db = client.get_default_database()
                 except Exception:
-                    db_name = database or "test"
-                    db_obj = client[db_name]
+                    mongo_db = client[database or "test"]
 
-                import json
-                # ✅ FIX: Robustly strip markdown/text before parsing
-                clean_query = re.sub(r"```(?:json)?|```", "", query).strip()
-                brace_start = clean_query.find('{')
-                brace_end = clean_query.rfind('}')
-                if brace_start != -1 and brace_end != -1:
-                    clean_query = clean_query[brace_start:brace_end+1]
+                if "find" in request:
+                    filter_doc = request.get("filter", {})
+                    projection = request.get("projection")
+                    if not isinstance(filter_doc, dict) or (projection is not None and not isinstance(projection, dict)):
+                        raise ValueError("MongoDB find filter and projection must be objects.")
+                    cursor = mongo_db[collection_name].find(filter_doc, projection).limit(1000)
+                    rows = list(cursor)
+                else:
+                    pipeline = request.get("pipeline", [])
+                    if not isinstance(pipeline, list) or len(pipeline) > 20:
+                        raise ValueError("MongoDB aggregation pipeline is invalid.")
+                    blocked_operators = {"$out", "$merge", "$where", "$function", "$accumulator"}
+                    serialized_pipeline = json.dumps(pipeline).lower()
+                    if any(operator in serialized_pipeline for operator in blocked_operators):
+                        raise ValueError("MongoDB aggregation contains a prohibited operator.")
+                    rows = list(mongo_db[collection_name].aggregate(pipeline, maxTimeMS=10000))[:1000]
 
-                if "$listcollections" in clean_query.lower():
-                    try:
-                        col_names = db_obj.list_collection_names()
-                        client.close()
-                        return [{"collection_name": name} for name in col_names]
-                    except Exception as list_err:
-                        client.close()
-                        return [{"error": f"Failed to list MongoDB collections: {str(list_err)}"}]
+                return [DatabaseConnectionService._serialize_row(row) for row in rows]
+            finally:
+                client.close()
 
-                try:
-                    q_dict = json.loads(clean_query)
-                    if "find" in q_dict:
-                        col_name = q_dict["find"]
-                        filter_doc = q_dict.get("filter", {})
-                        projection = q_dict.get("projection", None)
-                        cursor = db_obj[col_name].find(filter_doc, projection).limit(1000)
-                        rows = list(cursor)
-                        for r in rows:
-                            if '_id' in r:
-                                r['_id'] = str(r['_id'])
-                        client.close()
-                        return rows
-                    elif "aggregate" in q_dict:
-                        col_name = q_dict["aggregate"]
-                        pipeline = q_dict.get("pipeline", [])
-                        
-                        # Guardrail: Check if any pipeline stage contains $listCollections
-                        pipeline_str = str(pipeline).lower()
-                        if "$listcollections" in pipeline_str:
-                            col_names = db_obj.list_collection_names()
-                            client.close()
-                            return [{"collection_name": name} for name in col_names]
+        raise ValueError("Unsupported database type.")
 
-                        cursor = db_obj[col_name].aggregate(pipeline)
-                        rows = list(cursor)
-                        for r in rows:
-                            if '_id' in r:
-                                r['_id'] = str(r['_id'])
-                        client.close()
-                        return rows[:1000]
-                    else:
-                        client.close()
-                        return [{"error": "Only 'find' or 'aggregate' commands are supported via JSON query string."}]
-                except json.JSONDecodeError as je:
-                    client.close()
-                    return [{"error": f"MongoDB query JSON parse error: {je}. Received: {clean_query[:200]}"}]
-            elif db_type.lower() in ["firestore", "firebase"]:
-                import json
-                try:
-                    q_dict = json.loads(query or "{}")
-                    collection_name = q_dict.get("collection")
-                    if not collection_name:
-                        return [{"error": "Firestore query JSON must specify 'collection'."}]
-                    
-                    preview_data = DatabaseConnectionService.preview_table(
-                        db_type="firestore",
-                        host="",
-                        port=0,
-                        username="",
-                        password="",
-                        table_name=collection_name
-                    )
-                    if "error" in preview_data:
-                        return [preview_data]
-                    
-                    rows = preview_data.get("rows", [])
-                    filters = q_dict.get("where", [])
-                    filtered_rows = []
-                    for row in rows:
-                        match = True
-                        for f in filters:
-                            if len(f) == 3:
-                                field, op, val = f
-                                row_val = row.get(field)
-                                if op in ["==", "="]:
-                                    if row_val != val: match = False
-                                elif op == ">":
-                                    if not (row_val is not None and row_val > val): match = False
-                                elif op == "<":
-                                    if not (row_val is not None and row_val < val): match = False
-                        if match:
-                            filtered_rows.append(row)
-                    
-                    limit = q_dict.get("limit")
-                    if limit:
-                        filtered_rows = filtered_rows[:limit]
-                    return filtered_rows
-                except json.JSONDecodeError:
-                    return [{"error": "Firestore query must be a valid JSON string."}]
-            return [{"error": "Unsupported database type"}]
-        except Exception as e:
-            return [{"error": str(e)}]
 
 # Global instance
 db_connection_service = DatabaseConnectionService()
