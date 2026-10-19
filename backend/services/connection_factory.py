@@ -15,6 +15,7 @@ import socket
 from typing import Any, Dict, Optional, Tuple
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine, URL, make_url
+from sqlalchemy.pool import NullPool
 
 from services.crypto_service import decrypt_secret, redact_connection_url
 
@@ -308,6 +309,36 @@ class DatabaseConnectionFactory:
         statement_timeout_ms: int = 5000,
     ) -> Tuple[bool, Optional[str]]:
         """Tests external connection with statement timeouts and redacts credentials on failure."""
+        dialect = (db_type or "").lower().strip()
+        is_mongo = dialect == "mongodb" or (
+            connection_string and ("mongodb://" in connection_string or "mongodb+srv://" in connection_string)
+        )
+
+        if is_mongo:
+            # For MongoDB, verify pymongo connection (supports host/port and mongodb+srv:// connection strings)
+            try:
+                from pymongo import MongoClient
+                if connection_string:
+                    validated_url = cls.validate_connection_string(connection_string)
+                    client = MongoClient(validated_url, serverSelectionTimeoutMS=statement_timeout_ms)
+                else:
+                    validated_host = cls.validate_host_ssrf(host, port)
+                    decrypted_pwd = decrypt_secret(password) if password else None
+                    client = MongoClient(
+                        host=validated_host,
+                        port=port or 27017,
+                        username=username,
+                        password=decrypted_pwd,
+                        serverSelectionTimeoutMS=statement_timeout_ms,
+                    )
+                client.admin.command("ping")
+                client.close()
+                return True, None
+            except Exception as exc:
+                err_msg = redact_connection_url(str(exc))
+                logger.warning("MongoDB connection test failed: %s", err_msg)
+                return False, f"MongoDB connection failed: {err_msg}"
+
         if connection_string:
             try:
                 validated_url = cls.validate_connection_string(connection_string)
@@ -320,27 +351,6 @@ class DatabaseConnectionFactory:
                 err_msg = redact_connection_url(str(exc))
                 logger.warning("Database connection test failed: %s", err_msg)
                 return False, f"Connection failed: {err_msg}"
-
-        dialect = db_type.lower()
-        if dialect == "mongodb":
-            # For MongoDB, verify pymongo if available
-            try:
-                from pymongo import MongoClient
-                validated_host = cls.validate_host_ssrf(host, port)
-                decrypted_pwd = decrypt_secret(password) if password else None
-                client = MongoClient(
-                    host=validated_host,
-                    port=port or 27017,
-                    username=username,
-                    password=decrypted_pwd,
-                    serverSelectionTimeoutMS=statement_timeout_ms,
-                )
-                client.admin.command("ping")
-                client.close()
-                return True, None
-            except Exception as exc:
-                err_msg = redact_connection_url(str(exc))
-                return False, f"MongoDB connection failed: {err_msg}"
         
         try:
             engine = cls.create_engine_instance(

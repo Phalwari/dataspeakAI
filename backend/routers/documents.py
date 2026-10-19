@@ -88,7 +88,7 @@ def process_document(document_id: int, file_path: str, tenant_id: int, chunk_siz
         db = SessionLocal()
         close_db = True
 
-    doc = db.query(models.Document).filter(models.Document.id == document_id).first()
+    doc = db.query(models.Document).filter(models.Document.id == document_id, models.Document.tenant_id == tenant_id, models.Document.is_deleted == False).first()
     if not doc:
         if close_db:
             db.close()
@@ -269,7 +269,9 @@ def process_document(document_id: int, file_path: str, tenant_id: int, chunk_siz
             embeddings_model=active_embeddings,
             new_chunks=all_chunks,
             new_metadatas=all_metadatas,
-            all_bm25_chunks=bm25_input
+            all_bm25_chunks=bm25_input,
+            live_document_ids=lambda: {row.id for row in db.query(models.Document.id).filter(
+                models.Document.tenant_id == tenant_id, models.Document.is_deleted == False).all()},
         )
 
         doc.status = "Completed"
@@ -281,24 +283,17 @@ def process_document(document_id: int, file_path: str, tenant_id: int, chunk_siz
         db.commit()
 
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        print(f"Error processing document: {e}")
+        db.rollback()
         doc.status = "Failed"
         doc.progress_step = "failed"
         doc.error_message = str(e)
         doc.progress = 0.0
         doc.last_heartbeat_at = datetime.utcnow()
         db.commit()
+        raise
 
     finally:
-        # File Cleanup of ephemeral upload copy, but retain durable storage_service copy
-        if os.path.exists(file_path):
-            try:
-                if ("uploads" in file_path or "uploads\\" in file_path or "uploads/" in file_path) and getattr(doc, "storage_key", None):
-                    os.remove(file_path)
-            except Exception as clean_err:
-                print(f"Failed to cleanup temp file {file_path}: {clean_err}")
+        # The durable source must survive transient failures and worker retries.
         if close_db:
             db.close()
 
@@ -310,7 +305,7 @@ def reembed_stored_chunks(document_id: int, tenant_id: int, db: Session = None):
         close_db = True
 
     try:
-        doc = db.query(models.Document).filter(models.Document.id == document_id).first()
+        doc = db.query(models.Document).filter(models.Document.id == document_id, models.Document.tenant_id == tenant_id, models.Document.is_deleted == False).first()
         if not doc:
             return
 
@@ -318,10 +313,10 @@ def reembed_stored_chunks(document_id: int, tenant_id: int, db: Session = None):
         doc.progress = 0.1
         db.commit()
 
-        global embeddings_model
         model_name = getattr(doc, "embedding_model", "all-MiniLM-L6-v2") or "all-MiniLM-L6-v2"
-        if embeddings_model is None or getattr(embeddings_model, "model_name", None) != model_name:
-            embeddings_model = _load_hf_embeddings(model_name)
+        active_embeddings = embeddings_model
+        if active_embeddings is None or getattr(active_embeddings, "model_name", None) != model_name:
+            active_embeddings = _load_hf_embeddings(model_name)
 
         db_chunks = db.query(models.DocumentChunk).filter(
             models.DocumentChunk.document_id == document_id
@@ -373,10 +368,12 @@ def reembed_stored_chunks(document_id: int, tenant_id: int, db: Session = None):
         from search.generation_manager import IndexGenerationManager
         gen_mgr = IndexGenerationManager(tenant_id=tenant_id, model_name=model_name)
         gen_mgr.build_and_publish_generation(
-            embeddings_model=embeddings_model,
+            embeddings_model=active_embeddings,
             new_chunks=all_chunks,
             new_metadatas=all_metadatas,
-            all_bm25_chunks=bm25_input
+            all_bm25_chunks=bm25_input,
+            live_document_ids=lambda: {row.id for row in db.query(models.Document.id).filter(
+                models.Document.tenant_id == tenant_id, models.Document.is_deleted == False).all()},
         )
 
         doc.status = "Completed"
@@ -386,13 +383,12 @@ def reembed_stored_chunks(document_id: int, tenant_id: int, db: Session = None):
         db.commit()
 
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        print(f"Error reindexing document {document_id}: {e}")
+        db.rollback()
         doc.status = "Failed"
         doc.error_message = str(e)
         doc.progress = 0.0
         db.commit()
+        raise
     finally:
         if close_db:
             db.close()
@@ -523,6 +519,8 @@ async def upload_document(
     # Store uploaded original under durable, content-addressed storage key (NR-2.2-B-T01)
     stored_path = storage_service.store_file(current_user.tenant_id, doc.id, file_path, content_hash, filename=safe_filename)
     doc.storage_key = stored_path
+    if os.path.abspath(file_path) != os.path.abspath(stored_path):
+        os.remove(file_path)
     db.commit()
     db.refresh(doc)
 
@@ -542,11 +540,11 @@ async def upload_document(
     
     if os.getenv("CELERY_BROKER_URL"):
         from ingestion.task_queue import process_document_task
-        task = process_document_task.delay(doc.id, file_path, current_user.tenant_id, chunk_size, chunk_overlap, chunking_strategy)
+        task = process_document_task.delay(doc.id, stored_path, current_user.tenant_id, chunk_size, chunk_overlap, chunking_strategy)
         doc.celery_task_id = task.id
         db.commit()
     else:
-        background_tasks.add_task(process_document, doc.id, file_path, current_user.tenant_id, chunk_size, chunk_overlap, chunking_strategy)
+        background_tasks.add_task(process_document, doc.id, stored_path, current_user.tenant_id, chunk_size, chunk_overlap, chunking_strategy)
     
     return doc
 
@@ -591,7 +589,13 @@ def retry_document_ingestion(
     db.commit()
     db.refresh(doc)
 
-    background_tasks.add_task(process_document, doc.id, file_to_process, current_user.tenant_id, 512, 50, "fixed")
+    if os.getenv("CELERY_BROKER_URL"):
+        from ingestion.task_queue import process_document_task
+        task = process_document_task.delay(doc.id, file_to_process, current_user.tenant_id, 512, 50, "fixed")
+        doc.celery_task_id = task.id
+        db.commit()
+    else:
+        background_tasks.add_task(process_document, doc.id, file_to_process, current_user.tenant_id, 512, 50, "fixed")
     return doc
 
 @router.delete("/{document_id}")

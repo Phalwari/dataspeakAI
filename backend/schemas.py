@@ -564,10 +564,11 @@ class MetricProvenanceResponse(BaseModel):
 
 
 class TrainingSpecification(BaseModel):
-    split_strategy: Literal["random", "stratified", "temporal"] = "random"
+    split_strategy: Literal["random", "stratified", "temporal", "grouped"] = "random"
     test_size: float = Field(default=0.2, ge=0.05, le=0.5)
-    validation_strategy: Literal["k_fold", "holdout", "time_series"] = "k_fold"
+    validation_strategy: Literal["k_fold", "holdout", "time_series", "grouped"] = "k_fold"
     time_column: Optional[str] = None
+    group_column: Optional[str] = None
     random_state: int = 42
     imbalance_threshold: float = Field(default=0.1, ge=0.01, le=0.5)
     training_timeout_seconds: int = Field(default=30, ge=1, le=300)

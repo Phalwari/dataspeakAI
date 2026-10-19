@@ -343,12 +343,11 @@ class CitationService:
                 "disclaimer": None
             }
 
-        # Load embedding model if not provided
-        if embedding_model is None:
-            from routers.documents import _load_hf_embeddings
-            embedding_model = _load_hf_embeddings("all-MiniLM-L6-v2")
-
         try:
+            # Initialization and inference share the same unverified failure contract.
+            if embedding_model is None:
+                from routers.documents import _load_hf_embeddings
+                embedding_model = _load_hf_embeddings("all-MiniLM-L6-v2")
             chunk_texts = [c.get("content", "") for c in chunks]
             chunk_embeddings = embedding_model.embed_documents(chunk_texts)
             claim_embeddings = embedding_model.embed_documents(claims)

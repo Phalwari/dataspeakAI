@@ -632,13 +632,11 @@ def execute_safe_sql(
         connect_args = {"options": "-c default_transaction_read_only=on -c statement_timeout=10000"}
     elif "mariadb" in db_type:
         connect_args = {
-            "connect_timeout": 10,
-            "init_command": "SET SESSION max_statement_time=10.0"
+            "connect_timeout": 10
         }
     elif "mysql" in db_type:
         connect_args = {
-            "connect_timeout": 10,
-            "init_command": "SET SESSION max_execution_time=10000"
+            "connect_timeout": 10
         }
 
     def _apply_dialect_guardrails(conn_handle):
@@ -650,13 +648,23 @@ def execute_safe_sql(
                 conn_handle.execute(text("SET statement_timeout = 10000;"))
                 conn_handle.execute(text("SET TRANSACTION READ ONLY;"))
             elif "mariadb" in db_type:
-                conn_handle.execute(text("SET SESSION TRANSACTION READ ONLY;"))
+                try:
+                    conn_handle.execute(text("SET SESSION TRANSACTION READ ONLY;"))
+                except Exception as var_err:
+                    logger.warning(f"Could not set MariaDB READ ONLY: {var_err}")
                 try:
                     conn_handle.execute(text("SET SESSION max_statement_time = 10.0;"))
                 except Exception as var_err:
                     logger.warning(f"Could not set MariaDB max_statement_time: {var_err}")
             elif "mysql" in db_type:
-                conn_handle.execute(text("SET SESSION TRANSACTION READ ONLY;"))
+                try:
+                    conn_handle.execute(text("SET SESSION TRANSACTION READ ONLY;"))
+                except Exception as var_err:
+                    logger.warning(f"Could not set MySQL READ ONLY: {var_err}")
+                try:
+                    conn_handle.execute(text("SET SESSION sql_mode = CONCAT(@@sql_mode, ',ANSI_QUOTES');"))
+                except Exception as var_err:
+                    logger.warning(f"Could not set MySQL ANSI_QUOTES: {var_err}")
                 try:
                     conn_handle.execute(text("SET SESSION max_execution_time = 10000;"))
                 except Exception as var_err:

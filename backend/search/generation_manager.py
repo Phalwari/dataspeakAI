@@ -4,7 +4,7 @@ import time
 import uuid
 import shutil
 import threading
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Any, Tuple, Optional, Callable, Set
 from search.bm25_index import BM25IndexManager
 
 # Lock registry to serialize index builds per (tenant_id, model_slug)
@@ -41,8 +41,7 @@ class ProcessTenantLock:
                         pass
                     self.fd = None
                 if time.time() - start > self.timeout:
-                    # Timeout reached; continue under thread lock fallback
-                    break
+                    raise TimeoutError("Index publication lock is busy; retry the operation")
                 time.sleep(0.05)
         return self
 
@@ -113,7 +112,8 @@ class IndexGenerationManager:
         new_chunks: List[str],
         new_metadatas: List[Dict[str, Any]],
         all_bm25_chunks: List[Dict[str, Any]],
-        full_rebuild: bool = False
+        full_rebuild: bool = False,
+        live_document_ids: Optional[Callable[[], Set[int]]] = None,
     ) -> str:
         """
         Builds a new immutable index generation in a staging area, runs integrity validation,
@@ -166,16 +166,37 @@ class IndexGenerationManager:
                         new_metadatas = [{"document_id": -1, "source": "init", "is_placeholder": True}]
                     vectorstore = FAISS.from_texts(texts=new_chunks, embedding=embeddings_model, metadatas=new_metadatas)
 
+                # Revalidate tombstones inside the publication lock. Never use the
+                # caller's pre-lock SQL snapshot to decide which old vectors survive.
+                if live_document_ids is not None:
+                    live_ids = live_document_ids()
+                    obsolete = [uid for uid, entry in vectorstore.docstore._dict.items()
+                                if entry.metadata.get("document_id") not in live_ids]
+                    if obsolete:
+                        vectorstore.delete(obsolete)
+
                 vectorstore.save_local(staging_gen_dir)
 
                 # 2. BM25 Build strictly inside staging generation directory (F04: never mutate live in-place!)
                 bm25_path = os.path.join(staging_gen_dir, "bm25.pkl")
                 bm25_manager = BM25IndexManager(tenant_id=self.tenant_id, index_dir=staging_gen_dir)
-                bm25_manager.build_index(all_bm25_chunks)
+                # The merged dense generation is the common manifest for both
+                # indexes. Concurrent workers may have supplied stale BM25 snapshots.
+                supplied_ids = {(c.get("metadata", {}).get("document_id"), c.get("content")): c.get("id")
+                                for c in all_bm25_chunks}
+                generation_chunks = [
+                    {"id": entry.metadata.get("chunk_id") or supplied_ids.get(
+                        (entry.metadata.get("document_id"), entry.page_content)) or uid,
+                     "content": entry.page_content, "metadata": dict(entry.metadata)}
+                    for uid, entry in vectorstore.docstore._dict.items()
+                    if not entry.metadata.get("is_placeholder")
+                ]
+                bm25_manager.build_index(generation_chunks)
 
                 # 3. Integrity Probe
                 probe_store = FAISS.load_local(staging_gen_dir, embeddings_model, allow_dangerous_deserialization=True)
-                probe_results = probe_store.similarity_search("healthcheck", k=1)
+                if probe_store.index.ntotal:
+                    probe_store.similarity_search("healthcheck", k=1)
                 if not os.path.exists(os.path.join(staging_gen_dir, "index.faiss")):
                     raise RuntimeError("Integrity probe failed: index.faiss not created in staging")
                 if not os.path.exists(bm25_path):
@@ -189,7 +210,7 @@ class IndexGenerationManager:
                     "model_name": self.model_name,
                     "model_slug": self.model_slug,
                     "published_at": time.time(),
-                    "chunk_count": len(new_chunks)
+                    "chunk_count": len(generation_chunks)
                 }
                 temp_pointer = os.path.join(self.tenant_dir, f"active_generation_{gen_id}.tmp")
                 with open(temp_pointer, "w", encoding="utf-8") as f:
@@ -210,8 +231,8 @@ class IndexGenerationManager:
                     os.makedirs(self.legacy_dir, exist_ok=True)
                     shutil.copy2(src_bm25, legacy_bm25)
 
-                # 5. Clean up old generations (keep newest 3)
-                self._prune_old_generations(keep=3, active_gen=gen_id)
+                # Readers can have pinned an older generation. Retention/cleanup
+                # is an explicit reconciliation operation, not part of publication.
 
                 return gen_id
 

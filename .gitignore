@@ -37,6 +37,8 @@ scratch/
 .agents/fyp-verification/
 .agents/sds-submission/
 .agents/mcp_config.json
+.agents/**/isolated-*/
+.agents/**/*.xml
 qa_app.db
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).

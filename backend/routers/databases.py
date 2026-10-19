@@ -68,6 +68,38 @@ def get_databases(
     return databases
 
 
+def _get_mongo_client_and_db(db_conn: models.DatabaseConnection):
+    """Initializes a PyMongo client and database object from connection parameters or URI."""
+    from pymongo import MongoClient
+    raw_str = db_conn.connection_string
+    if not raw_str and db_conn.host and ("://" in str(db_conn.host) or "mongodb" in str(db_conn.host)):
+        raw_str = db_conn.host
+
+    if raw_str:
+        decrypted = decrypt_password(raw_str) or raw_str
+        validated = DatabaseConnectionFactory.validate_connection_string(decrypted)
+        client = MongoClient(validated, serverSelectionTimeoutMS=5000)
+        try:
+            db_obj = client.get_default_database()
+        except Exception:
+            db_name = db_conn.database or "test"
+            db_obj = client[db_name]
+        return client, db_obj
+    else:
+        validated_host = DatabaseConnectionFactory.validate_host_ssrf(db_conn.host, db_conn.port)
+        pwd = decrypt_password(db_conn.password) if db_conn.password else None
+        client = MongoClient(
+            host=validated_host,
+            port=db_conn.port or 27017,
+            username=db_conn.username,
+            password=pwd,
+            serverSelectionTimeoutMS=5000,
+        )
+        db_name = db_conn.database or "test"
+        db_obj = client[db_name]
+        return client, db_obj
+
+
 @router.post("", response_model=schemas.DatabaseConnectionResponse)
 def add_database(
     db_conn: schemas.DatabaseConnectionCreate,
@@ -77,14 +109,20 @@ def add_database(
     if not current_user.tenant_id:
         raise HTTPException(status_code=404, detail="User has no associated tenant")
     
+    conn_str = db_conn.connection_string
+    target_host = db_conn.host
+    if not conn_str and target_host and ("://" in target_host or "mongodb" in target_host):
+        conn_str = target_host
+        target_host = None
+
     try:
-        if db_conn.connection_string:
-            DatabaseConnectionFactory.validate_connection_string(db_conn.connection_string)
+        if conn_str:
+            DatabaseConnectionFactory.validate_connection_string(conn_str)
         elif db_conn.db_type.lower() == "sqlite":
             if db_conn.database:
                 DatabaseConnectionFactory.validate_sqlite_path(db_conn.database)
-        elif db_conn.host:
-            DatabaseConnectionFactory.validate_host_ssrf(db_conn.host, db_conn.port)
+        elif target_host:
+            DatabaseConnectionFactory.validate_host_ssrf(target_host, db_conn.port)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     
@@ -92,12 +130,12 @@ def add_database(
         tenant_id=current_user.tenant_id,
         name=db_conn.name,
         db_type=db_conn.db_type,
-        host=db_conn.host,
+        host=target_host,
         port=db_conn.port,
         username=db_conn.username,
-        password=encrypt_password(db_conn.password),
+        password=encrypt_password(db_conn.password) if db_conn.password else None,
         database=db_conn.database,
-        connection_string=encrypt_password(db_conn.connection_string) if db_conn.connection_string else None,
+        connection_string=encrypt_password(conn_str) if conn_str else None,
         description=db_conn.description,
         status="connected"
     )
@@ -137,6 +175,15 @@ def get_database_tables(
 ):
     db_conn = get_accessible_connection(db_id, current_user, db)
 
+    if (db_conn.db_type or "").lower() == "mongodb":
+        try:
+            client, db_obj = _get_mongo_client_and_db(db_conn)
+            cols = [c for c in db_obj.list_collection_names() if not c.startswith("system.")]
+            client.close()
+            return sorted(cols)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to fetch MongoDB collections: {str(e)}")
+
     connection_url = DatabaseConnectionFactory.get_connection_url(db_conn)
     if not connection_url:
         raise HTTPException(status_code=400, detail="Database connection URL is unavailable or invalid")
@@ -157,6 +204,32 @@ def get_table_data(
     db: Session = Depends(get_db)
 ):
     db_conn = get_accessible_connection(db_id, current_user, db)
+
+    if (db_conn.db_type or "").lower() == "mongodb":
+        try:
+            client, db_obj = _get_mongo_client_and_db(db_conn)
+            cursor = db_obj[table_name].find().limit(100)
+            rows = []
+            for doc in cursor:
+                row = {}
+                for k, v in doc.items():
+                    if k == "_id":
+                        row[k] = str(v)
+                    elif hasattr(v, "isoformat"):
+                        row[k] = v.isoformat()
+                    elif isinstance(v, (dict, list)):
+                        import json
+                        try:
+                            row[k] = json.dumps(v, default=str)
+                        except Exception:
+                            row[k] = str(v)
+                    else:
+                        row[k] = v
+                rows.append(row)
+            client.close()
+            return rows
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to fetch MongoDB documents: {str(e)}")
 
     from services.sql_engine import execute_safe_sql
     try:
@@ -187,23 +260,43 @@ def get_database_stats(
 ):
     db_conn = get_accessible_connection(db_id, current_user, db)
 
+    if (db_conn.db_type or "").lower() == "mongodb":
+        try:
+            client, db_obj = _get_mongo_client_and_db(db_conn)
+            collections = [c for c in db_obj.list_collection_names() if not c.startswith("system.")]
+            tables_info = []
+            for c in collections:
+                try:
+                    r_cnt = db_obj[c].estimated_document_count()
+                except Exception:
+                    r_cnt = 0
+                tables_info.append({"name": c, "rows": r_cnt})
+            client.close()
+            return {
+                "table_count": len(collections),
+                "tables": tables_info
+            }
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to fetch stats: {str(e)}")
+
     connection_url = DatabaseConnectionFactory.get_connection_url(db_conn)
     if not connection_url:
         raise HTTPException(status_code=400, detail="Database connection URL is unavailable or invalid")
 
     try:
+        from services.sql_engine import execute_safe_sql
         engine = get_engine(connection_url)
         inspector = inspect(engine)
         table_names = inspector.get_table_names()
         
         tables_info = []
-        with engine.connect() as conn:
-            for t in table_names:
-                try:
-                    r_cnt = conn.execute(text(f'SELECT COUNT(*) FROM "{t}"')).scalar()
-                except Exception:
-                    r_cnt = 0
-                tables_info.append({"name": t, "rows": r_cnt})
+        for t in table_names:
+            try:
+                c_res = execute_safe_sql(db_conn, f'SELECT COUNT(*) AS cnt FROM "{t}"', max_rows=1)
+                r_cnt = list(c_res["rows"][0].values())[0] if c_res.get("rows") else 0
+            except Exception:
+                r_cnt = 0
+            tables_info.append({"name": t, "rows": r_cnt})
 
         stats = {
             "table_count": len(table_names),
@@ -223,23 +316,44 @@ def get_table_stats(
 ):
     db_conn = get_accessible_connection(db_id, current_user, db)
 
+    if (db_conn.db_type or "").lower() == "mongodb":
+        try:
+            client, db_obj = _get_mongo_client_and_db(db_conn)
+            try:
+                row_count = db_obj[table_name].estimated_document_count()
+            except Exception:
+                row_count = 0
+            sample = db_obj[table_name].find_one()
+            col_count = len(sample.keys()) if sample else 0
+            client.close()
+            return {"rows": row_count, "columns": col_count}
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to fetch table stats: {str(e)}")
+
     connection_url = DatabaseConnectionFactory.get_connection_url(db_conn)
     if not connection_url:
         raise HTTPException(status_code=400, detail="Database connection URL is unavailable or invalid")
 
     try:
+        from services.sql_engine import execute_safe_sql
         engine = get_engine(connection_url)
         inspector = inspect(engine)
         valid_tables = inspector.get_table_names()
         if table_name not in valid_tables:
             raise HTTPException(status_code=400, detail="Invalid table name")
         
-        columns = inspector.get_columns(table_name)
-        col_count = len(columns)
-        
-        with engine.connect() as conn:
-            row_count_res = conn.execute(text(f'SELECT COUNT(*) FROM "{table_name}"'))
-            row_count = row_count_res.scalar()
+        try:
+            columns = inspector.get_columns(table_name)
+            col_count = len(columns)
+        except Exception:
+            empty_res = execute_safe_sql(db_conn, f'SELECT * FROM "{table_name}" LIMIT 0', max_rows=0)
+            col_count = len(empty_res.get("columns", []))
+            
+        try:
+            count_res = execute_safe_sql(db_conn, f'SELECT COUNT(*) AS cnt FROM "{table_name}"', max_rows=1)
+            row_count = list(count_res["rows"][0].values())[0] if count_res.get("rows") else 0
+        except Exception:
+            row_count = 0
             
         return {"rows": row_count, "columns": col_count}
     except HTTPException:
@@ -256,14 +370,20 @@ def test_database_connection(
     if not current_user.tenant_id:
         raise HTTPException(status_code=404, detail="User has no associated tenant")
         
+    conn_str = db_conn.connection_string
+    target_host = db_conn.host
+    if not conn_str and target_host and ("://" in target_host or "mongodb" in target_host):
+        conn_str = target_host
+        target_host = None
+
     success, error_msg = DatabaseConnectionFactory.test_connection(
         db_type=db_conn.db_type,
-        host=db_conn.host,
+        host=target_host,
         port=db_conn.port,
         database=db_conn.database,
         username=db_conn.username,
         password=db_conn.password,
-        connection_string=db_conn.connection_string,
+        connection_string=conn_str,
     )
     if not success:
         raise HTTPException(status_code=400, detail=error_msg or "Connection test failed")

@@ -11,11 +11,10 @@ import math
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
-from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 import numpy as np
 
-from sklearn.model_selection import train_test_split, cross_val_score, StratifiedShuffleSplit
+from sklearn.model_selection import train_test_split, cross_val_score, StratifiedShuffleSplit, TimeSeriesSplit, GroupKFold, GroupShuffleSplit
 from sklearn.preprocessing import LabelEncoder, StandardScaler, OneHotEncoder
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
@@ -174,11 +173,12 @@ def partition_dataset(
     specification = spec or TrainingSpecification()
     
     # Restrict to available columns
-    available_features = [c for c in feature_columns if c in df.columns]
+    available_features = list(dict.fromkeys(c for c in feature_columns if c in df.columns and c not in (target_column, specification.group_column, specification.time_column)))
     cols_to_use = list(available_features)
     if target_column and target_column in df.columns:
         cols_to_use.append(target_column)
 
+    df = df.reset_index(drop=True)
     clean_df = df[cols_to_use].dropna(how="all").copy()
 
     # Supervised learning requires valid, non-null target values (Fix F01)
@@ -250,15 +250,37 @@ def partition_dataset(
                 time_col = c
                 break
 
-    if specification.split_strategy == "temporal" and time_col and time_col in df.columns:
-        sorted_indices = df.loc[clean_df.index].sort_values(by=time_col).index
+    train_groups = None
+    train_times = None
+    if specification.split_strategy == "temporal" or specification.validation_strategy == "time_series":
+        if not time_col or time_col not in df.columns:
+            raise ValueError("Temporal validation requires a time column")
+        dates = pd.to_datetime(df.loc[clean_df.index, time_col], errors="raise", utc=True)
+        if dates.isna().any():
+            raise ValueError("Temporal validation requires complete timestamps")
+        sorted_indices = dates.sort_values(kind="stable").index
         clean_df = clean_df.loc[sorted_indices]
         X_all = clean_df[available_features]
         y_all = clean_df[target_column]
         split_idx = int(len(clean_df) * (1.0 - test_size))
-        X_train, X_test = X_all.iloc[:split_idx], X_all.iloc[split_idx:]
-        y_train, y_test = y_all.iloc[:split_idx], y_all.iloc[split_idx:]
+        cutoff = dates.loc[sorted_indices[split_idx]]
+        before = dates.loc[sorted_indices] < cutoff
+        X_train, X_test = X_all.loc[before], X_all.loc[~before]
+        y_train, y_test = y_all.loc[before], y_all.loc[~before]
+        train_times = dates.loc[X_train.index].to_numpy()
         actual_strategy = "temporal"
+    elif specification.split_strategy == "grouped" or specification.validation_strategy == "grouped":
+        group_col = specification.group_column
+        if not group_col or group_col not in df.columns:
+            raise ValueError("Grouped validation requires a group column")
+        groups = df.loc[clean_df.index, group_col]
+        if groups.isna().any() or groups.nunique() < 3:
+            raise ValueError("Grouped validation needs at least three complete groups")
+        train_idx, test_idx = next(GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=random_state).split(X_all, y_all, groups))
+        X_train, X_test = X_all.iloc[train_idx], X_all.iloc[test_idx]
+        y_train, y_test = y_all.iloc[train_idx], y_all.iloc[test_idx]
+        train_groups = groups.iloc[train_idx].to_numpy()
+        actual_strategy = "grouped"
     elif resolved_problem_type == "classification" and (
         specification.split_strategy == "stratified" or (
             target_column and y_all.nunique() <= 20 and all(c >= 2 for c in y_all.value_counts())
@@ -292,6 +314,8 @@ def partition_dataset(
         "majority_baseline": majority_baseline,
         "class_distribution": class_distribution,
         "split_strategy": actual_strategy,
+        "train_groups": train_groups,
+        "train_times": train_times,
     }
 
 
@@ -335,7 +359,14 @@ def build_feature_preprocessor(feature_columns: list, df_sample: pd.DataFrame) -
     return preprocessor, numeric_cols, categorical_cols
 
 
-def run_automl_pipeline(
+def run_automl_pipeline(df: pd.DataFrame, problem_info: dict, spec: Optional[TrainingSpecification] = None) -> dict:
+    """Run all preprocessing and fitting in a killable, capacity-limited worker."""
+    from services.training_worker import run_bounded
+    specification = spec or TrainingSpecification()
+    return run_bounded(__name__, "_run_automl_pipeline", (df, problem_info, specification), specification.training_timeout_seconds)
+
+
+def _run_automl_pipeline(
     df: pd.DataFrame,
     problem_info: dict,
     spec: Optional[TrainingSpecification] = None,
@@ -409,8 +440,7 @@ def run_automl_pipeline(
         ])
 
         # Model selection on train data strictly via Cross Validation
-        cv_scores = cross_val_score(pipeline, X_tr, y_tr, cv=folds, scoring=metric_score_name)
-        mean_cv = clean_float(float(np.mean(cv_scores)))
+        mean_cv = folds  # Selected using training-only validation before this final fit.
 
         # Fit once on train and evaluate on holdout test
         pipeline.fit(X_tr, y_tr)
@@ -502,7 +532,7 @@ def run_automl_pipeline(
             candidate_models = {
                 "Logistic Regression": LogisticRegression(max_iter=500, random_state=specification.random_state),
                 "Decision Tree": DecisionTreeClassifier(max_depth=5, random_state=specification.random_state),
-                "Random Forest": RandomForestClassifier(n_estimators=50, max_depth=10, random_state=specification.random_state, n_jobs=-1),
+                "Random Forest": RandomForestClassifier(n_estimators=50, max_depth=10, random_state=specification.random_state, n_jobs=1),
             }
             scoring_metric = "accuracy"
         else:
@@ -511,33 +541,54 @@ def run_automl_pipeline(
             candidate_models = {
                 "Linear Regression": LinearRegression(),
                 "Decision Tree": DecisionTreeRegressor(max_depth=5, random_state=specification.random_state),
-                "Random Forest": RandomForestRegressor(n_estimators=50, max_depth=10, random_state=specification.random_state, n_jobs=-1),
+                "Random Forest": RandomForestRegressor(n_estimators=50, max_depth=10, random_state=specification.random_state, n_jobs=1),
             }
             scoring_metric = "r2"
 
         cv_folds = min(3, max(2, len(X_train) // 5))
+        if partition["split_strategy"] == "temporal":
+            times = partition["train_times"]
+            folds = []
+            for train_idx, validation_idx in TimeSeriesSplit(n_splits=cv_folds).split(X_train):
+                train_idx = train_idx[times[train_idx] < times[validation_idx[0]]]
+                if len(train_idx) and len(validation_idx) >= 2:
+                    folds.append((train_idx, validation_idx))
+            if not folds:
+                return {"error": "Insufficient distinct periods for temporal validation", "best_model": None, "all_models": []}
+        elif partition["split_strategy"] == "grouped":
+            groups = partition["train_groups"]
+            folds = list(GroupKFold(n_splits=min(cv_folds, len(np.unique(groups)))).split(X_train, y_train, groups))
+        elif specification.validation_strategy == "holdout":
+            tr, va = train_test_split(np.arange(len(X_train)), test_size=specification.test_size,
+                                      random_state=specification.random_state,
+                                      stratify=y_train if problem_type == "classification" else None)
+            folds = [(tr, va)]
+        else:
+            folds = cv_folds
 
         for name, model in candidate_models.items():
-            remaining_time = timeout - (time.time() - start_time)
-            if remaining_time <= 0:
-                results.append({"model": name, "error": f"Training timeout exceeded ({timeout}s)", "score": -1.0})
-                continue
-
             try:
-                with ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(
-                        _train_and_eval_model,
-                        name, model, preprocessor,
-                        X_train, y_train, X_test, y_test,
-                        cv_folds, scoring_metric, problem_type,
-                        num_cols, cat_cols, available_features
-                    )
-                    res = future.result(timeout=max(0.1, remaining_time))
-                    results.append(res)
-            except TimeoutError:
-                results.append({"model": name, "error": f"Training timeout exceeded ({timeout}s)", "score": -1.0})
-            except Exception as e:
-                results.append({"model": name, "error": str(e), "score": -1.0})
+                pipeline = Pipeline([("preprocessor", preprocessor), ("model", model)])
+                scores = cross_val_score(pipeline, X_train, y_train, cv=folds, scoring=scoring_metric, error_score="raise")
+                if not np.isfinite(scores).all():
+                    raise ValueError("Validation metric is undefined for these folds")
+                mean_cv = round(float(np.mean(scores)), 4)
+                results.append({"model": name, "score": mean_cv, "cv_score": mean_cv,
+                                "test_score": None, "metric": "Validation R²" if problem_type == "regression" else "Validation Accuracy",
+                                "evaluation_scope": "training_validation"})
+            except Exception as exc:
+                results.append({"model": name, "error": str(exc), "score": None})
+        eligible = [r for r in results if "error" not in r]
+        if eligible:
+            selected = max(eligible, key=lambda r: r["cv_score"])
+            try:
+                final = _train_and_eval_model(selected["model"], candidate_models[selected["model"]], preprocessor,
+                    X_train, y_train, X_test, y_test, selected["cv_score"], scoring_metric, problem_type,
+                    num_cols, cat_cols, available_features)
+                final["evaluation_scope"] = "final_holdout"
+                selected.update(final)
+            except Exception as exc:
+                selected.update(error=str(exc), score=None)
 
     elif problem_type == "clustering":
         best_k = 3
@@ -568,7 +619,7 @@ def run_automl_pipeline(
                 else:
                     sil_val = float(silhouette_score(X_proc, labels))
             else:
-                sil_val = 0.0
+                raise ValueError("Silhouette score is unavailable for fewer than two distinct clusters")
 
             results.append({
                 "model": "K-Means Clustering",
@@ -584,11 +635,12 @@ def run_automl_pipeline(
                 }
             })
         except Exception as e:
-            results.append({"model": "K-Means Clustering", "error": str(e), "score": -1.0})
+            results.append({"model": "K-Means Clustering", "error": str(e), "score": None})
 
     valid = [r for r in results if "error" not in r]
     # Model selection priority: train CV score when available, otherwise score
-    best = max(valid, key=lambda x: x.get("cv_score", x.get("score", -1.0))) if valid else None
+    evaluated = [r for r in valid if r.get("evaluation_scope") == "final_holdout" or problem_type == "clustering"]
+    best = max(evaluated, key=lambda x: x.get("cv_score", x.get("score", -1.0))) if evaluated else None
 
     return {
         "problem_type": problem_type,
@@ -1381,71 +1433,31 @@ def compute_period_trend(
     col: str,
     agg: str = "sum",
     date_col: Optional[str] = None,
+    comparison: Optional[dict] = None,
 ) -> dict:
-    """
-    Computes period trend honestly.
-    Never compares aggregate sum against individual row mean (eliminates Defect I-09 / FYP-09).
-    If a date/time column is present, splits into current and prior periods.
-    If no date column is present but >=2 rows, splits into first half (prior) and second half (current).
-    Handles zero baselines and missing prior data via typed statuses.
-    """
-    if df.empty or col not in df.columns:
-        return {
-            "trend_pct": None,
-            "trend_direction": "flat",
-            "trend_status": "no_prior_data",
-            "trend_label": "No prior data",
-        }
-
-    # Identify date column if not provided
-    if not date_col:
-        for c in df.columns:
-            if pd.api.types.is_datetime64_any_dtype(df[c]) or any(k in str(c).lower() for k in ["date", "time", "period", "created", "timestamp"]):
-                date_col = c
-                break
-
-    has_date_split = False
-    if date_col and date_col in df.columns:
-        try:
-            df_sorted = df.dropna(subset=[col]).copy()
-            dt_series = pd.to_datetime(df_sorted[date_col], errors="coerce")
-            valid_dt = dt_series.dropna()
-            if len(valid_dt) >= 2 and valid_dt.min() < valid_dt.max():
-                df_sorted["__parsed_date__"] = dt_series
-                df_sorted = df_sorted.dropna(subset=["__parsed_date__"]).sort_values(by="__parsed_date__")
-                min_dt = df_sorted["__parsed_date__"].min()
-                max_dt = df_sorted["__parsed_date__"].max()
-                mid_dt = min_dt + (max_dt - min_dt) / 2
-                prior_df = df_sorted[df_sorted["__parsed_date__"] < mid_dt]
-                curr_df = df_sorted[df_sorted["__parsed_date__"] >= mid_dt]
-                has_date_split = True
-            elif len(df_sorted) >= 2:
-                df_sorted = df_sorted.sort_values(by=date_col)
-                mid = len(df_sorted) // 2
-                prior_df = df_sorted.iloc[:mid]
-                curr_df = df_sorted.iloc[mid:]
-            else:
-                return {
-                    "trend_pct": None,
-                    "trend_direction": "flat",
-                    "trend_status": "no_prior_data",
-                    "trend_label": "New Metric",
-                }
-        except Exception:
-            mid = len(df) // 2
-            prior_df = df.iloc[:mid]
-            curr_df = df.iloc[mid:]
-    else:
-        if len(df) < 2:
-            return {
-                "trend_pct": None,
-                "trend_direction": "flat",
-                "trend_status": "no_prior_data",
-                "trend_label": "No prior data",
-            }
-        mid = len(df) // 2
-        prior_df = df.iloc[:mid]
-        curr_df = df.iloc[mid:]
+    """Compare dated, non-overlapping business periods; never infer time from row order."""
+    unavailable = {"trend_pct": None, "trend_direction": "flat",
+                   "trend_status": "no_prior_data", "trend_label": "Comparison periods unavailable"}
+    if df.empty or col not in df.columns or not date_col or date_col not in df.columns:
+        return unavailable
+    if not comparison:
+        return unavailable
+    try:
+        zone = comparison.get("timezone", "UTC")
+        dates = pd.to_datetime(df[date_col], errors="raise")
+        dates = dates.dt.tz_localize(zone, ambiguous="raise", nonexistent="raise") if dates.dt.tz is None else dates.dt.tz_convert(zone)
+        boundaries = []
+        for key in ("prior_start", "prior_end", "current_start", "current_end"):
+            boundary = pd.Timestamp(comparison[key])
+            boundary = boundary.tz_localize(zone) if boundary.tzinfo is None else boundary.tz_convert(zone)
+            boundaries.append(boundary)
+        ps, pe, cs, ce = boundaries
+        if not (ps < pe <= cs < ce) or dates.isna().any():
+            return unavailable
+        prior_df = df.loc[(dates >= ps) & (dates < pe)]
+        curr_df = df.loc[(dates >= cs) & (dates < ce)]
+    except (ValueError, TypeError, KeyError):
+        return unavailable
 
     def _eval_agg(sub_df, column, ag):
         s = sub_df[column].dropna()
@@ -1474,14 +1486,6 @@ def compute_period_trend(
             "trend_status": "no_prior_data",
             "trend_label": "No prior data",
         }
-
-    # Normalize prior value for sum/total/count when row counts differ on index split (Fix F02)
-    # E.g., 3 rows split into 1 prior row and 2 current rows on a flat series should have 0% trend.
-    ag_lower = str(agg).lower()
-    if ag_lower in ["sum", "total", "count"] and not has_date_split:
-        if len(prior_df) > 0 and len(curr_df) > 0 and len(prior_df) != len(curr_df):
-            scale_factor = len(curr_df) / len(prior_df)
-            prior_val = prior_val * scale_factor
 
     if prior_val == 0:
         if curr_val == 0:
@@ -1593,7 +1597,7 @@ def compute_kpis(df: pd.DataFrame,
                     formatted = f"{val:,.1f}"
             
             # Honest period trend computation (Defect I-09 / FYP-09 eliminated)
-            trend_info = compute_period_trend(df, col, agg)
+            trend_info = compute_period_trend(df, col, agg, kpi_spec.get("date_column"), kpi_spec.get("comparison"))
             
             kpis.append({
                 "label": kpi_spec.get(

@@ -83,9 +83,8 @@ class BM25IndexManager:
             self.doc_ids.append(c["id"])
             self.chunk_metadatas.append(c.get("metadata", {}))
             
-        if self.corpus:
-            self.bm25 = BM25Okapi(self.corpus)
-            self.save_index()
+        self.bm25 = BM25Okapi(self.corpus) if any(self.corpus) else None
+        self.save_index()
 
     def search(self, query: str, top_k: int = 50) -> List[Dict[str, Any]]:
         if not self.bm25 or not self.doc_ids:

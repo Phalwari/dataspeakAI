@@ -149,7 +149,10 @@ def test_no_synthetic_mock_people_on_unsupported_or_missing_connection():
 def test_databases_router_rejects_mock_fallbacks_when_connection_unavailable():
     """Verifies get_database_tables and get_database_stats raise HTTP 400 instead of mock tables."""
     from fastapi import HTTPException
-    from backend.routers.databases import get_database_tables, get_database_stats
+    try:
+        from routers.databases import get_database_tables, get_database_stats
+    except ImportError:
+        from backend.routers.databases import get_database_tables, get_database_stats
 
     class MockUser:
         id = 1

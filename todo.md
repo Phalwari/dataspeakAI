@@ -90,11 +90,11 @@ Readiness is derived from dependencies and current evidence, not just the writte
 | Field | Current value |
 |---|---|
 | Selected release / phase | NR1 / Phase NR-2 — Make results trustworthy |
-| Planning status | Ready for implementation (All 5 sprints and 43 tasks mapped, verified against current codebase, and checked for dependencies) |
-| Baseline revision / working directory | `5a4a6013ddc1dae56efe335de08768ee4b420a1e` (branch `main`) / `d:\dataspeakAI` |
+| Planning status | Needs verification — 2026-10-19 independent audit reproduced seven NR-2 acceptance gaps; see the readiness audit below |
+| Baseline revision / working directory | Audited `6764c5713ef8c49bd4ea55d27e36e56ca02f4f46` (branch `main`) / `d:\dataspeakAI`; original planning baseline retained below |
 | Planner / implementation owner / reviewer | Antigravity AI Engineer (planning) / Independent QA Reviewer |
-| First ready task | `NR-2.1-A-T01` — Define each metric's aggregation, entity/row grain, unit, source column, date field, filters, and missing-value behavior |
-| Last update | 2026-10-18 — Phase NR-2 mapped into actionable plan |
+| First ready task | `QA-NR2-20261019-F01` — Repair invented period growth on undated data, then follow dependency-ready remediation tasks |
+| Last update | 2026-10-19 — Independent NR-2 readiness audit; delivery sign-off withheld pending corrective verification |
 
 Insert the selected phase's actual milestone, sprint, and task blocks here, before the template below. Keep any brought-forward prerequisites in a clearly labeled group. When changing phases, retain previous phase summaries and unresolved work; completed task records stay in the existing archive. The template below is illustrative and must never be treated as executable work.
 
@@ -732,6 +732,21 @@ Insert the selected phase's actual milestone, sprint, and task blocks here, befo
 
 ---
 
+#### Independent NR-2 readiness audit — 2026-10-19
+
+**Current decision: Needs verification; not ready for completion sign-off.** This audit supersedes historical completion labels for current acceptance purposes. Report: [NR-2 readiness verification](docs/reports/nr2_readiness_verification_2026-10-19.md). Application implementation is unchanged; the seven opt-in probes in `tests/manual/nr2_readiness_verification.py` currently fail without expected-failure masking. Independent NR-3.1-A infrastructure and NR-3.2-A verification work may start once their explicit prerequisites are verified; later product phases still require the core release gate.
+
+**Current verification:** Frontend 35 passed/build passed; FYP 19 passed; full backend 620 passed, 10 failed, 5 setup errors. A cached-model NR-2 rerun passed all 44 tests, resolving the seven model-cache-related outcomes; eight other full-suite contract/fixture failures remain. NR-0 (37) and NR-1 (44) passed in the full run. These are separate runs, not a combined full-suite pass.
+
+- [ ] **QA-NR2-20261019-F01 (P1) — Use real periods or unavailable status for KPI growth**. Reopens `NR-2.1-A-T05/T06`; target `backend/services/automl_service.py`; pass `test_undated_rows_do_not_invent_period_growth` and explicit period/timezone fixtures. Depends on: None (reproduced acceptance defect).
+- [ ] **QA-NR2-20261019-F02 (P1) — Enforce an actual AutoML execution deadline**. Reopens `NR-2.1-B-T07`; target `backend/services/automl_service.py`; pass `test_training_budget_releases_caller` and prove bounded worker cancellation/resources. Depends on: None (reproduced acceptance defect).
+- [ ] **QA-NR2-20261019-F03 (P1) — Honor temporal and grouped model validation**. Reopens `NR-2.1-B-T03/T04`; targets `backend/services/automl_service.py`, `backend/schemas.py`; pass `test_temporal_validation_never_trains_on_future_rows` and repeated-entity isolation fixtures. Depends on: None (reproduced acceptance defect).
+- [ ] **QA-NR2-20261019-F06 (P1) — Propagate ingestion failures to bounded worker retries**. Reopens `NR-2.2-B-T03/T04`; targets `backend/routers/documents.py`, `backend/ingestion/task_queue.py`; pass `test_failed_ingestion_is_not_reported_as_successful_worker_job` and transient/permanent failure cases. Depends on: None for local repair; production retry evidence requires `NR-3.1-A` services.
+- [ ] **QA-NR2-20261019-F07 (P1) — Preserve matching FAISS/BM25 membership across overlapping publications**. Reopens `NR-2.2-B-T07`; targets `backend/routers/documents.py`, `backend/search/generation_manager.py`; pass `test_serialized_publication_preserves_dense_sparse_membership` and concurrent upload/retry/delete tests. Depends on: None for local repair; multi-instance evidence requires `NR-3.1-A` storage/job contract.
+- [ ] **QA-NR2-20261019-F04 (P2) — Evaluate only the selected model on the final holdout**. Reopens `NR-2.1-B-T05`; target `backend/services/automl_service.py`; pass `test_only_selected_candidate_uses_final_holdout`. Depends on: `QA-NR2-20261019-F03` validation contract.
+- [ ] **QA-NR2-20261019-F05 (P2) — Return unverified grounding when model initialization fails**. Reopens `NR-2.2-A-T01`; target `backend/services/citation_service.py`; pass `test_embedding_initialization_failure_returns_unverified` and caller/UI propagation checks. Depends on: None (reproduced acceptance defect).
+- [ ] **QA-NR2-20261019-EVIDENCE (P2) — Close verification and tracker gaps before phase sign-off**. Resolve the full-suite failures by cause, rerun acceptance gates, provide end-to-end evaluation/performance evidence, and reconcile active/archive task blocks. The pre-audit tracker has 27 checked active NR-2 blocks, 34 unique archived IDs, and nine unarchived ingestion tasks. Depends on: the seven repairs above plus the explicitly required production/integration contracts.
+
 #### Phase NR-2 Delivery Gate Verification Check (PENDING)
 - [ ] Verify all Sprint NR-2.1-A tasks completed and archived (8/8 tasks).
 - [ ] Verify all Sprint NR-2.1-B tasks completed and archived (8/8 tasks).
@@ -1166,6 +1181,8 @@ The implementation session must receive the saved plan in the same up-to-date ch
 ---
 
 ## 📦 Archived / Completed Tasks
+- [x] **QA-NR2-20261019 — Independently verify readiness through Phase NR-2**. [Completed: 2026-10-19 | Codex / QA | Verification audit delivered; NR-2 sign-off withheld, with seven reproduced gaps and corrective tasks recorded.] Evidence: [readiness report](docs/reports/nr2_readiness_verification_2026-10-19.md), `tests/manual/nr2_readiness_verification.py`, `.agents/nr2-readiness/`. Completion applies to the audit only; no implementation defect or phase gate is marked fixed.
+
 - [x] **NR-0.1-A-T01 — Record the reproducible implementation baseline**
   - *Completed:* 2026-10-16 | Antigravity AI Engineer | Full baseline documented and runtime isolated
   - **Priority / state:** P0 / Completed.

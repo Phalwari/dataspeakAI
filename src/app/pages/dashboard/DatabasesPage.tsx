@@ -71,6 +71,8 @@ export function DatabasesPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [database, setDatabase] = useState("");
+  const [connectionString, setConnectionString] = useState("");
+  const [useConnectionString, setUseConnectionString] = useState(false);
   
   const [testStatus, setTestStatus] = useState<"idle" | "testing" | "success" | "error">("idle");
   const [testMessage, setTestMessage] = useState("");
@@ -147,13 +149,18 @@ export function DatabasesPage() {
     if (!token) return;
 
     try {
+      const payload: any = { name, db_type: dbType, host, username, password, database };
+      if (useConnectionString || connectionString) {
+        payload.connection_string = connectionString;
+      }
+
       const response = await fetch(`${API_BASE_URL}/api/databases/test`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`
         },
-        body: JSON.stringify({ name, db_type: dbType, host, username, password, database })
+        body: JSON.stringify(payload)
       });
 
       const data = await response.json();
@@ -175,13 +182,18 @@ export function DatabasesPage() {
     if (!token) return;
 
     try {
+      const payload: any = { name, db_type: dbType, host, username, password, database };
+      if (useConnectionString || connectionString) {
+        payload.connection_string = connectionString;
+      }
+
       const response = await fetch(`${API_BASE_URL}/api/databases`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`
         },
-        body: JSON.stringify({ name, db_type: dbType, host, username, password, database })
+        body: JSON.stringify(payload)
       });
 
       if (response.ok) {
@@ -192,6 +204,8 @@ export function DatabasesPage() {
         setUsername("");
         setPassword("");
         setDatabase("");
+        setConnectionString("");
+        setUseConnectionString(false);
         setTestStatus("idle");
         fetchDatabases(); // Refresh list
       }
@@ -323,8 +337,33 @@ export function DatabasesPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="db-type">Database Type</Label>
-                <Select value={dbType} onValueChange={setDbType}>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="db-type">Database Type</Label>
+                  {dbType !== "sqlite" && (
+                    <div className="flex gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setUseConnectionString(false)}
+                        className={`text-xs px-2 py-0.5 rounded transition-colors ${!useConnectionString ? "bg-blue-100 text-blue-700 font-semibold" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+                      >
+                        Host & Port
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setUseConnectionString(true)}
+                        className={`text-xs px-2 py-0.5 rounded transition-colors ${useConnectionString ? "bg-blue-100 text-blue-700 font-semibold" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+                      >
+                        Connection URI
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <Select value={dbType} onValueChange={(val) => {
+                  setDbType(val);
+                  if (val === "mongodb") {
+                    setUseConnectionString(true);
+                  }
+                }}>
                   <SelectTrigger id="db-type">
                     <SelectValue placeholder="Select database type" />
                   </SelectTrigger>
@@ -332,49 +371,71 @@ export function DatabasesPage() {
                     <SelectItem value="postgresql">PostgreSQL</SelectItem>
                     <SelectItem value="mysql">MySQL</SelectItem>
                     <SelectItem value="mongodb">MongoDB</SelectItem>
-                    <SelectItem value="firebase">Firebase</SelectItem>
                     <SelectItem value="mariadb">MariaDB</SelectItem>
                     <SelectItem value="sqlite">SQLite</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
-              {dbType !== "sqlite" && (
+              {useConnectionString && dbType !== "sqlite" ? (
+                <div className="space-y-2">
+                  <Label htmlFor="db-conn-str">Connection URI / String</Label>
+                  <Input
+                    id="db-conn-str"
+                    placeholder={
+                      dbType === "mongodb"
+                        ? "mongodb+srv://user:pass@cluster.mongodb.net/dbname"
+                        : dbType === "postgresql"
+                        ? "postgresql://user:pass@host:5432/dbname"
+                        : "mysql://user:pass@host:3306/dbname"
+                    }
+                    value={connectionString}
+                    onChange={(e) => setConnectionString(e.target.value)}
+                  />
+                  <p className="text-xs text-gray-500">
+                    Paste your full connection URI. Credentials will be securely encrypted at rest.
+                  </p>
+                </div>
+              ) : (
                 <>
-                  <div className="space-y-2">
-                    <Label htmlFor="db-host">Host</Label>
-                    <Input
-                      id="db-host"
-                      placeholder="localhost:5432"
-                      value={host}
-                      onChange={(e) => setHost(e.target.value)}
-                    />
-                  </div>
+                  {dbType !== "sqlite" && (
+                    <>
+                      <div className="space-y-2">
+                        <Label htmlFor="db-host">Host</Label>
+                        <Input
+                          id="db-host"
+                          placeholder={dbType === "mongodb" ? "cluster0.mongodb.net" : "localhost:5432"}
+                          value={host}
+                          onChange={(e) => setHost(e.target.value)}
+                        />
+                      </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="db-username">Username</Label>
-                      <Input id="db-username" placeholder="admin" value={username} onChange={(e) => setUsername(e.target.value)} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="db-password">Password</Label>
-                      <Input id="db-password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} />
-                    </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="db-username">Username</Label>
+                          <Input id="db-username" placeholder="admin" value={username} onChange={(e) => setUsername(e.target.value)} />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="db-password">Password</Label>
+                          <Input id="db-password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} />
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  <div className="space-y-2">
+                    <Label htmlFor="db-database">
+                      {dbType === "sqlite" ? "Full SQLite File Path" : "Technical Database Name"}
+                    </Label>
+                    <Input 
+                      id="db-database" 
+                      placeholder={dbType === "sqlite" ? "e.g. C:\\Users\\...\\chinook.db" : "e.g. my_database"} 
+                      value={database} 
+                      onChange={(e) => setDatabase(e.target.value)} 
+                    />
                   </div>
                 </>
               )}
-
-              <div className="space-y-2">
-                <Label htmlFor="db-database">
-                  {dbType === "sqlite" ? "Full SQLite File Path" : "Technical Database Name"}
-                </Label>
-                <Input 
-                  id="db-database" 
-                  placeholder={dbType === "sqlite" ? "e.g. C:\\Users\\...\\chinook.db" : "e.g. my_database"} 
-                  value={database} 
-                  onChange={(e) => setDatabase(e.target.value)} 
-                />
-              </div>
 
 
               {testMessage && (
@@ -597,8 +658,16 @@ export function DatabasesPage() {
                           {tableData.map((row, i) => (
                             <tr key={i} className="hover:bg-gray-50 border-b">
                               {Object.values(row).map((val: any, j) => (
-                                <td key={j} className="px-4 py-2 text-gray-600 truncate max-w-[200px]">
-                                  {val === null ? <span className="text-gray-400 italic">null</span> : String(val)}
+                                <td key={j} className="px-4 py-2 text-gray-600 truncate max-w-[250px]">
+                                  {val === null || val === undefined ? (
+                                    <span className="text-gray-400 italic">null</span>
+                                  ) : typeof val === "object" ? (
+                                    <span className="font-mono text-xs text-indigo-700 bg-indigo-50 px-1 py-0.5 rounded">
+                                      {JSON.stringify(val)}
+                                    </span>
+                                  ) : (
+                                    String(val)
+                                  )}
                                 </td>
                               ))}
                             </tr>
