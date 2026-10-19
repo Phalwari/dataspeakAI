@@ -3,8 +3,8 @@
 - **Date:** 2026-10-20
 - **Branch:** `fix/db-connection-enterprise`
 - **Scope:** connection creation, URL validation, encryption, SSRF and SQLite sandboxing, pooling, schema discovery, previews, query execution, errors, and tenant access.
-- **Audit status:** baseline review completed before this task's fixes. Existing uncommitted workspace changes were present in several backend and frontend files before the audit; they are being preserved and are not treated as changes authored by this task.
-- **Execution note:** no external database, server, or package installation was used during this audit. SQLite execution tests are pending the user's approval, which has now been granted for temporary local SQLite files only.
+- **Audit status:** baseline review completed before fixes; remediation status is recorded in [`DB_CONNECTION_SECURITY.md`](DB_CONNECTION_SECURITY.md). Existing uncommitted workspace changes were present in several backend and frontend files before the audit; they have been preserved and are not treated as changes authored by this task.
+- **Execution note:** no external database, server, or package installation was used. The user approved temporary local SQLite tests; those tests ran successfully.
 
 ## Findings
 
@@ -97,6 +97,7 @@
 ## Verification constraints
 
 - `python -m pytest --version` reports `pytest 9.1.1`.
-- Existing `tests/test_databases_connection_and_preview.py` was not run because it contains external database connections and credentials.
+- `tests/test_databases_connection_and_preview.py` was replaced with offline fake-client coverage and was run.
 - No connection to MySQL, MariaDB, PostgreSQL, MongoDB, any internal IP, or any cloud resource was attempted.
-- Temporary local SQLite execution tests may be run after implementation under the user's explicit approval.
+- Temporary SQLite execution ran under the user's explicit approval. Latest focused run: 21 passed, 22 warnings; see `DB_CONNECTION_SECURITY.md` for the exact command.
+- A 100-user load test was not run; capacity is not verified by execution.
