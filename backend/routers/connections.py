@@ -137,6 +137,19 @@ def get_connection_tables(
     if not c:
         raise HTTPException(status_code=404, detail="Database connection not found.")
 
+    if (c.db_type or "").lower() == "mongodb":
+        try:
+            from routers.databases import _get_mongo_client_and_db
+
+            client, mongo_db = _get_mongo_client_and_db(c)
+            try:
+                return sorted(name for name in mongo_db.list_collection_names() if not name.startswith("system."))
+            finally:
+                client.close()
+        except Exception:
+            logger.exception("MongoDB collection listing failed")
+            raise HTTPException(status_code=400, detail="Failed to fetch database collections.") from None
+
     # Check cached tables_metadata first
     if c.tables_metadata:
         try:
