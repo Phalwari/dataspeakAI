@@ -17,7 +17,7 @@ from database import get_db, SessionLocal
 from dependencies import get_current_user
 from services.db_utils import encrypt_password, decrypt_password, get_connection_url
 from services.connection_factory import DatabaseConnectionFactory
-from services.db_pool import get_engine
+from services.db_pool import get_engine, invalidate_engine
 from services.database_connection_service import db_connection_service
 
 router = APIRouter(prefix="/api/connections", tags=["Database Connections"])
@@ -171,7 +171,8 @@ def get_connection_tables(
         inspector = inspect(engine)
         return inspector.get_table_names()
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to inspect tables: {str(e)}")
+        logger.error("Database table inspection failed (%s)", type(e).__name__)
+        raise HTTPException(status_code=400, detail="Failed to inspect database tables") from None
 
 
 @router.post("/{connection_id}/retest")
@@ -233,7 +234,8 @@ def retest_connection(
 
     except Exception as ex:
         success = False
-        msg = str(ex)
+        logger.error("Database connection retest failed (%s)", type(ex).__name__)
+        msg = "Database connection test failed"
 
     c.status = "connected" if success else "error"
     if schema:
@@ -267,6 +269,9 @@ def delete_connection(
     if not c:
         raise HTTPException(status_code=404, detail="Database connection not found.")
 
+    old_url = DatabaseConnectionFactory.get_connection_url(c)
+    if old_url:
+        invalidate_engine(old_url)
     db.delete(c)
     db.commit()
     return {"message": "Database connection deleted successfully", "id": connection_id}
@@ -291,6 +296,7 @@ def update_connection(
     if not c:
         raise HTTPException(status_code=404, detail="Database connection not found.")
 
+    old_url = DatabaseConnectionFactory.get_connection_url(c)
     update_dict = update_data.model_dump(exclude_unset=True)
     if "password" in update_dict and update_dict["password"]:
         c.password = encrypt_password(update_dict["password"])
@@ -301,6 +307,8 @@ def update_connection(
             setattr(c, key, value)
 
     db.commit()
+    if old_url:
+        invalidate_engine(old_url)
     db.refresh(c)
     return {
         "id": c.id,

@@ -62,7 +62,7 @@ def get_pg_pool(host, port, username, password, database):
                 )
             return _pg_pools[key]
     except Exception as e:
-        logger.warning(f"[PG Pool] Failed to create pool: {e}")
+        logger.error("PostgreSQL pool creation failed (%s)", type(e).__name__)
         return None
 
 
@@ -108,7 +108,7 @@ def get_mysql_pool(host, port, username, password, database):
             _mysql_pools[key] = conn
             return conn
     except Exception as e:
-        logger.warning(f"[MySQL Pool] Failed to create connection: {e}")
+        logger.error("MySQL connection pool creation failed (%s)", type(e).__name__)
         return None
 
 
@@ -223,7 +223,8 @@ class DatabaseConnectionService:
                     return False, "Firestore credentials must be a valid JSON string."
             return True, "Firestore connection test successful"
         except Exception as e:
-            return False, f"Firestore connection failed: {str(e)}"
+            logger.error("Firestore connection test failed (%s)", type(e).__name__)
+            return False, "Firestore connection failed"
 
     @staticmethod
     def get_firestore_schema(connection_string: str) -> Dict[str, Any]:
@@ -320,7 +321,8 @@ class DatabaseConnectionService:
             conn.close()
             return True, "PostgreSQL connection successful"
         except Exception as e:
-            return False, f"PostgreSQL connection failed: {str(e)}"
+            logger.error("PostgreSQL connection test failed (%s)", type(e).__name__)
+            return False, "PostgreSQL connection failed"
     
     @staticmethod
     def test_mongodb(connection_string: str) -> Tuple[bool, str]:
@@ -335,7 +337,8 @@ class DatabaseConnectionService:
             temp_client.close()  # safe — this is a one-off test client, not the shared pool
             return True, "MongoDB connection successful"
         except Exception as e:
-            return False, f"MongoDB connection failed: {str(e)}"
+            logger.error("MongoDB connection test failed (%s)", type(e).__name__)
+            return False, "MongoDB connection failed"
     
     @staticmethod
     def test_mysql(host: str, port: int, username: str, password: str, database: Optional[str] = None) -> Tuple[bool, str]:
@@ -352,7 +355,8 @@ class DatabaseConnectionService:
             conn.close()
             return True, "MySQL connection successful"
         except Exception as e:
-            return False, f"MySQL connection failed: {str(e)}"
+            logger.error("MySQL connection test failed (%s)", type(e).__name__)
+            return False, "MySQL connection failed"
             
     @staticmethod
     def test_sqlite(database_path: str) -> Tuple[bool, str]:
@@ -368,7 +372,8 @@ class DatabaseConnectionService:
             conn.close()
             return True, "SQLite connection successful"
         except Exception as e:
-            return False, f"SQLite connection failed: {str(e)}"
+            logger.error("SQLite connection test failed (%s)", type(e).__name__)
+            return False, "SQLite connection failed"
     
     @staticmethod
     def get_postgresql_schema(host: Optional[str] = None, port: Optional[int] = 5432, username: Optional[str] = None, password: Optional[str] = None, database: Optional[str] = "postgres", connection_string: Optional[str] = None) -> Dict[str, Any]:
@@ -441,7 +446,8 @@ class DatabaseConnectionService:
             conn.close()
             return schema
         except Exception as e:
-            return {"error": str(e)}
+            logger.error("PostgreSQL schema discovery failed (%s)", type(e).__name__)
+            return {"error": "Database schema discovery failed"}
     
     @staticmethod
     def get_mongodb_schema(connection_string: Optional[str] = None) -> Dict[str, Any]:
@@ -483,7 +489,8 @@ class DatabaseConnectionService:
             client.close()
             return schema
         except Exception as e:
-            return {"error": str(e)}
+            logger.error("MongoDB schema discovery failed (%s)", type(e).__name__)
+            return {"error": "Database schema discovery failed"}
     
     @staticmethod
     def get_mysql_schema(host: Optional[str] = "localhost", port: Optional[int] = 3306, username: Optional[str] = "", password: Optional[str] = "", database: Optional[str] = "") -> Dict[str, Any]:
@@ -514,7 +521,8 @@ class DatabaseConnectionService:
             conn.close()
             return schema
         except Exception as e:
-            return {"error": str(e)}
+            logger.error("MySQL schema discovery failed (%s)", type(e).__name__)
+            return {"error": "Database schema discovery failed"}
 
     @staticmethod
     def get_sqlite_schema(database_path: str) -> Dict[str, Any]:
@@ -542,7 +550,8 @@ class DatabaseConnectionService:
             conn.close()
             return schema
         except Exception as e:
-            return {"error": str(e)}
+            logger.error("SQLite schema discovery failed (%s)", type(e).__name__)
+            return {"error": "Database schema discovery failed"}
 
     @staticmethod
     def get_tables(db_type: str, host: Optional[str] = None, port: Optional[int] = None, username: Optional[str] = None, password: Optional[str] = None, database: Optional[str] = None, connection_string: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -617,7 +626,8 @@ class DatabaseConnectionService:
                 ]
             return tables_info
         except Exception as e:
-            return [{"error": str(e)}]
+            logger.error("Database table listing failed (%s)", type(e).__name__)
+            return [{"error": "Database table listing failed"}]
 
     @staticmethod
     def preview_table(db_type: str, host: Optional[str] = None, port: Optional[int] = None, username: Optional[str] = None, password: Optional[str] = None, database: Optional[str] = None, connection_string: Optional[str] = None, table_name: Optional[str] = None, limit: int = 50, filter_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -772,7 +782,8 @@ class DatabaseConnectionService:
                 return {"columns": columns, "rows": rows}
             return {"error": "Unsupported database type"}
         except Exception as e:
-            return {"error": str(e)}
+            logger.error("Database preview failed (%s)", type(e).__name__)
+            return {"error": "Database preview failed"}
 
     @staticmethod
     def execute_query(db_type: str, host: str = "localhost", port: Optional[int] = None, username: str = "", password: Optional[str] = None, database: Optional[str] = None, connection_string: Optional[str] = None, query: Optional[str] = None) -> List[Dict[str, Any]]:

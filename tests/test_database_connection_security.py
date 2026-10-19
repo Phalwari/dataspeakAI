@@ -34,6 +34,10 @@ def test_credential_encryption_requires_key_in_production(monkeypatch):
         crypto_service.encrypt_secret("fake-database-password")
 
 
+def test_legacy_plaintext_credential_remains_decryptable():
+    assert crypto_service.decrypt_secret("legacy-fake-password") == "legacy-fake-password"
+
+
 def test_ssrf_guard_rejects_private_dns_resolution(monkeypatch):
     monkeypatch.setattr(DatabaseConnectionFactory, "allow_private_networks", classmethod(lambda _cls: False))
     monkeypatch.setattr(
@@ -122,8 +126,67 @@ def test_engine_pool_reuses_and_invalidates_sqlite_engine():
     url = "sqlite://"
 
     first = get_engine(url)
+    second = get_engine(url, connect_args={"timeout": 5.0})
     assert get_engine(url) is first
+    assert get_engine(url, connect_args={"timeout": 5.0}) is second
     assert invalidate_engine(url) is True
     assert get_engine(url) is not first
     assert invalidate_engine(url) is True
     assert invalidate_engine(url) is False
+
+
+def test_connection_test_error_does_not_expose_driver_details(monkeypatch):
+    monkeypatch.setattr(
+        DatabaseConnectionFactory,
+        "validate_connection_string",
+        classmethod(lambda _cls, _value: "sqlite://"),
+    )
+
+    def fail_create_engine(*_args, **_kwargs):
+        raise RuntimeError("driver diagnostic fake-password")
+
+    monkeypatch.setattr("services.connection_factory.create_engine", fail_create_engine)
+
+    success, message = DatabaseConnectionFactory.test_connection(
+        "sqlite", connection_string="sqlite://"
+    )
+
+    assert success is False
+    assert message == "Database connection failed"
+    assert "fake-password" not in message
+
+
+def test_cross_tenant_connection_lookup_returns_not_found():
+    from fastapi import HTTPException
+    from types import SimpleNamespace
+    import models
+    from routers.databases import get_accessible_connection
+
+    class Query:
+        def __init__(self):
+            self.filters = []
+
+        def filter(self, *criteria):
+            self.filters.extend(criteria)
+            return self
+
+        def first(self):
+            return None
+
+    class Session:
+        def __init__(self):
+            self.query_obj = Query()
+
+        def query(self, _model):
+            return self.query_obj
+
+    db = Session()
+    tenant_b_user = SimpleNamespace(tenant_id=202, role="Admin", is_platform_admin=False)
+
+    with pytest.raises(HTTPException) as exc:
+        get_accessible_connection(101, tenant_b_user, db)
+
+    assert exc.value.status_code == 404
+    clauses = {clause.left.key: clause.right.value for clause in db.query_obj.filters}
+    assert clauses["id"] == 101
+    assert clauses["tenant_id"] == 202

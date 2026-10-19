@@ -11,7 +11,12 @@ from sqlalchemy.engine import Engine
 
 _ENGINE_CACHE_LIMIT = 128
 _engine_cache: OrderedDict[str, Engine] = OrderedDict()
+_engine_url_fingerprints: dict[str, str] = {}
 _lock = threading.RLock()
+
+
+def _url_fingerprint(url: str) -> str:
+    return hashlib.sha256(url.encode("utf-8")).hexdigest()
 
 
 def _cache_key(url: str, connect_args: Mapping[str, Any] | None = None) -> str:
@@ -46,21 +51,28 @@ def get_engine(url: str, connect_args: Mapping[str, Any] | None = None) -> Engin
 
         engine = create_engine(url, **options)
         _engine_cache[key] = engine
+        _engine_url_fingerprints[key] = _url_fingerprint(url)
         if len(_engine_cache) > _ENGINE_CACHE_LIMIT:
-            _, evicted = _engine_cache.popitem(last=False)
+            evicted_key, evicted = _engine_cache.popitem(last=False)
+            _engine_url_fingerprints.pop(evicted_key, None)
             evicted.dispose()
         return engine
 
 
 def invalidate_engine(url: str, connect_args: Mapping[str, Any] | None = None) -> bool:
     """Remove and dispose one cached engine after credentials/connection changes."""
-    key = _cache_key(url, connect_args)
     with _lock:
-        engine = _engine_cache.pop(key, None)
-    if engine is None:
-        return False
-    engine.dispose()
-    return True
+        if connect_args is not None:
+            keys = [_cache_key(url, connect_args)]
+        else:
+            fingerprint = _url_fingerprint(url)
+            keys = [key for key, value in _engine_url_fingerprints.items() if value == fingerprint]
+        engines = [_engine_cache.pop(key) for key in keys if key in _engine_cache]
+        for key in keys:
+            _engine_url_fingerprints.pop(key, None)
+    for engine in engines:
+        engine.dispose()
+    return bool(engines)
 
 
 def clear_engine_cache() -> None:
@@ -68,5 +80,6 @@ def clear_engine_cache() -> None:
     with _lock:
         engines = list(_engine_cache.values())
         _engine_cache.clear()
+        _engine_url_fingerprints.clear()
     for engine in engines:
         engine.dispose()

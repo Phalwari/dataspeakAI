@@ -17,7 +17,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine, URL, make_url
 from sqlalchemy.pool import NullPool
 
-from services.crypto_service import decrypt_secret, redact_connection_url
+from services.crypto_service import decrypt_secret
 
 logger = logging.getLogger(__name__)
 
@@ -208,7 +208,7 @@ class DatabaseConnectionFactory:
                 validated = cls.validate_connection_string(decrypted)
                 return validated
             except Exception as exc:
-                logger.warning("Failed to validate connection_string: %s", exc)
+                logger.error("Failed to validate database connection URI (%s)", type(exc).__name__)
                 return None
         
         db_type = _get_attr("db_type")
@@ -226,7 +226,7 @@ class DatabaseConnectionFactory:
             )
             return url.render_as_string(hide_password=False)
         except Exception as exc:
-            logger.warning("Could not assemble database connection URL: %s", exc)
+            logger.error("Could not assemble database connection URL (%s)", type(exc).__name__)
             return None
 
     @classmethod
@@ -367,9 +367,8 @@ class DatabaseConnectionFactory:
                 client.close()
                 return True, None
             except Exception as exc:
-                err_msg = redact_connection_url(str(exc))
-                logger.warning("MongoDB connection test failed: %s", err_msg)
-                return False, f"MongoDB connection failed: {err_msg}"
+                logger.error("MongoDB connection test failed (%s)", type(exc).__name__)
+                return False, "MongoDB connection failed"
 
         if connection_string:
             try:
@@ -380,9 +379,8 @@ class DatabaseConnectionFactory:
                 engine.dispose()
                 return True, None
             except Exception as exc:
-                err_msg = redact_connection_url(str(exc))
-                logger.warning("Database connection test failed: %s", err_msg)
-                return False, f"Connection failed: {err_msg}"
+                logger.error("Database connection test failed (%s)", type(exc).__name__)
+                return False, "Database connection failed"
         
         try:
             engine = cls.create_engine_instance(
@@ -399,6 +397,5 @@ class DatabaseConnectionFactory:
             engine.dispose()
             return True, None
         except Exception as exc:
-            err_msg = redact_connection_url(str(exc))
-            logger.warning("Database connection test failed: %s", err_msg)
-            return False, f"Connection failed: {err_msg}"
+            logger.error("Database connection test failed (%s)", type(exc).__name__)
+            return False, "Database connection failed"

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+import logging
 from sqlalchemy.orm import Session
 from typing import List
 import models, schemas
@@ -9,9 +10,10 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 from services.db_utils import get_connection_url, encrypt_password, decrypt_password
 from services.connection_factory import DatabaseConnectionFactory
-from services.db_pool import get_engine
+from services.db_pool import get_engine, invalidate_engine
 
 router = APIRouter(prefix="/api/databases", tags=["databases"])
+logger = logging.getLogger("dataspeak.databases")
 
 
 def get_accessible_connection(
@@ -124,7 +126,8 @@ def add_database(
         elif target_host:
             DatabaseConnectionFactory.validate_host_ssrf(target_host, db_conn.port)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        logger.error("Database target validation failed (%s)", type(exc).__name__)
+        raise HTTPException(status_code=400, detail="Database target is invalid or unavailable") from None
     
     new_db = models.DatabaseConnection(
         tenant_id=current_user.tenant_id,
@@ -161,7 +164,10 @@ def delete_database(
     
     if not db_conn:
         raise HTTPException(status_code=404, detail="Database connection not found")
-        
+
+    old_url = DatabaseConnectionFactory.get_connection_url(db_conn)
+    if old_url:
+        invalidate_engine(old_url)
     db.delete(db_conn)
     db.commit()
     return {"message": "Database deleted successfully"}
@@ -182,7 +188,8 @@ def get_database_tables(
             client.close()
             return sorted(cols)
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Failed to fetch MongoDB collections: {str(e)}")
+            logger.error("MongoDB collection listing failed (%s)", type(e).__name__)
+            raise HTTPException(status_code=400, detail="Failed to fetch database collections") from None
 
     connection_url = DatabaseConnectionFactory.get_connection_url(db_conn)
     if not connection_url:
@@ -229,7 +236,8 @@ def get_table_data(
             client.close()
             return rows
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Failed to fetch MongoDB documents: {str(e)}")
+            logger.error("MongoDB preview failed (%s)", type(e).__name__)
+            raise HTTPException(status_code=400, detail="Failed to fetch table preview") from None
 
     from services.sql_engine import execute_safe_sql
     try:
@@ -249,7 +257,8 @@ def get_table_data(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to fetch data: {str(e)}")
+        logger.error("Database preview failed (%s)", type(e).__name__)
+        raise HTTPException(status_code=400, detail="Failed to fetch table preview") from None
 
 
 @router.get("/{db_id}/stats")
@@ -277,7 +286,8 @@ def get_database_stats(
                 "tables": tables_info
             }
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Failed to fetch stats: {str(e)}")
+            logger.error("MongoDB statistics query failed (%s)", type(e).__name__)
+            raise HTTPException(status_code=400, detail="Failed to fetch database statistics") from None
 
     connection_url = DatabaseConnectionFactory.get_connection_url(db_conn)
     if not connection_url:
@@ -304,7 +314,8 @@ def get_database_stats(
         }
         return stats
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to fetch stats: {str(e)}")
+        logger.error("Database statistics query failed (%s)", type(e).__name__)
+        raise HTTPException(status_code=400, detail="Failed to fetch database statistics") from None
 
 
 @router.get("/{db_id}/tables/{table_name}/stats")
@@ -328,7 +339,8 @@ def get_table_stats(
             client.close()
             return {"rows": row_count, "columns": col_count}
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Failed to fetch table stats: {str(e)}")
+            logger.error("MongoDB table statistics query failed (%s)", type(e).__name__)
+            raise HTTPException(status_code=400, detail="Failed to fetch table statistics") from None
 
     connection_url = DatabaseConnectionFactory.get_connection_url(db_conn)
     if not connection_url:
@@ -359,7 +371,8 @@ def get_table_stats(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to fetch table stats: {str(e)}")
+        logger.error("Database table statistics query failed (%s)", type(e).__name__)
+        raise HTTPException(status_code=400, detail="Failed to fetch table statistics") from None
 
 
 @router.post("/test")
@@ -386,5 +399,5 @@ def test_database_connection(
         connection_string=conn_str,
     )
     if not success:
-        raise HTTPException(status_code=400, detail=error_msg or "Connection test failed")
+        raise HTTPException(status_code=400, detail="Database connection test failed")
     return {"status": "success", "message": "Connection successful"}
