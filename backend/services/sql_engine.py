@@ -22,6 +22,11 @@ from services.llm_generation_service import llm_gateway
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.pool import NullPool
 from sqlalchemy.exc import SQLAlchemyError
+from services.db_pool import get_engine as get_pooled_engine
+
+_SQL_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=32, thread_name_prefix="dataspeak-sql"
+)
 
 
 class SafeExecutionRequest(BaseModel):
@@ -677,7 +682,7 @@ def execute_safe_sql(
 
     def _run_query_internal():
         try:
-            engine = create_engine(connection_url, poolclass=NullPool, connect_args=connect_args)
+            engine = get_pooled_engine(connection_url, connect_args=connect_args)
             active_conn_info["engine"] = engine
             with engine.connect() as conn:
                 try:
@@ -701,7 +706,6 @@ def execute_safe_sql(
                 ]
                 rows = mask_pii_rows(columns, rows)
 
-            engine.dispose()
             exec_time_ms = round((time.time() - start_time) * 1000, 2)
             return {
                 "columns": columns,
@@ -774,16 +778,8 @@ def execute_safe_sql(
             except Exception as cancel_err:
                 logger.warning(f"Failed to cancel timed out database connection: {cancel_err}")
         
-        eng = active_conn_info.get("engine")
-        if eng:
-            try:
-                eng.dispose()
-            except Exception:
-                pass
-
-        executor.shutdown(wait=False, cancel_futures=True)
+        # Engines are shared across requests; disposing here can interrupt
+        # unrelated work. Driver timeouts and cancellation handle this query.
         raise RuntimeError(
             f"Database execution timeout exceeded (10s dialect statement limit / {int(timeout_ceiling)}s watchdog for {db_type})"
         )
-    finally:
-        executor.shutdown(wait=False, cancel_futures=True)
