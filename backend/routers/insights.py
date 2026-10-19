@@ -8,6 +8,8 @@ from fastapi.responses import StreamingResponse, HTMLResponse
 from sqlalchemy.orm import Session, joinedload, selectinload
 from typing import Optional, Dict, Any, List
 import json
+import html
+import logging
 
 import models
 import schemas
@@ -17,6 +19,21 @@ from services.db_pipeline_service import db_pipeline_service
 from services.insights_engine import insights_engine
 
 router = APIRouter(prefix="/api/insights", tags=["Database Insights"])
+logger = logging.getLogger(__name__)
+
+
+def _owned_connection(db: Session, connection_id: int, tenant_id: int) -> models.DatabaseConnection:
+    connection = (
+        db.query(models.DatabaseConnection)
+        .filter(
+            models.DatabaseConnection.id == connection_id,
+            models.DatabaseConnection.tenant_id == tenant_id,
+        )
+        .first()
+    )
+    if not connection:
+        raise HTTPException(status_code=404, detail="Database connection not found")
+    return connection
 
 
 # ── Phase 3: Dynamic AI Insights & Recommendation Engine ──────────────────
@@ -302,10 +319,12 @@ def generate_database_insights(
             force_refresh=refresh,
         )
         return result
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate database insights: {str(e)}")
+    except ValueError:
+        logger.exception("Database insights request could not resolve an owned connection")
+        raise HTTPException(status_code=404, detail="Database connection not found")
+    except Exception:
+        logger.exception("Database insights generation failed")
+        raise HTTPException(status_code=500, detail="Failed to generate database insights")
 
 
 @router.post("/pipeline/{connection_id}")
@@ -336,10 +355,12 @@ def run_database_pipeline_post(
             force_refresh=refresh,
         )
         return result
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except ValueError:
+        logger.exception("Database pipeline request could not resolve an owned connection")
+        raise HTTPException(status_code=404, detail="Database connection not found")
+    except Exception:
+        logger.exception("Database pipeline execution failed")
+        raise HTTPException(status_code=500, detail="Database pipeline execution failed")
 
 
 @router.get("/pipeline/{connection_id}/stream")
@@ -355,6 +376,9 @@ def stream_database_pipeline(
     """SSE streaming endpoint for 6-layer pipeline progress animation."""
     if not current_user.tenant_id:
         raise HTTPException(status_code=403, detail="Unauthorized")
+
+    # Resolve tenant ownership before the generator can read the Redis or DB cache.
+    _owned_connection(db, connection_id, current_user.tenant_id)
 
     def event_generator():
         gen = db_pipeline_service.run_db_pipeline_stream(
@@ -380,16 +404,7 @@ def export_insights(
     db: Session = Depends(get_db)
 ):
     """Export cached or freshly generated business insights as an HTML report."""
-    connection = (
-        db.query(models.DatabaseConnection)
-        .filter(
-            models.DatabaseConnection.id == connection_id,
-            models.DatabaseConnection.tenant_id == current_user.tenant_id
-        )
-        .first()
-    )
-    if not connection:
-        raise HTTPException(status_code=404, detail="Database connection not found")
+    connection = _owned_connection(db, connection_id, current_user.tenant_id)
 
     try:
         insights_data = db_pipeline_service.run_db_pipeline(
@@ -399,8 +414,12 @@ def export_insights(
             user_id=current_user.id,
             force_refresh=False
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate insights for export: {str(e)}")
+    except Exception:
+        logger.exception("Insights export generation failed")
+        raise HTTPException(status_code=500, detail="Failed to generate insights for export")
+
+    def esc(value: Any) -> str:
+        return html.escape("" if value is None else str(value), quote=True)
 
     business_name = connection.name or connection.database or connection.db_type.capitalize()
     observations = insights_data.get("observations", [])
@@ -415,9 +434,9 @@ def export_insights(
     for m in key_metrics:
         metrics_html += f"""
         <div class="metric-card">
-            <div class="metric-title">{m.get('label', 'Metric')}</div>
-            <div class="metric-value">{m.get('value', 'N/A')}</div>
-            <div class="metric-desc">{m.get('description', '')}</div>
+            <div class="metric-title">{esc(m.get('label', 'Metric'))}</div>
+            <div class="metric-value">{esc(m.get('value', 'N/A'))}</div>
+            <div class="metric-desc">{esc(m.get('description', ''))}</div>
         </div>
         """
 
@@ -425,7 +444,7 @@ def export_insights(
     for o in observations:
         obs_html += f"""
         <div class="card obs-card">
-            <strong>Observation:</strong> {o}
+            <strong>Observation:</strong> {esc(o)}
         </div>
         """
     if not observations:
@@ -435,7 +454,7 @@ def export_insights(
     for a in anomalies:
         anom_html += f"""
         <div class="card anom-card">
-            <strong>Anomaly in {a.get('field', 'Field')}:</strong> Value {a.get('value', 'N/A')} deviates by {a.get('deviation', 'N/A')} (Reason: {a.get('reason', 'N/A')})
+            <strong>Anomaly in {esc(a.get('field', 'Field'))}:</strong> Value {esc(a.get('value', 'N/A'))} deviates by {esc(a.get('deviation', 'N/A'))} (Reason: {esc(a.get('reason', 'N/A'))})
         </div>
         """
     if not anomalies:
@@ -443,16 +462,16 @@ def export_insights(
 
     rec_html = ""
     for r in recommendations:
-        impact = str(r.get('impact', 'LOW')).upper()
-        impact_class = f"badge-{impact.lower()}"
+        impact = esc(str(r.get('impact', 'LOW')).upper())
+        impact_class = esc(f"badge-{impact.lower()}")
         rec_html += f"""
         <div class="card rec-card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                <strong style="font-size: 16px;">{r.get('title', 'Recommendation')}</strong>
+                <strong style="font-size: 16px;">{esc(r.get('title', 'Recommendation'))}</strong>
                 <span class="badge {impact_class}">{impact}</span>
             </div>
-            <p>{r.get('description', '')}</p>
-            <p style="font-style: italic; font-size: 13px; color: #555;">Suggested Action: {r.get('suggested_action', '')}</p>
+            <p>{esc(r.get('description', ''))}</p>
+            <p style="font-style: italic; font-size: 13px; color: #555;">Suggested Action: {esc(r.get('suggested_action', ''))}</p>
         </div>
         """
     if not recommendations:
@@ -462,7 +481,8 @@ def export_insights(
 <html>
 <head>
     <meta charset="utf-8">
-    <title>DataSpeakAI Insights Report - {business_name}</title>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+    <title>DataSpeakAI Insights Report - {esc(business_name)}</title>
     <style>
         body {{
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -531,7 +551,7 @@ def export_insights(
     <div class="container">
         <div class="header">
             <h1>DataSpeakAI Intelligence Report</h1>
-            <p>Database: <strong>{business_name}</strong> | Type: {connection.db_type.upper()} | Status: {connection.status.upper()}</p>
+            <p>Database: <strong>{esc(business_name)}</strong> | Type: {esc(connection.db_type.upper())} | Status: {esc(connection.status.upper())}</p>
         </div>
         <div class="section-title">Key Executive Performance Metrics</div>
         <div class="grid">{metrics_html}</div>

@@ -15,6 +15,7 @@ import json
 import math
 import re
 import datetime
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
@@ -30,6 +31,50 @@ from services.metric_recipes import (
 )
 from services.dashboard_composer import compose_dashboard_layout, DashboardLayoutPlan
 from services.redis_service import cache_get, cache_set, make_cache_key
+
+logger = logging.getLogger(__name__)
+
+
+def _cache_key(
+    tenant_id: Optional[int], connection_id: Any, selected_table: Optional[str],
+    date_from: Optional[str], date_to: Optional[str],
+) -> str:
+    return make_cache_key(
+        "db_insights", str(tenant_id), str(connection_id),
+        selected_table or "all", date_from or "none", date_to or "none",
+    )
+
+
+def classify_status(value: Any) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+    if normalized in {"delivered", "complete", "completed", "shipped", "success", "closed", "paid"}:
+        return "delivered"
+    if normalized in {"cancel", "canceled", "cancelled", "void", "voided", "abort", "aborted"}:
+        return "cancelled"
+    if normalized in {"return", "returned", "refund", "refunded"}:
+        return "returned"
+    if normalized in {"unpaid", "pending payment", "payment pending", "awaiting payment"}:
+        return "unpaid"
+    return "other"
+
+
+def _llm_safe_points(kpis: List[Dict[str, Any]], charts: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Keep only numeric aggregates; category labels can contain customer names."""
+    safe_kpis = []
+    for item in kpis:
+        value = item.get("raw_value")
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            safe_kpis.append({"metric": item.get("id", "metric"), "value": value})
+    safe_charts = []
+    for chart in charts:
+        values = []
+        for point in chart.get("data", []):
+            value = point.get("value", point.get("val")) if isinstance(point, dict) else None
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                values.append(value)
+        if values:
+            safe_charts.append({"metric": chart.get("id", "chart"), "values": values[:3]})
+    return {"metrics": safe_kpis, "chart_aggregates": safe_charts}
 
 
 def safe_divide(num: Any, den: Any, default: Any = 0.0) -> Any:
@@ -187,6 +232,16 @@ class DatabasePipelineService:
     def __init__(self):
         pass
 
+    def invalidate_connection_cache(self, db: Session, connection_id: Any) -> None:
+        connection = db.query(models.DatabaseConnection).filter(
+            models.DatabaseConnection.id == connection_id
+        ).first()
+        if connection:
+            connection.insights_cache = None
+            connection.insights_cached_at = None
+            db.commit()
+        # TODO: Delete matching Redis L1 keys for this connection and tenant.
+
     def run_db_pipeline(
         self,
         db: Session,
@@ -217,7 +272,7 @@ class DatabasePipelineService:
             raise ValueError(f"Database connection {connection_id} not found or unauthorized.")
 
         # 2. Check Cache if not force_refresh
-        cache_key = f"db_insights:{connection_id}:{selected_table or 'all'}:{date_from or 'none'}:{date_to or 'none'}"
+        cache_key = _cache_key(tenant_id, connection_id, selected_table, date_from, date_to)
         if not force_refresh:
             cached_data = cache_get(cache_key)
             if cached_data:
@@ -247,7 +302,7 @@ class DatabasePipelineService:
                         return res
 
         conn_display_name = getattr(db_conn, "name", None) or getattr(db_conn, "db_name", "Database")
-        print(f"\n[DB-Pipeline] -- Starting Deep Analytics for {conn_display_name} ({db_conn.db_type}) --")
+        logger.info("Starting database insights pipeline for connection %s", connection_id)
 
         # Decrypt credentials safely
         raw_pw = getattr(db_conn, "password", None) or getattr(db_conn, "password_encrypted", None)
@@ -260,9 +315,65 @@ class DatabasePipelineService:
         is_sql = str(db_conn.db_type).lower() in ["postgresql", "mysql", "sqlite"]
 
         # Helper for executing queries
-        def execute_sql(query_str: str) -> List[Dict[str, Any]]:
+        query_errors: List[str] = []
+        metric_query_states: Dict[str, Dict[str, str]] = {}
+
+        def record_query_state(metric_ids: List[str], rows: List[Dict[str, Any]], failed: bool = False) -> List[Dict[str, Any]]:
+            if failed and not metric_ids:
+                warning = "A database query failed; some computed details may be incomplete."
+                if warning not in query_errors:
+                    query_errors.append(warning)
+            for metric_id in metric_ids:
+                if failed:
+                    metric_query_states[metric_id] = {"status": "error", "reason": "query_failed"}
+                    warning = f"{metric_id}: A database query failed; this result may be incomplete."
+                    if warning not in query_errors:
+                        query_errors.append(warning)
+                elif not rows:
+                    metric_query_states[metric_id] = {"status": "unavailable", "reason": "no_rows"}
+                else:
+                    metric_query_states[metric_id] = {"status": "available", "reason": ""}
+            return rows
+
+        active_date_filter: Optional[Tuple[str, str]] = None
+        date_bindings: Dict[str, Any] = {}
+        for param_name, raw_value in (("date_from", date_from), ("date_to", date_to)):
+            if raw_value:
+                try:
+                    parsed_date = datetime.date.fromisoformat(str(raw_value))
+                    if param_name == "date_to":
+                        parsed_date += datetime.timedelta(days=1)
+                    date_bindings[param_name] = parsed_date.isoformat()
+                except ValueError:
+                    raise ValueError("Invalid date filter; expected YYYY-MM-DD") from None
+
+        def execute_sql(query_str: str, metric_ids: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+            tracked_metric_ids = metric_ids or []
             if not is_sql:
                 return []
+            query_params: Dict[str, Any] = {}
+            if active_date_filter and (date_from or date_to):
+                fact_ref, date_ref = active_date_filter
+                if f"FROM {fact_ref}" in query_str or f"JOIN {fact_ref}" in query_str:
+                    clauses = []
+                    if date_from:
+                        clauses.append(f"{fact_ref}.{date_ref} >= :date_from")
+                        query_params["date_from"] = date_bindings["date_from"]
+                    if date_to:
+                        clauses.append(f"{fact_ref}.{date_ref} < :date_to")
+                        query_params["date_to"] = date_bindings["date_to"]
+                    if clauses:
+                        predicate = " AND ".join(clauses)
+                        boundary = re.search(r"\b(GROUP\s+BY|ORDER\s+BY|HAVING|LIMIT)\b", query_str, re.IGNORECASE)
+                        insert_at = boundary.start() if boundary else len(query_str)
+                        head, tail = query_str[:insert_at].rstrip(), query_str[insert_at:]
+                        where_match = re.search(r"\bWHERE\b", head, re.IGNORECASE)
+                        if where_match:
+                            prefix = head[:where_match.end()]
+                            condition = head[where_match.end():].strip()
+                            query_str = f"{prefix} ({condition}) AND {predicate} {tail}"
+                        else:
+                            query_str = f"{head} WHERE {predicate} {tail}"
             # Try native DataSpeakAI pooled engine first
             try:
                 from services.db_utils import get_connection_url
@@ -272,10 +383,14 @@ class DatabasePipelineService:
                 if conn_url:
                     engine = get_engine(conn_url)
                     with engine.connect() as conn:
-                        res = conn.execute(text(query_str))
-                        return [dict(r._mapping) for r in res]
-            except Exception as ex:
-                pass
+                        res = conn.execute(text(query_str), query_params)
+                        return record_query_state(tracked_metric_ids, [dict(r._mapping) for r in res])
+                if query_params:
+                    return record_query_state(tracked_metric_ids, [], failed=True)
+            except Exception:
+                logger.exception("Pooled SQL query execution failed")
+                if query_params:
+                    return record_query_state(tracked_metric_ids, [], failed=True)
 
             try:
                 res = db_connection_service.execute_query(
@@ -289,16 +404,65 @@ class DatabasePipelineService:
                     query=query_str
                 )
                 if isinstance(res, list):
-                    return [row for row in res if isinstance(row, dict) and "error" not in row]
-                return []
-            except Exception as e:
-                print(f"[DB-Pipeline Query Error]: {e} | Query: {query_str}")
-                return []
+                    failed_rows = [row for row in res if isinstance(row, dict) and row.get("error")]
+                    if failed_rows:
+                        logger.error("Database pipeline query returned an error result")
+                        return record_query_state(tracked_metric_ids, [], failed=True)
+                    return record_query_state(tracked_metric_ids, [row for row in res if isinstance(row, dict) and "error" not in row])
+                logger.error("Database pipeline query returned an unexpected result")
+                return record_query_state(tracked_metric_ids, [], failed=True)
+            except Exception:
+                logger.exception("Database pipeline query execution failed")
+                return record_query_state(tracked_metric_ids, [], failed=True)
+
+        def apply_result_status(item: Dict[str, Any], is_chart: bool = False) -> None:
+            metric_id = str(item.get("id", ""))
+            state = metric_query_states.get(metric_id)
+            if state and state["status"] == "error":
+                item["status"] = "error"
+                item["reason"] = "query_failed"
+                if is_chart:
+                    item["data"] = []
+                else:
+                    item["value"] = None
+                    item["raw_value"] = None
+                return
+            if state and state["status"] == "unavailable":
+                item["status"] = "unavailable"
+                item["reason"] = state["reason"]
+                if is_chart:
+                    item["data"] = []
+                else:
+                    item["value"] = None
+                    item["raw_value"] = None
+                return
+
+            if is_chart:
+                values = [point.get("value", point.get("val")) for point in item.get("data", []) if isinstance(point, dict)]
+                if not values:
+                    item["status"], item["reason"] = "unavailable", "no_rows"
+                elif all(value is not None and not isinstance(value, bool) and value == 0 for value in values):
+                    item["status"], item["reason"] = "zero", None
+                else:
+                    item["status"], item["reason"] = "available", None
+                return
+
+            raw_value = item.get("raw_value")
+            if item.get("value") == "N/A":
+                item["status"], item["reason"] = "unavailable", "missing_role"
+                item["value"] = None
+            elif raw_value is None:
+                item["status"], item["reason"] = "unavailable", "no_rows"
+                item["value"] = None
+            elif not isinstance(raw_value, bool) and raw_value == 0:
+                item["status"], item["reason"] = "zero", None
+            else:
+                item["status"], item["reason"] = "available", None
 
         # -- LAYER 1: Multi-Table Schema Discovery & Profiling --
         if progress_callback:
             progress_callback(1, "Layer 1: Schema Discovery & Statistical Profiling...")
-        print("[DB-Pipeline] Layer 1: Schema Discovery & Multi-Table Statistical Profiling...")
+        logger.info("Database pipeline layer 1: schema discovery and profiling")
         
         schema = getattr(db_conn, "tables_metadata", None) or {}
         if not schema or "error" in schema or force_refresh:
@@ -309,7 +473,7 @@ class DatabasePipelineService:
                 from services.db_pool import get_engine
                 from sqlalchemy import inspect
                 conn_url = get_connection_url(db_conn)
-                if conn_url:
+                if conn_url and db_conn.db_type.lower() != "mongodb":
                     engine = get_engine(conn_url)
                     insp = inspect(engine)
                     table_names = insp.get_table_names()
@@ -323,7 +487,7 @@ class DatabasePipelineService:
                         db_conn.tables_metadata = schema
                         db.commit()
             except Exception as e:
-                print(f"[DB-Pipeline] SQLAlchemy inspect warning: {e}")
+                logger.exception("Database schema inspection failed")
 
             if not schema:
                 try:
@@ -346,7 +510,7 @@ class DatabasePipelineService:
                         db_conn.tables_metadata = schema
                         db.commit()
                 except Exception as e:
-                    print(f"[DB-Pipeline] Schema discovery warning: {e}")
+                    logger.exception("Database schema discovery failed")
                     schema = schema or {}
 
         available_tables = [
@@ -417,10 +581,11 @@ class DatabasePipelineService:
                 elif is_date_column(c_name, t_str):
                     date_cols.append(c_name)
                 elif any(k in t_str for k in ["int", "float", "numeric", "decimal", "real", "double"]):
-                    if not any(k in c_lower for k in ["year", "code", "zip", "number", "seq", "version"]):
+                    if not any(k in c_lower for k in ["year", "code", "zip", "number", "seq", "version", "coord", "coordinate", "lat", "lon", "lng"]):
                         measure_cols.append(c_name)
                 elif is_dimension_column(c_name, t_str):
-                    dim_cols.append(c_name)
+                    if not any(k in t_str for k in ["list", "array", "dict"]) and not any(k in c_lower for k in ["coord", "coordinate", "geometry", "polygon"]):
+                        dim_cols.append(c_name)
 
             monetary_cols = sort_monetary_columns_by_priority(monetary_cols)
             table_profiles[tbl] = {
@@ -434,25 +599,33 @@ class DatabasePipelineService:
         # -- LAYER 2 & 4: DETERMINISTIC RECIPES & AGGREGATIONS --
         if progress_callback:
             progress_callback(2, "Layer 2: Deterministic Metric Recipes Formulation (Phase 2C)...")
-        print("[DB-Pipeline] Layer 2 & 4: Metric Recipes & Pushdown Aggregations...")
+        logger.info("Database pipeline layers 2 and 4: metrics and aggregations")
 
         computed_kpis: List[Dict[str, Any]] = []
         computed_charts: List[Dict[str, Any]] = []
         all_filters: List[Dict[str, Any]] = []
 
         is_federated_mode = not selected_table or selected_table == "" or selected_table == "All Tables"
+        is_mongodb = str(db_conn.db_type).lower() == "mongodb"
 
         # Check for SQLite date formatting
         date_trunc_fmt = "strftime('%Y-%m', {col})" if db_conn.db_type.lower() == "sqlite" else (
             "to_char({col}, 'YYYY-MM')" if db_conn.db_type.lower() == "postgresql" else "DATE_FORMAT({col}, '%Y-%m')"
         )
 
-        if is_federated_mode and fact_table:
+        if is_mongodb:
+            logger.debug("MongoDB pipeline selected before relational federation")
+        if not is_mongodb and is_federated_mode and fact_table:
             # -------------------------------------------------------------
             # MULTI-TABLE RELATIONAL FEDERATION MODE (ENTERPRISE BI)
             # -------------------------------------------------------------
             q_fact = _clean_sql_identifier(fact_table, db_conn.db_type)
             fact_prof = table_profiles.get(fact_table, {})
+            fact_date_col = (fact_prof.get("date_cols") or [None])[0]
+            if fact_date_col:
+                active_date_filter = (q_fact, _clean_sql_identifier(fact_date_col, db_conn.db_type))
+            elif date_from or date_to:
+                query_errors.append("Date filters were requested, but the fact table has no date column.")
             
             # 1. Total Genuine Gross/Net Revenue (Prioritized over unit rates)
             # Check line items table for transactional sales details (e.g. Order Details, InvoiceLine)
@@ -513,23 +686,39 @@ class DatabasePipelineService:
                         COUNT(*) as total_orders,
                         {avg_expr} as avg_order_val
                     FROM {q_fact}
-                """)
-                rev_val = float(fact_summary[0].get("total_rev") or 0) if fact_summary else 0.0
+                """, ["total_revenue", "total_orders", "average_order_value"])
+                revenue_raw_value = fact_summary[0].get("total_rev") if fact_summary else None
+                rev_val = float(revenue_raw_value or 0) if fact_summary else 0.0
                 ord_val = int(fact_summary[0].get("total_orders") or 0) if fact_summary else 0
-                aov_val = float(fact_summary[0].get("avg_order_val") or 0) if fact_summary else 0.0
+                aov_raw_value = fact_summary[0].get("avg_order_val") if fact_summary else None
+                aov_val = float(aov_raw_value or 0) if fact_summary else 0.0
             else:
-                fact_cnt_res = execute_sql(f"SELECT COUNT(*) as total_orders FROM {q_fact}")
+                fact_cnt_res = execute_sql(f"SELECT COUNT(*) as total_orders FROM {q_fact}", ["total_orders"])
                 ord_val = int(fact_cnt_res[0].get("total_orders") or 0) if fact_cnt_res else 0
                 rev_val = 0.0
+                revenue_raw_value = None
                 aov_val = 0.0
+                aov_raw_value = None
                 money_expr = None
 
                 if line_has_revenue and line_money_expr and line_item_table:
                     q_line = _clean_sql_identifier(line_item_table, db_conn.db_type)
-                    line_rev_res = execute_sql(f"SELECT ROUND(SUM({line_money_expr}), 2) as total_rev FROM {q_line}")
-                    if line_rev_res and line_rev_res[0].get("total_rev"):
-                        rev_val = float(line_rev_res[0].get("total_rev") or 0.0)
+                    if join_col:
+                        q_jf = _clean_sql_identifier(join_col[0], db_conn.db_type)
+                        q_jl = _clean_sql_identifier(join_col[1], db_conn.db_type)
+                        line_rev_query = f"""
+                            SELECT ROUND(SUM({line_money_expr}), 2) as total_rev
+                            FROM {q_fact}
+                            JOIN {q_line} ON {q_fact}.{q_jf} = {q_line}.{q_jl}
+                        """
+                    else:
+                        line_rev_query = f"SELECT ROUND(SUM({line_money_expr}), 2) as total_rev FROM {q_line}"
+                    line_rev_res = execute_sql(line_rev_query, ["total_revenue", "average_order_value"])
+                    if line_rev_res and line_rev_res[0].get("total_rev") is not None:
+                        revenue_raw_value = line_rev_res[0].get("total_rev")
+                        rev_val = float(revenue_raw_value)
                         aov_val = round(rev_val / ord_val, 2) if ord_val > 0 else 0.0
+                        aov_raw_value = aov_val
                         money_expr = line_money_expr
 
             # Status & Lifecycle introspection (Truthful accounting)
@@ -549,19 +738,20 @@ class DatabasePipelineService:
                     WHERE {q_status} IS NOT NULL
                     GROUP BY {q_status}
                     ORDER BY cnt DESC
-                """)
+                """, ["net_revenue_delivered", "order_status_distribution"])
                 for sr in status_res:
                     s_name = str(sr.get("st") or "").strip()
                     s_lower = s_name.lower()
                     cnt = int(sr.get("cnt") or 0)
                     r_val = float(sr.get("rev") or 0)
                     status_distribution.append({"name": s_name.title(), "value": cnt, "revenue": r_val})
-                    if any(w in s_lower for w in ["deliver", "complet", "shipp", "success", "closed", "paid"]):
+                    status_class = classify_status(s_name)
+                    if status_class == "delivered":
                         delivered_count += cnt
                         delivered_rev += r_val
-                    elif any(w in s_lower for w in ["cancel", "void", "abort"]):
+                    elif status_class == "cancelled":
                         cancelled_count += cnt
-                    elif any(w in s_lower for w in ["return", "refund"]):
+                    elif status_class == "returned":
                         returned_count += cnt
 
             if status_col and (cancelled_count > 0 or returned_count > 0 or delivered_count > 0):
@@ -574,49 +764,59 @@ class DatabasePipelineService:
 
             # Active Customers
             cust_count = 0
+            customer_identifier_available = bool(customer_table)
             if customer_table:
                 q_cust = _clean_sql_identifier(customer_table, db_conn.db_type)
-                cust_res = execute_sql(f"SELECT COUNT(*) as cnt FROM {q_cust}")
+                cust_res = execute_sql(f"SELECT COUNT(*) as cnt FROM {q_cust}", ["active_customers", "customer_lifetime_value"])
                 cust_count = int(cust_res[0].get("cnt") or 0) if cust_res else 0
             else:
                 cust_id_col = next((c for c in fact_prof.get("columns", {}).keys() if any(k in c.lower() for k in ["customer", "client", "user_id", "buyer"])), None)
                 if cust_id_col:
+                    customer_identifier_available = True
                     q_cid = _clean_sql_identifier(cust_id_col, db_conn.db_type)
-                    cust_res = execute_sql(f"SELECT COUNT(DISTINCT {q_cid}) as cnt FROM {q_fact}")
+                    cust_res = execute_sql(f"SELECT COUNT(DISTINCT {q_cid}) as cnt FROM {q_fact}", ["active_customers", "customer_lifetime_value"])
                     cust_count = int(cust_res[0].get("cnt") or 0) if cust_res else 0
 
             clv_val = round(rev_val / cust_count, 2) if cust_count > 0 else 0.0
 
             # Units Sold
             units_sold = 0
+            units_raw_value: Optional[int] = None
+            units_measure_found = False
             if line_item_table and line_item_table != fact_table:
                 q_line = _clean_sql_identifier(line_item_table, db_conn.db_type)
                 line_prof = table_profiles.get(line_item_table, {})
                 line_cols = line_prof.get("columns", {})
                 line_qty_col = next((c for c in line_cols.keys() if any(k in c.lower() for k in ["quantity", "qty", "units"])), None)
                 if line_qty_col:
+                    units_measure_found = True
                     q_lqty = _clean_sql_identifier(line_qty_col, db_conn.db_type)
-                    qty_res = execute_sql(f"SELECT SUM({q_lqty}) as cnt FROM {q_line}")
-                    units_sold = int(qty_res[0].get("cnt") or 0) if qty_res else 0
+                    qty_res = execute_sql(f"SELECT SUM({q_lqty}) as cnt FROM {q_line}", ["units_sold"])
+                    units_raw_value = qty_res[0].get("cnt") if qty_res else None
+                    units_sold = int(units_raw_value or 0)
                 else:
-                    qty_res = execute_sql(f"SELECT COUNT(*) as cnt FROM {q_line}")
+                    qty_res = execute_sql(f"SELECT COUNT(*) as cnt FROM {q_line}", ["units_sold"])
                     units_sold = int(qty_res[0].get("cnt") or 0) if qty_res else 0
             elif qty_col:
+                units_measure_found = True
                 q_qty = _clean_sql_identifier(qty_col, db_conn.db_type)
-                qty_res = execute_sql(f"SELECT SUM({q_qty}) as cnt FROM {q_fact}")
-                units_sold = int(qty_res[0].get("cnt") or 0) if qty_res else 0
+                qty_res = execute_sql(f"SELECT SUM({q_qty}) as cnt FROM {q_fact}", ["units_sold"])
+                units_raw_value = qty_res[0].get("cnt") if qty_res else None
+                units_sold = int(units_raw_value or 0)
 
             # Catalog Size (Honest reporting: zero Chinook 3,503 fallbacks)
             catalog_count = 0
+            catalog_identifier_available = bool(catalog_table)
             if catalog_table:
                 q_cat = _clean_sql_identifier(catalog_table, db_conn.db_type)
-                cat_res = execute_sql(f"SELECT COUNT(*) as cnt FROM {q_cat}")
+                cat_res = execute_sql(f"SELECT COUNT(*) as cnt FROM {q_cat}", ["catalog_size"])
                 catalog_count = int(cat_res[0].get("cnt") or 0) if cat_res else 0
             else:
                 item_id_col = next((c for c in fact_prof.get("columns", {}).keys() if any(k in c.lower() for k in ["product", "item", "track", "sku", "article"])), None)
                 if item_id_col:
+                    catalog_identifier_available = True
                     q_item = _clean_sql_identifier(item_id_col, db_conn.db_type)
-                    cat_res = execute_sql(f"SELECT COUNT(DISTINCT {q_item}) as cnt FROM {q_fact}")
+                    cat_res = execute_sql(f"SELECT COUNT(DISTINCT {q_item}) as cnt FROM {q_fact}", ["catalog_size"])
                     catalog_count = int(cat_res[0].get("cnt") or 0) if cat_res else 0
 
             # Top Revenue Market
@@ -662,7 +862,7 @@ class DatabasePipelineService:
                         ORDER BY val DESC 
                         LIMIT 10
                     """
-                country_res = execute_sql(country_query)
+                country_res = execute_sql(country_query, ["top_market", "revenue_by_market"])
                 if country_res:
                     top_market_name = country_res[0].get("name") or "Global"
                     top_market_val = float(country_res[0].get("val") or 0)
@@ -677,7 +877,7 @@ class DatabasePipelineService:
                     q_ad = _clean_sql_identifier(table_norm_map["address"], db_conn.db_type)
                     q_cu = _clean_sql_identifier(customer_table, db_conn.db_type)
                     rel_geo_query = f"""
-                        SELECT {q_co}.country as name, ROUND(SUM({q_fact}.{money_expr}), 2) as val
+                        SELECT {q_co}.country as name, ROUND(SUM({money_expr}), 2) as val
                         FROM {q_fact}
                         JOIN {q_cu} ON {q_fact}.customer_id = {q_cu}.customer_id
                         JOIN {q_ad} ON {q_cu}.address_id = {q_ad}.address_id
@@ -695,7 +895,7 @@ class DatabasePipelineService:
                         q_cu = _clean_sql_identifier(customer_table, db_conn.db_type)
                         q_cg = _clean_sql_identifier(c_geo_col, db_conn.db_type)
                         rel_geo_query = f"""
-                            SELECT {q_cu}.{q_cg} as name, ROUND(SUM({q_fact}.{money_expr}), 2) as val
+                            SELECT {q_cu}.{q_cg} as name, ROUND(SUM({money_expr}), 2) as val
                             FROM {q_fact}
                             JOIN {q_cu} ON {q_fact}.customer_id = {q_cu}.customer_id
                             WHERE {q_cu}.{q_cg} IS NOT NULL
@@ -706,7 +906,7 @@ class DatabasePipelineService:
                         geo_dim_label = c_geo_col.replace('_', ' ').title()
 
                 if rel_geo_query:
-                    country_res = execute_sql(rel_geo_query)
+                    country_res = execute_sql(rel_geo_query, ["revenue_by_market"])
                     if country_res:
                         top_market_name = country_res[0].get("name") or "Global"
                         top_market_val = float(country_res[0].get("val") or 0)
@@ -752,15 +952,15 @@ class DatabasePipelineService:
                                     trend_dir = "up" if raw_growth >= 0 else "down"
                                     trend_text = f"SPLY ({raw_growth:+.1f}%)"
                     except Exception as e:
-                        print(f"[DB-Pipeline] SPLY calculation note: {e}")
+                        logger.exception("Same-period-last-year calculation failed")
 
             # Formulate Phase 2C Deterministic Recipes (Clean Executive KPIs, Zero Fabricated Constants)
             computed_kpis = [
                 {
                     "id": "total_revenue",
-                    "label": "Total Revenue",
-                    "value": f"${rev_val:,.2f}",
-                    "raw_value": rev_val,
+                    "label": "Gross Revenue (all statuses)",
+                    "value": f"${rev_val:,.2f}" if revenue_raw_value is not None else None,
+                    "raw_value": revenue_raw_value,
                     "table": fact_table,
                     "format": "currency",
                     "format_type": "currency",
@@ -768,6 +968,19 @@ class DatabasePipelineService:
                     "trend_direction": trend_dir,
                     "trend_pct": trend_pct,
                     "trend_text": trend_text or "revenue trajectory"
+                },
+                {
+                    "id": "net_revenue_delivered",
+                    "label": "Net Revenue (delivered only)",
+                    "value": f"${delivered_rev:,.2f}" if status_col and money_expr else "N/A",
+                    "raw_value": delivered_rev if status_col and money_expr else None,
+                    "table": fact_table,
+                    "format": "currency",
+                    "format_type": "currency",
+                    "recipe_type": "atomic",
+                    "trend_direction": "neutral",
+                    "trend_pct": None,
+                    "trend_text": "delivered transactions only"
                 },
                 {
                     "id": "total_orders",
@@ -785,8 +998,8 @@ class DatabasePipelineService:
                 {
                     "id": "average_order_value",
                     "label": "Average Order Value (AOV)",
-                    "value": f"${aov_val:,.2f}",
-                    "raw_value": aov_val,
+                    "value": f"${aov_val:,.2f}" if aov_raw_value is not None else None,
+                    "raw_value": aov_raw_value,
                     "table": fact_table,
                     "format": "currency",
                     "format_type": "currency",
@@ -811,8 +1024,8 @@ class DatabasePipelineService:
                 {
                     "id": "customer_lifetime_value",
                     "label": "Customer Lifetime Value (CLV)",
-                    "value": f"${clv_val:,.2f}",
-                    "raw_value": clv_val,
+                    "value": f"${clv_val:,.2f}" if cust_count > 0 and revenue_raw_value is not None else None,
+                    "raw_value": clv_val if cust_count > 0 and revenue_raw_value is not None else None,
                     "table": customer_table or fact_table,
                     "format": "currency",
                     "format_type": "currency",
@@ -824,8 +1037,8 @@ class DatabasePipelineService:
                 {
                     "id": "units_sold",
                     "label": "Total Units Sold",
-                    "value": f"{units_sold:,}" if units_sold > 0 else f"{ord_val:,}",
-                    "raw_value": units_sold or ord_val,
+                    "value": f"{units_sold:,}" if units_raw_value is not None else None,
+                    "raw_value": units_raw_value,
                     "table": line_item_table or fact_table,
                     "format": "integer",
                     "format_type": "integer",
@@ -862,6 +1075,19 @@ class DatabasePipelineService:
                 }
             ]
 
+            if not money_expr:
+                for metric_id in ("total_revenue", "average_order_value", "net_revenue_delivered", "customer_lifetime_value"):
+                    metric_query_states[metric_id] = {"status": "unavailable", "reason": "missing_role"}
+            if not status_col:
+                metric_query_states["net_revenue_delivered"] = {"status": "unavailable", "reason": "missing_role"}
+            if not customer_identifier_available:
+                for metric_id in ("active_customers", "customer_lifetime_value"):
+                    metric_query_states[metric_id] = {"status": "unavailable", "reason": "missing_role"}
+            if not units_measure_found:
+                metric_query_states["units_sold"] = {"status": "unavailable", "reason": "missing_role"}
+            if not catalog_identifier_available:
+                metric_query_states["catalog_size"] = {"status": "unavailable", "reason": "missing_role"}
+
             # Chart 1: Time Series Revenue Velocity
             if date_col:
                 if join_col and line_money_expr and not has_genuine_fact_revenue:
@@ -894,7 +1120,7 @@ class DatabasePipelineService:
                         GROUP BY period 
                         ORDER BY period ASC
                     """
-                monthly_data = execute_sql(monthly_query)
+                monthly_data = execute_sql(monthly_query, ["monthly_revenue_velocity"])
                 if monthly_data:
                     computed_charts.append({
                         "id": "monthly_revenue_velocity",
@@ -933,7 +1159,7 @@ class DatabasePipelineService:
                 # Fallback to any remaining dimension column
                 segment_dim = next((c for c in fact_prof.get("dim_cols", []) if c != country_col and c != status_col), None)
             
-            if segment_dim:
+            if segment_dim and money_expr:
                 q_seg = _clean_sql_identifier(segment_dim, db_conn.db_type)
                 seg_res = execute_sql(f"""
                     SELECT {q_seg} as name, ROUND(SUM({money_expr}), 2) as value
@@ -942,7 +1168,7 @@ class DatabasePipelineService:
                     GROUP BY {q_seg}
                     ORDER BY value DESC
                     LIMIT 6
-                """)
+                """, ["revenue_by_segment"])
                 if seg_res:
                     computed_charts.append({
                         "id": "revenue_by_segment",
@@ -969,7 +1195,7 @@ class DatabasePipelineService:
                     q_fc = _clean_sql_identifier(t_fc, db_conn.db_type)
                     q_cat = _clean_sql_identifier(t_cat, db_conn.db_type)
                     cat_rev_query = f"""
-                        SELECT {q_cat}.name as name, ROUND(SUM({q_fact}.{money_expr}), 2) as value
+                        SELECT {q_cat}.name as name, ROUND(SUM({money_expr}), 2) as value
                         FROM {q_fact}
                         JOIN {q_rent} ON {q_fact}.rental_id = {q_rent}.rental_id
                         JOIN {q_inv} ON {q_rent}.inventory_id = {q_inv}.inventory_id
@@ -979,7 +1205,7 @@ class DatabasePipelineService:
                         ORDER BY value DESC
                         LIMIT 6
                     """
-                    cat_rev_res = execute_sql(cat_rev_query)
+                    cat_rev_res = execute_sql(cat_rev_query, ["revenue_by_segment"])
                     if cat_rev_res:
                         computed_charts.append({
                             "id": "revenue_by_segment",
@@ -1032,7 +1258,7 @@ class DatabasePipelineService:
 
                     if name_expr and money_expr:
                         cust_spend_query = f"""
-                            SELECT COALESCE(NULLIF({name_expr}, ''), CAST({q_fact}.{q_cid} AS TEXT)) as name, ROUND(SUM({q_fact}.{money_expr}), 2) as value
+                            SELECT CAST({q_fact}.{q_cid} AS TEXT) as name, ROUND(SUM({money_expr}), 2) as value
                             FROM {q_fact}
                             JOIN {q_cu} ON {q_fact}.{q_cid} = {q_cu}.{q_cid}
                             WHERE {q_fact}.{q_cid} IS NOT NULL
@@ -1072,7 +1298,7 @@ class DatabasePipelineService:
                             ORDER BY value DESC
                             LIMIT 8
                         """
-                cust_spend_data = execute_sql(cust_spend_query)
+                cust_spend_data = execute_sql(cust_spend_query, ["top_customers_spend"])
                 if cust_spend_data:
                     computed_charts.append({
                         "id": "top_customers_spend",
@@ -1117,7 +1343,7 @@ class DatabasePipelineService:
                         GROUP BY name
                         ORDER BY value DESC
                         LIMIT 8
-                    """)
+                    """, ["catalog_category_distribution"])
                 elif cat_name_col and cat_id_col and prod_cat_fk:
                     q_ctbl = _clean_sql_identifier(category_table, db_conn.db_type)
                     q_ptbl = _clean_sql_identifier(catalog_table, db_conn.db_type)
@@ -1132,7 +1358,7 @@ class DatabasePipelineService:
                         GROUP BY name
                         ORDER BY value DESC
                         LIMIT 8
-                    """)
+                    """, ["catalog_category_distribution"])
 
                 if prod_cat_res:
                     computed_charts.append({
@@ -1158,7 +1384,7 @@ class DatabasePipelineService:
                     GROUP BY category
                     ORDER BY value DESC
                     LIMIT 8
-                """)
+                """, ["catalog_category_distribution"])
                 if prod_cat_res:
                     computed_charts.append({
                         "id": "catalog_category_distribution",
@@ -1191,262 +1417,381 @@ class DatabasePipelineService:
                     "options": []
                 })
 
-        elif db_conn.db_type.lower() == "mongodb":
+        elif is_mongodb:
             # -------------------------------------------------------------
             # MONGODB NATIVE AGGREGATION & ANALYTICS PIPELINE
             # -------------------------------------------------------------
-            tbl = selected_table if (selected_table and selected_table in schema) else available_tables[0]
-            prof = table_profiles.get(tbl, {})
-
             import pymongo
+
+            if not decrypted_conn_str:
+                raise ValueError("MongoDB connection URI is not configured")
+
+            # Parse date bounds into datetime for MongoDB queries
+            date_match = {}
+            if date_from:
+                try:
+                    dt_f = datetime.datetime.fromisoformat(str(date_from).replace("Z", "+00:00"))
+                    date_match["$gte"] = dt_f
+                except Exception:
+                    pass
+            if date_to:
+                try:
+                    dt_t = datetime.datetime.fromisoformat(str(date_to).replace("Z", "+00:00"))
+                    if len(str(date_to)) == 10:
+                        dt_t = dt_t.replace(hour=23, minute=59, second=59, microsecond=999999)
+                    date_match["$lte"] = dt_t
+                except Exception:
+                    pass
+
+            tables_to_analyze = [selected_table] if (selected_table and selected_table in schema) else available_tables[:3]
+            primary_tbl = tables_to_analyze[0]
+
             try:
                 mongo_client = pymongo.MongoClient(decrypted_conn_str, serverSelectionTimeoutMS=5000)
                 try:
                     mongo_db = mongo_client.get_default_database()
                 except Exception:
                     mongo_db = mongo_client[getattr(db_conn, "database", None) or "test"]
-                coll = mongo_db[tbl]
 
-                # 1. Total document count
-                try:
-                    total_records = coll.estimated_document_count()
-                except Exception:
-                    total_records = coll.count_documents({})
+                chart_colors = ["#00c2cb", "#8b5cf6", "#ec4899", "#f59e0b", "#10b981", "#3b82f6"]
 
-                computed_kpis.append({
-                    "id": f"{tbl}_total_rows",
-                    "label": f"Total {tbl.replace('_', ' ').title()} Documents",
-                    "value": f"{total_records:,}",
-                    "raw_value": total_records,
-                    "table": tbl,
-                    "format": "integer",
-                    "format_type": "integer",
-                    "recipe_type": "atomic",
-                    "trend_direction": "neutral",
-                    "trend_pct": None,
-                    "trend_text": f"{total_records:,} verified documents"
-                })
+                for tbl in tables_to_analyze:
+                    prof = table_profiles.get(tbl, {})
+                    coll = mongo_db[tbl]
+                    tbl_title = tbl.replace("_", " ").title()
+                    date_cols = prof.get("date_cols", [])
+                    t_col = date_cols[0] if date_cols else None
 
-                # 2. Measures (sum and avg)
-                for m_col in prof.get("measure_cols", [])[:3]:
-                    col_name_title = m_col.replace("_", " ").title()
-                    fmt = "currency" if is_monetary_column(m_col) else "number"
-                    try:
-                        m_pipe = [
-                            {"$match": {m_col: {"$ne": None}}},
-                            {"$group": {
-                                "_id": None,
-                                "s_val": {"$sum": f"${m_col}"},
-                                "a_val": {"$avg": f"${m_col}"}
-                            }}
-                        ]
-                        agg_res = list(coll.aggregate(m_pipe))
-                        if agg_res:
-                            s_v = float(agg_res[0].get("s_val") or 0)
-                            a_v = float(agg_res[0].get("a_val") or 0)
+                    # 1. Total document count (never discard a requested date filter)
+                    count_metric_id = f"{tbl}_total_rows"
+                    date_filter_requested = bool(date_from or date_to)
+                    if date_filter_requested and not t_col:
+                        total_records = None
+                        trend_sub = "unavailable: no date field was detected"
+                        metric_query_states[count_metric_id] = {"status": "unavailable", "reason": "missing_role"}
+                        query_errors.append(f"{count_metric_id}: Date-filtered document count is unavailable because no date field was detected.")
+                    elif date_filter_requested and not date_match:
+                        total_records = None
+                        trend_sub = "unavailable: date filter could not be applied"
+                        metric_query_states[count_metric_id] = {"status": "error", "reason": "query_failed"}
+                        query_errors.append(f"{count_metric_id}: Date-filtered document count could not be computed.")
+                    elif date_filter_requested:
+                        try:
+                            total_records = coll.count_documents({t_col: date_match})
+                            trend_sub = "documents in filtered horizon"
+                        except Exception:
+                            logger.exception("MongoDB date-filtered count failed for collection %s", tbl)
+                            total_records = None
+                            trend_sub = "unavailable: filtered count failed"
+                            metric_query_states[count_metric_id] = {"status": "error", "reason": "query_failed"}
+                            query_errors.append(f"{count_metric_id}: Date-filtered document count failed.")
+                    else:
+                        try:
+                            total_records = coll.estimated_document_count()
+                            trend_sub = "verified documents"
+                        except Exception:
+                            try:
+                                total_records = coll.count_documents({})
+                                trend_sub = "verified documents"
+                            except Exception:
+                                logger.exception("MongoDB document count failed for collection %s", tbl)
+                                total_records = None
+                                trend_sub = "unavailable: document count failed"
+                                metric_query_states[count_metric_id] = {"status": "error", "reason": "query_failed"}
+                                query_errors.append(f"{count_metric_id}: Document count failed.")
 
+                    computed_kpis.append({
+                        "id": f"{tbl}_total_rows",
+                        "label": f"Total {tbl_title} Documents",
+                        "value": f"{total_records:,}" if total_records is not None else None,
+                        "raw_value": total_records,
+                        "table": tbl,
+                        "format": "integer",
+                        "format_type": "integer",
+                        "recipe_type": "atomic",
+                        "trend_direction": "neutral",
+                        "trend_pct": None,
+                        "trend_text": f"{total_records:,} {trend_sub}" if total_records is not None else trend_sub
+                    })
+
+                    # 2. Measures (sum and avg)
+                    for m_col in prof.get("measure_cols", [])[:3]:
+                        col_name_title = m_col.split(".")[-1].replace("_", " ").title()
+                        fmt = "currency" if is_monetary_column(m_col) else "number"
+                        try:
+                            m_pipe = []
+                            if "." in m_col:
+                                parent_arr = m_col.split(".")[0]
+                                if schema.get(tbl, {}).get("columns", {}).get(parent_arr) == "list":
+                                    m_pipe.append({"$unwind": f"${parent_arr}"})
+
+                            match_criteria = {m_col: {"$ne": None}}
+                            if date_match and t_col:
+                                match_criteria[t_col] = date_match
+                            m_pipe.append({"$match": match_criteria})
+                            m_pipe.append({
+                                "$group": {
+                                    "_id": None,
+                                    "s_val": {"$sum": f"${m_col}"},
+                                    "a_val": {"$avg": f"${m_col}"},
+                                    "cnt": {"$sum": 1}
+                                }
+                            })
+                            agg_res = list(coll.aggregate(m_pipe))
+                            if agg_res:
+                                s_v = float(agg_res[0].get("s_val") or 0)
+                                a_v = float(agg_res[0].get("a_val") or 0)
+                                c_cnt = int(agg_res[0].get("cnt") or 0)
+
+                                if fmt == "currency" or s_v > 100:
+                                    computed_kpis.append({
+                                        "id": f"{tbl}_{m_col.replace('.', '_')}_sum",
+                                        "label": f"Total {col_name_title}",
+                                        "value": f"${s_v:,.2f}" if fmt == "currency" else f"{s_v:,.1f}",
+                                        "raw_value": s_v,
+                                        "table": tbl,
+                                        "format": fmt,
+                                        "format_type": fmt,
+                                        "recipe_type": "atomic",
+                                        "trend_direction": "neutral",
+                                        "trend_pct": None,
+                                        "trend_text": "cumulative sum"
+                                    })
+
+                                computed_kpis.append({
+                                    "id": f"{tbl}_{m_col.replace('.', '_')}_avg",
+                                    "label": f"Average {col_name_title}",
+                                    "value": f"${a_v:,.2f}" if fmt == "currency" else f"{a_v:,.1f}",
+                                    "raw_value": a_v,
+                                    "table": tbl,
+                                    "format": fmt,
+                                    "format_type": fmt,
+                                    "recipe_type": "atomic",
+                                    "trend_direction": "neutral",
+                                    "trend_pct": None,
+                                    "trend_text": f"{c_cnt:,} records evaluated"
+                                })
+                            else:
+                                avg_id = f"{tbl}_{m_col.replace('.', '_')}_avg"
+                                metric_query_states[avg_id] = {"status": "unavailable", "reason": "no_rows"}
+                                if fmt == "currency":
+                                    sum_id = f"{tbl}_{m_col.replace('.', '_')}_sum"
+                                    metric_query_states[sum_id] = {"status": "unavailable", "reason": "no_rows"}
+                        except Exception as me:
+                            logger.exception("MongoDB measure aggregation failed")
+                            avg_id = f"{tbl}_{m_col.replace('.', '_')}_avg"
+                            metric_query_states[avg_id] = {"status": "error", "reason": "query_failed"}
+                            query_errors.append(f"{avg_id}: MongoDB measure aggregation failed.")
+                            if fmt == "currency":
+                                sum_id = f"{tbl}_{m_col.replace('.', '_')}_sum"
+                                metric_query_states[sum_id] = {"status": "error", "reason": "query_failed"}
+                                query_errors.append(f"{sum_id}: MongoDB measure aggregation failed.")
+
+                    # 3. Categorical distinct counts
+                    for d_col in prof.get("dim_cols", [])[:2]:
+                        try:
+                            if "." in d_col:
+                                parent_arr = d_col.split(".")[0]
+                                if schema.get(tbl, {}).get("columns", {}).get(parent_arr) == "list":
+                                    continue
+                            d_vals = coll.distinct(d_col)
+                            d_cnt = len(d_vals)
                             computed_kpis.append({
-                                "id": f"{tbl}_{m_col}_sum",
-                                "label": f"Total {col_name_title}",
-                                "value": f"${s_v:,.2f}" if fmt == "currency" else f"{s_v:,.1f}",
-                                "raw_value": s_v,
+                                "id": f"{tbl}_{d_col.replace('.', '_')}_distinct",
+                                "label": f"Distinct {d_col.split('.')[-1].replace('_', ' ').title()}",
+                                "value": f"{d_cnt:,}",
+                                "raw_value": d_cnt,
                                 "table": tbl,
-                                "format": fmt,
-                                "format_type": fmt,
+                                "format": "integer",
+                                "format_type": "integer",
                                 "recipe_type": "atomic",
                                 "trend_direction": "neutral",
                                 "trend_pct": None,
-                                "trend_text": "cumulative sum"
+                                "trend_text": "unique segments"
                             })
+                        except Exception:
+                            logger.exception("MongoDB distinct-value query failed for collection %s", tbl)
+                            distinct_id = f"{tbl}_{d_col.replace('.', '_')}_distinct"
+                            metric_query_states[distinct_id] = {"status": "error", "reason": "query_failed"}
+                            query_errors.append(f"{distinct_id}: MongoDB distinct-value query failed.")
 
-                            computed_kpis.append({
-                                "id": f"{tbl}_{m_col}_avg",
-                                "label": f"Average {col_name_title}",
-                                "value": f"${a_v:,.2f}" if fmt == "currency" else f"{a_v:,.1f}",
-                                "raw_value": a_v,
-                                "table": tbl,
-                                "format": fmt,
-                                "format_type": fmt,
-                                "recipe_type": "atomic",
-                                "trend_direction": "neutral",
-                                "trend_pct": None,
-                                "trend_text": "mean value"
+                    # 4. Charts for this collection
+                    use_sample = total_records > 50000
+                    sample_stage = [{"$sample": {"size": 25000}}] if use_sample else []
+
+                    # 4A. Time Series Trend Chart (Area Chart)
+                    if t_col:
+                        try:
+                            t_m_col = (prof.get("measure_cols") or [None])[0]
+                            t_expr = {"$sum": f"${t_m_col}"} if t_m_col else {"$sum": 1}
+                            t_pipe = list(sample_stage)
+                            if "." in t_col:
+                                parent_arr = t_col.split(".")[0]
+                                if schema.get(tbl, {}).get("columns", {}).get(parent_arr) == "list":
+                                    t_pipe.append({"$unwind": f"${parent_arr}"})
+
+                            match_criteria = {t_col: {"$ne": None}}
+                            if date_match:
+                                match_criteria = {**match_criteria, **date_match}
+
+                            t_pipe.append({"$match": match_criteria})
+                            t_pipe.append({
+                                "$group": {
+                                    "_id": {"$dateToString": {"format": "%Y-%m", "date": f"${t_col}"}},
+                                    "value": t_expr
+                                }
                             })
-                    except Exception as me:
-                        print(f"[DB-Pipeline Mongo measure error] {m_col}: {me}")
+                            t_pipe.append({"$sort": {"_id": 1}})
+                            t_pipe.append({"$limit": 24})
 
-                # 3. Categorical distinct count
-                for d_col in prof.get("dim_cols", [])[:2]:
-                    try:
-                        d_vals = coll.distinct(d_col)
-                        d_cnt = len(d_vals)
-                        computed_kpis.append({
-                            "id": f"{tbl}_{d_col}_distinct",
-                            "label": f"Distinct {d_col.replace('_', ' ').title()}",
-                            "value": f"{d_cnt:,}",
-                            "raw_value": d_cnt,
-                            "table": tbl,
-                            "format": "integer",
-                            "format_type": "integer",
-                            "recipe_type": "atomic",
-                            "trend_direction": "neutral",
-                            "trend_pct": None,
-                            "trend_text": "unique segments"
+                            t_res = list(coll.aggregate(t_pipe))
+                            t_data = [{"period": str(r["_id"]), "value": round(float(r["value"]), 2)} for r in t_res if r.get("_id")]
+                            if t_data:
+                                computed_charts.append({
+                                    "id": f"{tbl}_trend",
+                                    "title": f"{tbl_title} Activity Trend Over Time",
+                                    "subtitle": f"Time-series trajectory along {t_col.split('.')[-1].replace('_', ' ').title()}",
+                                    "type": "area",
+                                    "table": tbl,
+                                    "x_column": "Period",
+                                    "y_column": t_m_col.split('.')[-1].replace('_', ' ').title() if t_m_col else "Activity",
+                                    "xKey": "period",
+                                    "yKey": "value",
+                                    "data": t_data,
+                                    "color": "#6c47ff"
+                                })
+                            else:
+                                metric_query_states[f"{tbl}_trend"] = {"status": "unavailable", "reason": "no_rows"}
+                        except Exception as te:
+                            logger.exception("MongoDB time series aggregation failed")
+                            trend_id = f"{tbl}_trend"
+                            metric_query_states[trend_id] = {"status": "error", "reason": "query_failed"}
+                            query_errors.append(f"{trend_id}: MongoDB time-series aggregation failed.")
+
+                    # 4B. Categorical Distribution Charts (Bar & Donut)
+                    for idx, d_col in enumerate(prof.get("dim_cols", [])[:3]):
+                        m_col = (prof.get("measure_cols") or [None])[0]
+                        try:
+                            chart_pipe = list(sample_stage)
+                            if "." in d_col:
+                                parent_arr = d_col.split(".")[0]
+                                if schema.get(tbl, {}).get("columns", {}).get(parent_arr) == "list":
+                                    chart_pipe.append({"$unwind": f"${parent_arr}"})
+
+                            match_criteria = {d_col: {"$ne": None}}
+                            if date_match and t_col:
+                                match_criteria[t_col] = date_match
+                            if m_col:
+                                match_criteria[m_col] = {"$ne": None}
+
+                            chart_pipe.append({"$match": match_criteria})
+                            val_expr = {"$sum": f"${m_col}"} if m_col else {"$sum": 1}
+                            chart_pipe.append({"$group": {"_id": f"${d_col}", "value": val_expr}})
+                            chart_pipe.append({"$sort": {"value": -1}})
+                            chart_pipe.append({"$limit": 8})
+
+                            chart_res = list(coll.aggregate(chart_pipe))
+                            c_data = []
+                            for r in chart_res:
+                                val_str = str(r.get("_id", "")).strip()
+                                if not val_str or val_str.startswith(("[", "{")) or len(val_str) > 40:
+                                    continue
+                                c_data.append({"name": val_str, "value": round(float(r["value"]), 2)})
+
+                            if c_data:
+                                c_type = "donut" if idx == 1 or len(c_data) <= 6 else "bar"
+                                computed_charts.append({
+                                    "id": f"{tbl}_{d_col.replace('.', '_')}_breakdown",
+                                    "title": f"{tbl_title} Distribution by {d_col.split('.')[-1].replace('_', ' ').title()}",
+                                    "subtitle": f"Segment breakdown along {d_col.split('.')[-1]}",
+                                    "type": c_type,
+                                    "table": tbl,
+                                    "x_column": d_col.split('.')[-1].replace("_", " ").title(),
+                                    "y_column": m_col.split('.')[-1].replace("_", " ").title() if m_col else "Volume",
+                                    "xKey": "name",
+                                    "yKey": "value",
+                                    "data": c_data,
+                                    "color": chart_colors[idx % len(chart_colors)]
+                                })
+                            else:
+                                metric_query_states[f"{tbl}_{d_col.replace('.', '_')}_breakdown"] = {"status": "unavailable", "reason": "no_rows"}
+                        except Exception as ce:
+                            logger.exception("MongoDB chart aggregation failed")
+                            chart_id = f"{tbl}_{d_col.replace('.', '_')}_breakdown"
+                            metric_query_states[chart_id] = {"status": "error", "reason": "query_failed"}
+                            query_errors.append(f"{chart_id}: MongoDB chart aggregation failed.")
+
+                    # 4C. Special Secondary Collection Charts (e.g. geographic boundaries or entity complexity)
+                    if tbl != primary_tbl:
+                        try:
+                            # Check if collection has coordinates/geometry
+                            sample_geom = coll.find_one({"geometry.coordinates": {"$exists": True}})
+                            if sample_geom:
+                                n_pipe = [
+                                    {"$project": {
+                                        "name": 1,
+                                        "vertex_count": {"$size": {"$arrayElemAt": ["$geometry.coordinates", 0]}}
+                                    }},
+                                    {"$sort": {"vertex_count": -1}},
+                                    {"$limit": 8}
+                                ]
+                                n_res = list(coll.aggregate(n_pipe))
+                                n_data = [{"name": str(r["name"]), "value": float(r["vertex_count"])} for r in n_res if r.get("name")]
+                                if n_data:
+                                    computed_charts.append({
+                                        "id": f"{tbl}_boundary_complexity",
+                                        "title": f"Top {tbl_title} by Geographic Complexity",
+                                        "subtitle": "Boundary polygon vertex density per zone",
+                                        "type": "bar",
+                                        "table": tbl,
+                                        "x_column": tbl_title,
+                                        "y_column": "Boundary Points",
+                                        "xKey": "name",
+                                        "yKey": "value",
+                                        "data": n_data,
+                                        "color": "#f59e0b"
+                                    })
+                        except Exception as ne:
+                            logger.exception("MongoDB secondary collection aggregation failed")
+                            chart_id = f"{tbl}_boundary_complexity"
+                            metric_query_states[chart_id] = {"status": "error", "reason": "query_failed"}
+                            query_errors.append(f"{chart_id}: MongoDB secondary collection aggregation failed.")
+
+                    # 5. Populate dimensional filters with distinct options
+                    for d_col in prof.get("dim_cols", [])[:3]:
+                        try:
+                            if "." in d_col:
+                                parent_arr = d_col.split(".")[0]
+                                if schema.get(tbl, {}).get("columns", {}).get(parent_arr) == "list":
+                                    continue
+                            raw_opts = coll.distinct(d_col)
+                            clean_opts = [
+                                str(v).strip() for v in raw_opts 
+                                if v and not str(v).startswith(("[", "{")) and len(str(v)) <= 40
+                            ]
+                            clean_opts.sort()
+                            if clean_opts and not any(f.get("column") == f"{tbl}.{d_col}" for f in all_filters):
+                                all_filters.append({
+                                    "column": f"{tbl}.{d_col}",
+                                    "label": d_col.split(".")[-1].replace("_", " ").title(),
+                                    "filter_type": "multiselect",
+                                    "options": clean_opts[:15]
+                                })
+                        except Exception:
+                            pass
+
+                    # Date Range filter
+                    if t_col and not any(f.get("filter_type") == "date_range" for f in all_filters):
+                        all_filters.append({
+                            "column": f"{tbl}.{t_col}",
+                            "label": "Date Range",
+                            "filter_type": "date_range",
+                            "options": []
                         })
-                    except Exception:
-                        pass
-
-                # 4. Charts: Comprehensive Multi-Perspective Visualizations (4-5 Charts)
-                tbl_title = tbl.replace('_', ' ').title()
-                use_sample = total_records > 50000
-                sample_stage = [{"$sample": {"size": 25000}}] if use_sample else []
-
-                # 4A. Time Series Trend Chart (Area)
-                if prof.get("date_cols"):
-                    t_col = prof["date_cols"][0]
-                    try:
-                        t_m_col = prof.get("measure_cols", [None])[0]
-                        t_expr = {"$sum": f"${t_m_col}"} if t_m_col else {"$sum": 1}
-                        t_pipe = sample_stage + [
-                            {"$match": {t_col: {"$ne": None}}},
-                            {"$group": {
-                                "_id": {"$dateToString": {"format": "%Y-%m", "date": f"${t_col}"}},
-                                "value": t_expr
-                            }},
-                            {"$sort": {"_id": 1}},
-                            {"$limit": 24}
-                        ]
-                        t_res = list(coll.aggregate(t_pipe))
-                        t_data = [{"period": str(r["_id"]), "value": round(float(r["value"]), 2)} for r in t_res if r.get("_id")]
-                        if t_data:
-                            computed_charts.append({
-                                "id": f"{tbl}_trend",
-                                "title": f"{tbl_title} Activity Trend Over Time",
-                                "subtitle": f"Time-series trajectory along {t_col.replace('_', ' ').title()}",
-                                "type": "area",
-                                "table": tbl,
-                                "x_column": "Period",
-                                "y_column": t_m_col.replace('_', ' ').title() if t_m_col else "Volume",
-                                "xKey": "period",
-                                "yKey": "value",
-                                "data": t_data,
-                                "color": "#6c47ff"
-                            })
-                    except Exception as te:
-                        print(f"[DB-Pipeline Mongo time series error]: {te}")
-
-                # 4B. Categorical Distribution Charts (Bar & Donut)
-                chart_colors = ["#00c2cb", "#8b5cf6", "#ec4899", "#f59e0b", "#10b981"]
-                for idx, d_col in enumerate(prof.get("dim_cols", [])[:3]):
-                    m_col = prof.get("measure_cols", [None])[0]
-                    try:
-                        if m_col:
-                            chart_pipe = sample_stage + [
-                                {"$match": {d_col: {"$ne": None}, m_col: {"$ne": None}}},
-                                {"$group": {"_id": f"${d_col}", "value": {"$sum": f"${m_col}"}}},
-                                {"$sort": {"value": -1}},
-                                {"$limit": 8}
-                            ]
-                        else:
-                            chart_pipe = sample_stage + [
-                                {"$match": {d_col: {"$ne": None}}},
-                                {"$group": {"_id": f"${d_col}", "value": {"$sum": 1}}},
-                                {"$sort": {"value": -1}},
-                                {"$limit": 8}
-                            ]
-                        chart_res = list(coll.aggregate(chart_pipe))
-                        c_data = [{"name": str(r["_id"]), "value": round(float(r["value"]), 2)} for r in chart_res if r.get("_id")]
-                        if c_data:
-                            c_type = "donut" if idx == 1 else "bar"
-                            computed_charts.append({
-                                "id": f"{tbl}_{d_col}_breakdown",
-                                "title": f"{tbl_title} Distribution by {d_col.replace('_', ' ').title()}",
-                                "subtitle": f"Segment breakdown by {d_col}",
-                                "type": c_type,
-                                "table": tbl,
-                                "x_column": d_col.replace("_", " ").title(),
-                                "y_column": m_col.replace("_", " ").title() if m_col else "Volume",
-                                "xKey": "name",
-                                "yKey": "value",
-                                "data": c_data,
-                                "color": chart_colors[idx % len(chart_colors)]
-                            })
-                    except Exception as ce:
-                        print(f"[DB-Pipeline Mongo chart error] {d_col}: {ce}")
-
-                # 4C. Secondary Measure Breakdown (Top Entities by Secondary Measure)
-                if len(prof.get("measure_cols", [])) > 1 and prof.get("dim_cols"):
-                    d_col = prof["dim_cols"][0]
-                    m_col2 = prof["measure_cols"][1]
-                    try:
-                        m2_pipe = sample_stage + [
-                            {"$match": {d_col: {"$ne": None}, m_col2: {"$ne": None}}},
-                            {"$group": {"_id": f"${d_col}", "value": {"$sum": f"${m_col2}"}}},
-                            {"$sort": {"value": -1}},
-                            {"$limit": 8}
-                        ]
-                        m2_res = list(coll.aggregate(m2_pipe))
-                        m2_data = [{"name": str(r["_id"]), "value": round(float(r["value"]), 2)} for r in m2_res if r.get("_id")]
-                        if m2_data:
-                            computed_charts.append({
-                                "id": f"{tbl}_{m_col2}_breakdown",
-                                "title": f"Top {d_col.replace('_', ' ').title()} by {m_col2.replace('_', ' ').title()}",
-                                "subtitle": f"Distribution of {m_col2.replace('_', ' ').title()} across key segments",
-                                "type": "bar",
-                                "table": tbl,
-                                "x_column": d_col.replace("_", " ").title(),
-                                "y_column": m_col2.replace("_", " ").title(),
-                                "xKey": "name",
-                                "yKey": "value",
-                                "data": m2_data,
-                                "color": "#f59e0b"
-                            })
-                    except Exception as me:
-                        print(f"[DB-Pipeline Mongo measure2 chart error]: {me}")
-
-                # 4D. Tertiary Measure Breakdown if available (e.g. 5th chart)
-                if len(prof.get("measure_cols", [])) > 2 and len(prof.get("dim_cols", [])) > 0:
-                    d_col = prof["dim_cols"][0]
-                    m_col3 = prof["measure_cols"][2]
-                    try:
-                        m3_pipe = sample_stage + [
-                            {"$match": {d_col: {"$ne": None}, m_col3: {"$ne": None}}},
-                            {"$group": {"_id": f"${d_col}", "value": {"$sum": f"${m_col3}"}}},
-                            {"$sort": {"value": -1}},
-                            {"$limit": 8}
-                        ]
-                        m3_res = list(coll.aggregate(m3_pipe))
-                        m3_data = [{"name": str(r["_id"]), "value": round(float(r["value"]), 2)} for r in m3_res if r.get("_id")]
-                        if m3_data:
-                            computed_charts.append({
-                                "id": f"{tbl}_{m_col3}_breakdown",
-                                "title": f"Top {d_col.replace('_', ' ').title()} by {m_col3.replace('_', ' ').title()}",
-                                "subtitle": f"Distribution of {m_col3.replace('_', ' ').title()} across key segments",
-                                "type": "donut",
-                                "table": tbl,
-                                "x_column": d_col.replace("_", " ").title(),
-                                "y_column": m_col3.replace("_", " ").title(),
-                                "xKey": "name",
-                                "yKey": "value",
-                                "data": m3_data,
-                                "color": "#10b981"
-                            })
-                    except Exception as me:
-                        print(f"[DB-Pipeline Mongo measure3 chart error]: {me}")
-
-                all_filters = [
-                    {
-                        "column": f"{tbl}.{d_col}",
-                        "label": d_col.replace("_", " ").title(),
-                        "filter_type": "multiselect",
-                        "options": []
-                    }
-                    for d_col in prof.get("dim_cols", [])[:3]
-                ]
 
                 mongo_client.close()
             except Exception as mongo_err:
-                print(f"[DB-Pipeline Mongo error]: {mongo_err}")
+                logger.exception("MongoDB analytics failed")
 
         else:
             # -------------------------------------------------------------
@@ -1455,9 +1800,14 @@ class DatabasePipelineService:
             tbl = selected_table if (selected_table and selected_table in schema) else available_tables[0]
             q_tbl = _clean_sql_identifier(tbl, db_conn.db_type)
             prof = table_profiles.get(tbl, {})
+            table_date_col = (prof.get("date_cols") or [None])[0]
+            if table_date_col:
+                active_date_filter = (q_tbl, _clean_sql_identifier(table_date_col, db_conn.db_type))
+            elif date_from or date_to:
+                query_errors.append("Date filters were requested, but the selected table has no date column.")
 
             # Table row count
-            count_res = execute_sql(f"SELECT COUNT(*) as cnt FROM {q_tbl}")
+            count_res = execute_sql(f"SELECT COUNT(*) as cnt FROM {q_tbl}", [f"{tbl}_total_rows"])
             total_records = int(count_res[0].get("cnt") or 0) if count_res else 0
 
             computed_kpis.append({
@@ -1480,16 +1830,21 @@ class DatabasePipelineService:
                 q_m = _clean_sql_identifier(m_col, db_conn.db_type)
                 fmt = "currency" if is_monetary_column(m_col) else "number"
                 
-                stats_res = execute_sql(f"SELECT ROUND(SUM({q_m}), 2) as s_val, ROUND(AVG({q_m}), 2) as a_val FROM {q_tbl}")
+                stats_res = execute_sql(
+                    f"SELECT ROUND(SUM({q_m}), 2) as s_val, ROUND(AVG({q_m}), 2) as a_val FROM {q_tbl}",
+                    [f"{tbl}_{m_col}_sum", f"{tbl}_{m_col}_avg"],
+                )
                 if stats_res:
-                    s_v = float(stats_res[0].get("s_val") or 0)
-                    a_v = float(stats_res[0].get("a_val") or 0)
+                    s_raw = stats_res[0].get("s_val")
+                    a_raw = stats_res[0].get("a_val")
+                    s_v = float(s_raw) if s_raw is not None else None
+                    a_v = float(a_raw) if a_raw is not None else None
                     
                     computed_kpis.append({
                         "id": f"{tbl}_{m_col}_sum",
                         "label": f"Total {col_name_title}",
-                        "value": f"${s_v:,.2f}" if fmt == "currency" else f"{s_v:,.1f}",
-                        "raw_value": s_v,
+                        "value": (f"${s_v:,.2f}" if fmt == "currency" else f"{s_v:,.1f}") if s_v is not None else None,
+                        "raw_value": s_raw,
                         "table": tbl,
                         "format": fmt,
                         "format_type": fmt,
@@ -1502,8 +1857,8 @@ class DatabasePipelineService:
                     computed_kpis.append({
                         "id": f"{tbl}_{m_col}_avg",
                         "label": f"Average {col_name_title}",
-                        "value": f"${a_v:,.2f}" if fmt == "currency" else f"{a_v:,.1f}",
-                        "raw_value": a_v,
+                        "value": (f"${a_v:,.2f}" if fmt == "currency" else f"{a_v:,.1f}") if a_v is not None else None,
+                        "raw_value": a_raw,
                         "table": tbl,
                         "format": fmt,
                         "format_type": fmt,
@@ -1516,7 +1871,7 @@ class DatabasePipelineService:
             # Distinct categorical entities
             for d_col in prof["dim_cols"][:2]:
                 q_d = _clean_sql_identifier(d_col, db_conn.db_type)
-                dist_res = execute_sql(f"SELECT COUNT(DISTINCT {q_d}) as cnt FROM {q_tbl}")
+                dist_res = execute_sql(f"SELECT COUNT(DISTINCT {q_d}) as cnt FROM {q_tbl}", [f"{tbl}_{d_col}_distinct"])
                 if dist_res:
                     d_cnt = int(dist_res[0].get("cnt") or 0)
                     computed_kpis.append({
@@ -1548,7 +1903,7 @@ class DatabasePipelineService:
                     ORDER BY period ASC 
                     LIMIT 30
                 """
-                t_data = execute_sql(t_query)
+                t_data = execute_sql(t_query, [f"{tbl}_trend"])
                 if t_data:
                     computed_charts.append({
                         "id": f"{tbl}_trend",
@@ -1578,7 +1933,7 @@ class DatabasePipelineService:
                     ORDER BY value DESC 
                     LIMIT 8
                 """
-                c_data = execute_sql(c_query)
+                c_data = execute_sql(c_query, [f"{tbl}_{d_col}_breakdown"])
                 if c_data:
                     c_type = "donut" if idx == 1 else "bar"
                     computed_charts.append({
@@ -1609,7 +1964,7 @@ class DatabasePipelineService:
                     ORDER BY value DESC 
                     LIMIT 8
                 """
-                m2_data = execute_sql(m2_query)
+                m2_data = execute_sql(m2_query, [f"{tbl}_{m_col2}_breakdown"])
                 if m2_data:
                     computed_charts.append({
                         "id": f"{tbl}_{m_col2}_breakdown",
@@ -1635,57 +1990,62 @@ class DatabasePipelineService:
                 for d_col in prof["dim_cols"][:2]
             ]
 
+        # Keep failed query-backed outputs visible instead of silently dropping the metric/chart.
+        known_metric_ids = {str(item.get("id", "")) for item in computed_kpis}
+        known_chart_ids = {str(item.get("id", "")) for item in computed_charts}
+        chart_metric_ids = {
+            "monthly_revenue_velocity", "revenue_by_market", "revenue_by_segment",
+            "order_status_distribution", "top_customers_spend", "catalog_category_distribution",
+        }
+        for metric_id, state in metric_query_states.items():
+            if state["status"] == "available":
+                continue
+            if metric_id in chart_metric_ids or metric_id.endswith("_trend") or metric_id.endswith("_breakdown"):
+                if metric_id not in known_chart_ids:
+                    computed_charts.append({
+                        "id": metric_id,
+                        "title": "Chart unavailable",
+                        "type": "area" if metric_id.endswith("_trend") or metric_id == "monthly_revenue_velocity" else "bar",
+                        "data": [],
+                        "xKey": "name",
+                        "yKey": "value",
+                    })
+            elif metric_id not in known_metric_ids:
+                computed_kpis.append({
+                    "id": metric_id,
+                    "label": "Metric unavailable",
+                    "value": None,
+                    "raw_value": None,
+                    "format": "number",
+                })
+
+        # Preserve metric existence while making missing, zero, and failed results explicit.
+        for metric in computed_kpis:
+            apply_result_status(metric)
+        for chart in computed_charts:
+            apply_result_status(chart, is_chart=True)
+
         # -- LAYER 5 & 6: AI EXECUTIVE PLAYBOOK & ANOMALIES (PARALLEL) --
         if progress_callback:
             progress_callback(5, "Layer 5 & 6: Strategic AI Executive Playbook & Outlier Engine...")
-        print("[DB-Pipeline] Layer 5 & 6: Strategic AI Synthesis & Outliers...")
+        logger.info("Database pipeline layers 5 and 6: synthesis and anomaly detection")
 
         def run_ai_synthesis() -> Dict[str, Any]:
             prompt = f"""
             You are DataSpeakAI's Chief Business Intelligence Analyst.
             Analyze this live enterprise database profile and key performance indicators:
             
-            Database: {getattr(db_conn, "name", getattr(db_conn, "db_name", "Database"))} ({db_conn.db_type})
-            Mode: {"Multi-Table Relational Federation" if is_federated_mode else f"Single Table: {selected_table}"}
+            Database type: {db_conn.db_type}
+            Mode: {"Multi-Table Relational Federation" if is_federated_mode else "Single Table"}
+
+            Aggregated numeric values only:
+            {json.dumps(_llm_safe_points(computed_kpis, computed_charts), indent=2, default=str)}
             
-            Deterministic Key Metrics (Calculated mathematically):
-            {json.dumps([{"label": k["label"], "value": k["value"], "trend": f"{k['trend_direction']} {k['trend_pct']}%"} for k in computed_kpis], indent=2)}
-            
-            Top Chart Dimensions:
-            {json.dumps([{"title": c["title"], "type": c["type"], "top_points": c["data"][:3]} for c in computed_charts], indent=2)}
-            
-            Synthesize an authoritative, commercial executive summary.
-            Include real numerical values from the metrics.
-            Return STRICT JSON:
-            {{
-              "business_domain": "E-Commerce / Digital Media Retail",
-              "executive_summary": "1-2 crisp strategic sentences summarizing commercial performance and velocity.",
-              "strategic_insights": [
-                {{
-                  "title": "e.g. Revenue Velocity Acceleration",
-                  "finding": "Detailed explanation with numerical evidence and percentages from metrics.",
-                  "impact": "High",
-                  "category": "Growth"
-                }},
-                {{
-                  "title": "e.g. Geographic Market Concentration",
-                  "finding": "Detailed explanation of top markets and international buyer distribution.",
-                  "impact": "High",
-                  "category": "Market"
-                }},
-                {{
-                  "title": "e.g. Catalog & Category Engagement",
-                  "finding": "Detailed explanation of top categories and product demand.",
-                  "impact": "Medium",
-                  "category": "Catalog"
-                }}
-              ],
-              "tactical_recommendations": [
-                "Deploy targeted loyalty programs to top-tier accounts driving disproportionate revenue.",
-                "Expand regional catalog offerings in high-growth international territories.",
-                "Optimize average order value through personalized cross-sell recommendations."
-              ]
-            }}
+            Synthesize a concise executive summary using only the supplied numeric values.
+            Do not infer category names, customer identities, geographies, percentages, or trends that are not supplied.
+            Return STRICT JSON with business_domain, executive_summary,
+            strategic_insights, and tactical_recommendations. Use empty lists
+            when the numeric aggregates do not support an insight or recommendation.
             """
             try:
                 from services.llm_generation_service import generate
@@ -1695,40 +2055,30 @@ class DatabasePipelineService:
                 elif res_text.startswith("```"):
                     res_text = res_text[3:-3].strip()
                 return json.loads(res_text)
-            except Exception as e:
-                print(f"[DB-Pipeline] AI Synthesis fallback: {e}")
-                # High-fidelity deterministic synthesis fallback
-                rev_str = computed_kpis[0]["value"] if computed_kpis else "$2,328.60"
-                ord_str = computed_kpis[1]["value"] if len(computed_kpis) > 1 else "412"
-                aov_str = computed_kpis[2]["value"] if len(computed_kpis) > 2 else "$5.65"
+            except Exception:
+                logger.exception("AI synthesis failed; returning a computed-data fallback")
+                metrics = {item.get("id"): item.get("raw_value") for item in computed_kpis}
+                gross_revenue = metrics.get("total_revenue")
+                record_count = metrics.get("total_orders")
+                if isinstance(gross_revenue, (int, float)) and isinstance(record_count, (int, float)):
+                    summary = (
+                        f"Computed gross revenue is ${gross_revenue:,.2f} across "
+                        f"{int(record_count):,} records."
+                    )
+                    findings = [{
+                        "title": "Computed gross revenue",
+                        "finding": summary,
+                        "impact": "Medium",
+                        "category": "Revenue",
+                    }]
+                else:
+                    summary = "Insufficient data to generate a reliable business summary."
+                    findings = []
                 return {
-                    "business_domain": "E-Commerce & Digital Media",
-                    "executive_summary": f"Commercial operations demonstrate sustained trajectory with {rev_str} in gross sales across {ord_str} completed transactions, maintaining an Average Order Value (AOV) of {aov_str}.",
-                    "strategic_insights": [
-                        {
-                            "title": "Revenue Velocity & Stability",
-                            "finding": f"Gross sales reached {rev_str} with consistent transaction throughput. Average transaction volume remains stable across core operational periods.",
-                            "impact": "High",
-                            "category": "Growth"
-                        },
-                        {
-                            "title": "Geographic Demand Dispersion",
-                            "finding": "International buyers in primary markets (led by USA and Canada) contribute over 35% of total enterprise volume, representing prime expansion targets.",
-                            "impact": "High",
-                            "category": "Market"
-                        },
-                        {
-                            "title": "Catalog & Category Leadership",
-                            "finding": "Core product categories demonstrate high buyer affinity, with catalog utilization indicating consistent repeat purchase behavior.",
-                            "impact": "Medium",
-                            "category": "Catalog"
-                        }
-                    ],
-                    "tactical_recommendations": [
-                        "Prioritize marketing acquisition in top revenue-generating territories to maximize ROI.",
-                        "Bundle top-performing catalog items to elevate average order value above current baseline.",
-                        "Establish automated re-engagement workflows for high-value accounts exceeding historical spend thresholds."
-                    ]
+                    "business_domain": "Business operations",
+                    "executive_summary": summary,
+                    "strategic_insights": findings,
+                    "tactical_recommendations": [],
                 }
 
         def run_anomaly_detection() -> List[Dict[str, Any]]:
@@ -1785,7 +2135,7 @@ class DatabasePipelineService:
             "filters": all_filters,
             "executive_summary": ai_summary,
             "business_summary": {
-                "business_domain": ai_summary.get("business_domain", "E-Commerce"),
+                "business_domain": ai_summary.get("business_domain", "Business operations"),
                 "executive_summary": ai_summary.get("executive_summary", ""),
                 "key_metrics": computed_kpis
             },
@@ -1794,12 +2144,15 @@ class DatabasePipelineService:
                     "title": s.get("title", "Insight"),
                     "description": s.get("finding", ""),
                     "impact": s.get("impact", "Medium"),
-                    "suggested_action": ai_summary.get("tactical_recommendations", ["Take data-driven action"])[idx % max(1, len(ai_summary.get("tactical_recommendations", ["Action"])))],
+                    "suggested_action": (ai_summary.get("tactical_recommendations") or ["Take data-driven action"])[
+                        idx % len(ai_summary.get("tactical_recommendations") or ["Take data-driven action"])
+                    ],
                     "metric": s.get("category", "General")
                 }
                 for idx, s in enumerate(ai_summary.get("strategic_insights", []))
             ],
             "anomalies": detected_anomalies,
+            "data_quality": {"warnings": list(dict.fromkeys(query_errors))},
             "layout_plan": final_layout.model_dump(),
             "pipeline_layers": [
                 {"layer": 1, "name": "Schema Discovery & Multi-Table Statistical Profiling", "status": "completed"},
@@ -1815,15 +2168,16 @@ class DatabasePipelineService:
 
         # Cache in Redis L1 and Database L2
         try:
-            cache_set(cache_key, response_payload, ttl_seconds=86400)
+            clean_payload = json.loads(json.dumps(response_payload, default=str))
+            cache_set(cache_key, clean_payload, ttl_seconds=86400)
             if not selected_table and not date_from and not date_to:
-                db_conn.insights_cache = response_payload
+                db_conn.insights_cache = clean_payload
                 db_conn.insights_cached_at = datetime.datetime.now(datetime.timezone.utc)
                 db.commit()
         except Exception as e:
-            print(f"[DB-Pipeline] Caching warning: {e}")
+            logger.exception("Database insights cache write failed")
 
-        print(f"[DB-Pipeline] Complete! Generated {len(computed_kpis)} KPIs and {len(computed_charts)} Charts with sub-second execution.\n")
+        logger.info("Database insights pipeline completed")
         return response_payload
 
     def run_db_pipeline_stream(
@@ -1841,7 +2195,16 @@ class DatabasePipelineService:
         Runs the 6-Layer Deterministic Database Pipeline as an SSE event generator.
         Yields progress steps and finally the result payload.
         """
-        cache_key = f"db_insights:{connection_id}:{selected_table or 'all'}:{date_from or 'none'}:{date_to or 'none'}"
+        cache_key = _cache_key(tenant_id, connection_id, selected_table, date_from, date_to)
+        query = db.query(models.DatabaseConnection).filter(
+            models.DatabaseConnection.id == connection_id
+        )
+        if tenant_id is not None and hasattr(models.DatabaseConnection, "tenant_id"):
+            query = query.filter(models.DatabaseConnection.tenant_id == tenant_id)
+        elif user_id is not None and hasattr(models.DatabaseConnection, "user_id"):
+            query = query.filter(models.DatabaseConnection.user_id == user_id)
+        if not query.first():
+            raise ValueError("Database connection not found or unauthorized")
         if not force_refresh:
             cached_data = cache_get(cache_key)
             if cached_data:
@@ -1850,13 +2213,6 @@ class DatabasePipelineService:
                 yield {"type": "result", "data": cached_data, "cached": True}
                 return
 
-            query = db.query(models.DatabaseConnection).filter(
-                models.DatabaseConnection.id == connection_id
-            )
-            if tenant_id is not None and hasattr(models.DatabaseConnection, "tenant_id"):
-                query = query.filter(models.DatabaseConnection.tenant_id == tenant_id)
-            elif user_id is not None and hasattr(models.DatabaseConnection, "user_id"):
-                query = query.filter(models.DatabaseConnection.user_id == user_id)
             db_conn = query.first()
 
             if db_conn and db_conn.insights_cache and db_conn.insights_cached_at:
@@ -1949,8 +2305,8 @@ class DatabasePipelineService:
             yield {"type": "result", "data": result, "cached": False}
 
         except Exception as e:
-            print(f"[DB-Pipeline Stream Error]: {e}")
-            yield {"type": "error", "message": str(e)}
+            logger.exception("Database pipeline stream failed")
+            yield {"type": "error", "message": "Database pipeline execution failed"}
 
 
 db_pipeline_service = DatabasePipelineService()

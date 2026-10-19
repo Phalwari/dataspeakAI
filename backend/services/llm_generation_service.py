@@ -125,10 +125,10 @@ def _mask_key(key: str) -> str:
 # ── Active Model Configurations ──────────────────────────────────────────────
 
 GEMINI_MODELS = [
-    "gemini-2.5-flash",
     "gemini-flash-lite-latest",
-    "gemini-3.8-flash",
+    "gemini-2.0-flash",
     "gemini-flash-latest",
+    "gemini-2.5-flash",
 ]
 
 GROQ_MODELS = [

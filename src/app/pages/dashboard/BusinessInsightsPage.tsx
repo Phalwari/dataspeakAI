@@ -9,7 +9,7 @@ import {
   Sparkles, RefreshCw, Download, AlertTriangle, AlertCircle, CheckCircle2, Lightbulb,
   TrendingUp, TrendingDown, Minus, MessageSquare, X, Database, Clock, ArrowLeft,
   Table as TableIcon, Activity, Cpu, Compass, ShieldCheck, Check, Loader2,
-  Server, Plus, Search, Layers, ChevronDown, ChevronUp, Zap, Trash2
+  Server, Plus, Search, Layers, ChevronDown, ChevronUp, Zap, Trash2, Filter
 } from 'lucide-react';
 import {
   BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell,
@@ -119,6 +119,7 @@ export function BusinessInsightsPage() {
 
   // In-place Date presets ('all', '90d', '30d', '7d')
   const [preset, setPreset] = useState('all');
+  const [selectedDimensionFilter, setSelectedDimensionFilter] = useState<{ column: string; label: string; value: string } | null>(null);
 
   // Interactive Features
   const [expandedKpi, setExpandedKpi] = useState<any>(null);
@@ -331,7 +332,13 @@ export function BusinessInsightsPage() {
     });
 
     try {
-      const filterBody = label != null && label !== 'All' ? { [field]: label } : {};
+      let filterBody: any = label != null && label !== 'All' ? { [field]: label } : {};
+      if (selectedDimensionFilter && selectedDimensionFilter.column) {
+        const dimCol = selectedDimensionFilter.column.split('.').pop();
+        if (dimCol && dimCol !== field) {
+          filterBody = { ...filterBody, [dimCol]: selectedDimensionFilter.value };
+        }
+      }
       const res = await fetch(`${API_URL}/connections/${selectedConnection}/preview`, {
         method: 'POST',
         headers: {
@@ -491,8 +498,8 @@ export function BusinessInsightsPage() {
               trend_text: `in ${periodText}`
             };
           }
-          // Volume metric (Orders, Units, Tracks):
-          if (labelLower.includes('order') || labelLower.includes('volume') || labelLower.includes('track') || labelLower.includes('unit')) {
+          // Volume metric (Orders, Units, Tracks, Documents, Inspections, Records):
+          if (labelLower.includes('order') || labelLower.includes('volume') || labelLower.includes('track') || labelLower.includes('unit') || labelLower.includes('document') || labelLower.includes('inspection') || labelLower.includes('record')) {
             const baseNum = typeof k.raw_value === 'number' ? k.raw_value : parseFloat(String(k.value).replace(/[^0-9.]/g, '')) || 100;
             const newVol = Math.max(1, Math.round(baseNum * ratio));
             return {
@@ -520,8 +527,15 @@ export function BusinessInsightsPage() {
       }
     }
 
+    if (selectedDimensionFilter) {
+      result = result.map((k: any) => ({
+        ...k,
+        trend_text: `${k.trend_text || ''} · ${selectedDimensionFilter.label}: ${selectedDimensionFilter.value}`
+      }));
+    }
+
     return result;
-  }, [baseKpis, activeTable, preset, hasTimeSeriesData, rawCharts]);
+  }, [baseKpis, activeTable, preset, hasTimeSeriesData, rawCharts, selectedDimensionFilter]);
 
   // Dynamically derive Period Comparison from Time-Series Chart data & KPIs
   const timeSeriesChart = charts.find((c: any) => c.type === 'line' || c.type === 'area') || charts[0];
@@ -1108,48 +1122,105 @@ export function BusinessInsightsPage() {
           </div>
 
           {/* Quick Date Presets & Filter Strip (ONLY shown if time-series data or multi-tables exist!) */}
-          {(hasTimeSeriesData || availableTables.length > 1) && (
-            <div className="glass-card no-export" style={{ padding: '14px 18px', marginBottom: '20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
-              
-              {/* Only show Date Horizon if date/timeline column actually exists in data! */}
-              {hasTimeSeriesData ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginRight: '4px' }}>
-                    <Clock size={13} style={{ verticalAlign: -2 }} /> Horizon:
-                  </span>
-                  {PRESETS.map(([id, label]) => (
-                    <button
-                      key={id}
-                      className={`chip ${preset === id ? 'active' : ''}`}
-                      onClick={() => handleApplyPreset(id)}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              ) : <div />}
+          {(hasTimeSeriesData || availableTables.length > 1 || (pipelineData?.filters && pipelineData.filters.some((f: any) => f.options && f.options.length > 0))) && (
+            <div className="glass-card no-export" style={{ padding: '14px 18px', marginBottom: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+                {/* Only show Date Horizon if date/timeline column actually exists in data! */}
+                {hasTimeSeriesData ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginRight: '4px' }}>
+                      <Clock size={13} style={{ verticalAlign: -2 }} /> Horizon:
+                    </span>
+                    {PRESETS.map(([id, label]) => (
+                      <button
+                        key={id}
+                        className={`chip ${preset === id ? 'active' : ''}`}
+                        onClick={() => handleApplyPreset(id)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                ) : <div />}
 
-              {/* Table Scope Selector with ZERO-TOKEN Client-side instant filter */}
-              {availableTables.length > 1 && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginLeft: hasTimeSeriesData ? 'auto' : 0 }}>
-                  <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                    <TableIcon size={13} style={{ verticalAlign: -2 }} /> Scope:
-                  </span>
-                  <button
-                    className={`chip ${!activeTable ? 'active' : ''}`}
-                    onClick={() => handleSelectTableScope('')}
-                  >
-                    Federated (All)
-                  </button>
-                  {availableTables.slice(0, 6).map((tbl) => (
+                {/* Table Scope Selector with ZERO-TOKEN Client-side instant filter */}
+                {availableTables.length > 1 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginLeft: hasTimeSeriesData ? 'auto' : 0 }}>
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                      <TableIcon size={13} style={{ verticalAlign: -2 }} /> Scope:
+                    </span>
                     <button
-                      key={tbl}
-                      className={`chip ${activeTable === tbl ? 'active' : ''}`}
-                      onClick={() => handleSelectTableScope(tbl)}
+                      className={`chip ${!activeTable ? 'active' : ''}`}
+                      onClick={() => handleSelectTableScope('')}
                     >
-                      {tbl}
+                      Federated (All)
                     </button>
-                  ))}
+                    {availableTables.slice(0, 6).map((tbl) => (
+                      <button
+                        key={tbl}
+                        className={`chip ${activeTable === tbl ? 'active' : ''}`}
+                        onClick={() => handleSelectTableScope(tbl)}
+                      >
+                        {tbl}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Dimensional Filters Row (Borough, Cuisine, etc.) */}
+              {pipelineData?.filters && pipelineData.filters.filter((f: any) => f.options && f.options.length > 0 && (!activeTable || f.column.toLowerCase().startsWith(activeTable.toLowerCase()))).length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', paddingTop: '10px', borderTop: '1px solid var(--border-subtle)' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                    <Filter size={13} style={{ verticalAlign: -1 }} /> Filter by:
+                  </span>
+                  {pipelineData.filters
+                    .filter((f: any) => f.options && f.options.length > 0 && (!activeTable || f.column.toLowerCase().startsWith(activeTable.toLowerCase())))
+                    .slice(0, 4)
+                    .map((f: any) => {
+                      const isActive = selectedDimensionFilter?.column === f.column;
+                      return (
+                        <div key={f.column} style={{ display: 'flex', alignItems: 'center' }}>
+                          <select
+                            value={isActive ? selectedDimensionFilter.value : ''}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (val) {
+                                setSelectedDimensionFilter({ column: f.column, label: f.label, value: val });
+                              } else {
+                                setSelectedDimensionFilter(null);
+                              }
+                            }}
+                            style={{
+                              padding: '5px 12px',
+                              borderRadius: '20px',
+                              border: isActive ? '1px solid #6c47ff' : '1px solid var(--border)',
+                              background: isActive ? 'rgba(108, 71, 255, 0.08)' : 'var(--card)',
+                              color: isActive ? '#6c47ff' : 'var(--text-primary)',
+                              fontSize: '12px',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              outline: 'none'
+                            }}
+                          >
+                            <option value="">{f.label}: All</option>
+                            {f.options.map((opt: string) => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                        </div>
+                      );
+                    })}
+
+                  {selectedDimensionFilter && (
+                    <button
+                      className="chip"
+                      onClick={() => setSelectedDimensionFilter(null)}
+                      style={{ color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)', padding: '4px 10px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                    >
+                      <X size={12} /> Clear ({selectedDimensionFilter.value})
+                    </button>
+                  )}
                 </div>
               )}
             </div>
