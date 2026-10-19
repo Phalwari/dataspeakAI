@@ -146,8 +146,8 @@ def get_connection_tables(
                 return sorted(name for name in mongo_db.list_collection_names() if not name.startswith("system."))
             finally:
                 client.close()
-        except Exception:
-            logger.exception("MongoDB collection listing failed")
+        except Exception as exc:
+            logger.error("MongoDB collection listing failed (%s)", type(exc).__name__)
             raise HTTPException(status_code=400, detail="Failed to fetch database collections.") from None
 
     # Check cached tables_metadata first
@@ -402,8 +402,8 @@ def execute_connection_query(
         )
     except ValueError:
         raise HTTPException(status_code=400, detail="Query was rejected by the read-only policy or is invalid.") from None
-    except Exception:
-        logger.exception("Database query execution failed")
+    except Exception as exc:
+        logger.error("Database query execution failed (%s)", type(exc).__name__)
         raise HTTPException(status_code=500, detail="Database query failed.") from None
 
 
