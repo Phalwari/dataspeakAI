@@ -10,6 +10,7 @@ from services.connection_factory import (
     SSRFSecurityViolation,
 )
 from services.database_connection_service import DatabaseConnectionService
+from services.db_pool import get_engine, invalidate_engine
 
 
 def test_credential_encryption_round_trip_with_configured_key(monkeypatch):
@@ -115,3 +116,14 @@ def test_sqlite_connection_lists_tables_and_rejects_writes(monkeypatch, tmp_path
         DatabaseConnectionService.execute_query(
             "sqlite", database=str(db_path), query="INSERT INTO orders (amount) VALUES (999)"
         )
+
+
+def test_engine_pool_reuses_and_invalidates_sqlite_engine():
+    url = "sqlite://"
+
+    first = get_engine(url)
+    assert get_engine(url) is first
+    assert invalidate_engine(url) is True
+    assert get_engine(url) is not first
+    assert invalidate_engine(url) is True
+    assert invalidate_engine(url) is False
