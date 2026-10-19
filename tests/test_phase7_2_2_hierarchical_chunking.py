@@ -238,5 +238,5 @@ def test_build_grounded_rag_context_parent_deduplication(test_db):
     assert "Full Parent Chapter" in context_text
 
     # 3. Deduplication check: parent section header appears only ONCE in the expanded prompt
-    parent_mention_count = context_text.count("(Parent Context)")
+    parent_mention_count = context_text.count("Full Parent Chapter")
     assert parent_mention_count == 1, f"Expected parent context to be deduplicated (found {parent_mention_count})"

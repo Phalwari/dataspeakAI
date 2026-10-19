@@ -51,6 +51,7 @@ async def stream_chat_response(
     collected_tokens = []
     completed_normally = False
     slot_released = False
+    token_stream = None
 
     try:
         sources_list = []
@@ -247,6 +248,13 @@ async def stream_chat_response(
             raise ex
 
     finally:
+        # async-for does not close an upstream generator when this consumer
+        # returns early. Close it explicitly so its provider connection is released.
+        try:
+            if token_stream is not None and hasattr(token_stream, "aclose"):
+                await token_stream.aclose()
+        except Exception:
+            logger.warning("Upstream stream cleanup failed", exc_info=False)
         # Guarantee widget concurrent stream slot release
         if public_key and not slot_released:
             widget_limiter.release_stream(public_key)

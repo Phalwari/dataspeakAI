@@ -17,6 +17,22 @@ To maintain seamless multi-developer and AI agent collaboration:
 
 ## [Unreleased]
 
+### Fixed
+
+- **NR-2 independent readiness remediation (2026-10-19):** Repaired all seven reproduced findings: explicit dated KPI comparison windows, bounded spawned AutoML execution, chronological/grouped validation, winner-only holdout scoring, typed grounding failures, durable ingestion retries with propagated errors, and serialized immutable dense/sparse generation publication. Explicit upstream stream closure releases resources on disconnect; SQL-disabled widget responses remain on the RAG contract. Affected `automl_service.py`, `training_worker.py`, `citation_service.py`, `chat_stream.py`, `routers/documents.py`, `routers/widget.py`, `ingestion/task_queue.py`, and `search/generation_manager.py`.
+- **Index repair consistency:** `scripts/reconcile_indexes.py` verifies chunk/version/content-hash manifests and rebuilds drifted or missing active generations under the publication lock, deferring during active ingestion. Published generations are retained for readers. Re-embedding uses the requested model and child chunks consistently.
+
+### Added
+
+- **Permanent NR-2 verification:** 16 remediation regressions in `tests/test_nr2_readiness.py`; 50 synthetic-provider application workflows and 30 stream lifecycle samples in `tests/test_nr2_workflow_evidence.py`, with structured evidence under `docs/reports/nr2_evidence_2026-10-19/`. Final offline backend coverage: 656 passed, four external database integrations skipped; FYP: 19 passed; frontend: 35 passed and production build passed.
+
+### Changed
+
+- **Accurate NR-2 readiness records:** Consolidated 43 unique historical roadmap task blocks and seven completed repairs in `todo.md`, removed duplicate active/archive copies, documented verification contracts in `AGENTS.md`, and corrected unsupported historical quality/performance claims. Production acceptance still requires NR-3.1-A service/storage/recovery evidence. See [remediation report](docs/reports/nr2_remediation_2026-10-19.md) and [session log](docs/sessions/2026-10-19_nr2_remediation.md).
+- Public PostgreSQL/MySQL integration tests require `RUN_LIVE_DATABASE_TESTS=1`; skipped checks are explicitly excluded from pass totals.
+
+### Earlier unreleased work
+
 - **Database Connections & Data Preview Support (`backend/services/connection_factory.py`, `backend/services/sql_engine.py`, `backend/routers/databases.py`, `src/app/pages/dashboard/DatabasesPage.tsx`, `tests/test_databases_connection_and_preview.py`, `tests/test_databases_api_e2e.py`)**:
   - **MySQL ANSI_QUOTES & Execution Timeout**: Handled `SET SESSION max_execution_time` gracefully to eliminate MySQL error 1193 on versions lacking the variable; injected `SET SESSION sql_mode = CONCAT(@@sql_mode, ',ANSI_QUOTES')` so table preview queries (`SELECT * FROM "{table_name}"`) execute seamlessly across all MySQL versions.
   - **MongoDB Driver & Introspection Support**: Added PyMongo `ping` routing in `DatabaseConnectionFactory.test_connection`, bypassing SQLAlchemy engine crashes on MongoDB strings; added `_get_mongo_client_and_db()` in `databases.py` supporting collection listing, document preview with `ObjectId` serialization, and collection statistics.

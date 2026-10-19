@@ -1,3 +1,5 @@
+> **Evidence correction — 2026-10-19:** The original 25 cases below test citation verification against supplied answers and supplied evidence. They do not demonstrate SQL execution, retrieval quality, or live Gemini/Groq answer quality. The new [50-case workflow record](nr2_evidence_2026-10-19/workflow-results.json) executes real SQL, ingestion, retrieval, grounding and conversation persistence using a synthetic provider; all 50 passed. See [current verification](nr2_remediation_2026-10-19.md). Live provider comparisons remain an integration check.
+
 # DataSpeakAI — NR-2.2 AI Grounding & Evaluation Baseline Report
 
 **Evaluation Date:** 2026-10-18  

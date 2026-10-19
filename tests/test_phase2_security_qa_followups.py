@@ -98,7 +98,7 @@ def test_sec02_malformed_unparseable_sql_fails_closed():
     for q in malformed_queries:
         valid, msg = validate_widget_sql(q, allowed_tables=["products"])
         assert valid is False, f"Malformed query should fail closed: {q}"
-        assert "parsing failed" in msg.lower() or "guardrail" in msg.lower() or "violation" in msg.lower()
+        assert "parse error" in msg.lower() or "parsing failed" in msg.lower() or "guardrail" in msg.lower() or "violation" in msg.lower()
 
 
 # ---------------------------------------------------------------------------

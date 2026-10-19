@@ -1,3 +1,5 @@
+> **Evidence correction — 2026-10-19:** No raw measurements or reproducible setup were found for the historical latency table and 85.9% improvement claim below. Those figures are unverified and must not be used as release evidence. Current measured data is in [stream-results.json](nr2_evidence_2026-10-19/stream-results.json): 30 in-process runs, including 15 cancellations, with a synthetic provider deliberately waiting 5 ms per token. This establishes the stream lifecycle contract, not live-provider or network performance. See [current verification](nr2_remediation_2026-10-19.md).
+
 # DataSpeakAI — NR-2.3 Streaming, Generation & Memory Performance Report
 
 **Report Date:** 2026-10-18  

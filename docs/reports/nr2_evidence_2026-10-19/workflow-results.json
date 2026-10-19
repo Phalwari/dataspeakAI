@@ -1,0 +1,572 @@
+{
+  "dataset_version": "2.0",
+  "scope": "Offline synthetic-provider workflow correctness; no live provider quality claim",
+  "cases": [
+    {
+      "id": "FLOW-01",
+      "kind": "sql",
+      "route": "sql",
+      "grounding": null,
+      "provider_calls": [
+        "nl_to_sql",
+        "sql_synthesis"
+      ],
+      "elapsed_ms": 163.944,
+      "passed": true
+    },
+    {
+      "id": "FLOW-02",
+      "kind": "sql",
+      "route": "sql",
+      "grounding": null,
+      "provider_calls": [
+        "nl_to_sql",
+        "sql_synthesis"
+      ],
+      "elapsed_ms": 10.997,
+      "passed": true
+    },
+    {
+      "id": "FLOW-03",
+      "kind": "sql",
+      "route": "sql",
+      "grounding": null,
+      "provider_calls": [
+        "nl_to_sql",
+        "sql_synthesis"
+      ],
+      "elapsed_ms": 10.665,
+      "passed": true
+    },
+    {
+      "id": "FLOW-04",
+      "kind": "sql",
+      "route": "sql",
+      "grounding": null,
+      "provider_calls": [
+        "nl_to_sql",
+        "sql_synthesis"
+      ],
+      "elapsed_ms": 9.941,
+      "passed": true
+    },
+    {
+      "id": "FLOW-05",
+      "kind": "sql",
+      "route": "sql",
+      "grounding": null,
+      "provider_calls": [
+        "nl_to_sql",
+        "sql_synthesis"
+      ],
+      "elapsed_ms": 10.882,
+      "passed": true
+    },
+    {
+      "id": "FLOW-06",
+      "kind": "sql",
+      "route": "sql",
+      "grounding": null,
+      "provider_calls": [
+        "nl_to_sql",
+        "sql_synthesis"
+      ],
+      "elapsed_ms": 11.107,
+      "passed": true
+    },
+    {
+      "id": "FLOW-07",
+      "kind": "sql",
+      "route": "sql",
+      "grounding": null,
+      "provider_calls": [
+        "nl_to_sql",
+        "sql_synthesis"
+      ],
+      "elapsed_ms": 11.339,
+      "passed": true
+    },
+    {
+      "id": "FLOW-08",
+      "kind": "sql",
+      "route": "sql",
+      "grounding": null,
+      "provider_calls": [
+        "nl_to_sql",
+        "sql_synthesis"
+      ],
+      "elapsed_ms": 12.867,
+      "passed": true
+    },
+    {
+      "id": "FLOW-09",
+      "kind": "sql",
+      "route": "sql",
+      "grounding": null,
+      "provider_calls": [
+        "nl_to_sql",
+        "sql_synthesis"
+      ],
+      "elapsed_ms": 10.889,
+      "passed": true
+    },
+    {
+      "id": "FLOW-10",
+      "kind": "sql",
+      "route": "sql",
+      "grounding": null,
+      "provider_calls": [
+        "nl_to_sql",
+        "sql_synthesis"
+      ],
+      "elapsed_ms": 9.969,
+      "passed": true
+    },
+    {
+      "id": "FLOW-11",
+      "kind": "sql",
+      "route": "sql",
+      "grounding": null,
+      "provider_calls": [
+        "nl_to_sql",
+        "sql_synthesis"
+      ],
+      "elapsed_ms": 10.346,
+      "passed": true
+    },
+    {
+      "id": "FLOW-12",
+      "kind": "sql",
+      "route": "sql",
+      "grounding": null,
+      "provider_calls": [
+        "nl_to_sql",
+        "sql_synthesis"
+      ],
+      "elapsed_ms": 9.898,
+      "passed": true
+    },
+    {
+      "id": "FLOW-13",
+      "kind": "sql",
+      "route": "sql",
+      "grounding": null,
+      "provider_calls": [
+        "nl_to_sql",
+        "sql_synthesis"
+      ],
+      "elapsed_ms": 10.072,
+      "passed": true
+    },
+    {
+      "id": "FLOW-14",
+      "kind": "sql",
+      "route": "sql",
+      "grounding": null,
+      "provider_calls": [
+        "nl_to_sql",
+        "sql_synthesis"
+      ],
+      "elapsed_ms": 9.998,
+      "passed": true
+    },
+    {
+      "id": "FLOW-15",
+      "kind": "sql",
+      "route": "sql",
+      "grounding": null,
+      "provider_calls": [
+        "nl_to_sql",
+        "sql_synthesis"
+      ],
+      "elapsed_ms": 11.005,
+      "passed": true
+    },
+    {
+      "id": "FLOW-16",
+      "kind": "rag",
+      "route": "rag",
+      "grounding": "supported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 25.14,
+      "passed": true
+    },
+    {
+      "id": "FLOW-17",
+      "kind": "rag",
+      "route": "rag",
+      "grounding": "supported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 10.677,
+      "passed": true
+    },
+    {
+      "id": "FLOW-18",
+      "kind": "rag",
+      "route": "rag",
+      "grounding": "supported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 10.376,
+      "passed": true
+    },
+    {
+      "id": "FLOW-19",
+      "kind": "rag",
+      "route": "rag",
+      "grounding": "supported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 10.233,
+      "passed": true
+    },
+    {
+      "id": "FLOW-20",
+      "kind": "rag",
+      "route": "rag",
+      "grounding": "supported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 7.521,
+      "passed": true
+    },
+    {
+      "id": "FLOW-21",
+      "kind": "rag",
+      "route": "rag",
+      "grounding": "supported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 7.254,
+      "passed": true
+    },
+    {
+      "id": "FLOW-22",
+      "kind": "rag",
+      "route": "rag",
+      "grounding": "supported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 7.064,
+      "passed": true
+    },
+    {
+      "id": "FLOW-23",
+      "kind": "rag",
+      "route": "rag",
+      "grounding": "supported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 6.78,
+      "passed": true
+    },
+    {
+      "id": "FLOW-24",
+      "kind": "rag",
+      "route": "rag",
+      "grounding": "supported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 6.851,
+      "passed": true
+    },
+    {
+      "id": "FLOW-25",
+      "kind": "rag",
+      "route": "rag",
+      "grounding": "supported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 7.265,
+      "passed": true
+    },
+    {
+      "id": "FLOW-26",
+      "kind": "rag",
+      "route": "rag",
+      "grounding": "supported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 7.186,
+      "passed": true
+    },
+    {
+      "id": "FLOW-27",
+      "kind": "rag",
+      "route": "rag",
+      "grounding": "supported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 7.17,
+      "passed": true
+    },
+    {
+      "id": "FLOW-28",
+      "kind": "rag",
+      "route": "rag",
+      "grounding": "supported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 7.187,
+      "passed": true
+    },
+    {
+      "id": "FLOW-29",
+      "kind": "rag",
+      "route": "rag",
+      "grounding": "supported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 7.499,
+      "passed": true
+    },
+    {
+      "id": "FLOW-30",
+      "kind": "rag",
+      "route": "rag",
+      "grounding": "supported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 7.382,
+      "passed": true
+    },
+    {
+      "id": "FLOW-31",
+      "kind": "unanswerable",
+      "route": "rag",
+      "grounding": "no_claims",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 6.855,
+      "passed": true
+    },
+    {
+      "id": "FLOW-32",
+      "kind": "unanswerable",
+      "route": "rag",
+      "grounding": "no_claims",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 7.013,
+      "passed": true
+    },
+    {
+      "id": "FLOW-33",
+      "kind": "unanswerable",
+      "route": "rag",
+      "grounding": "no_claims",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 6.953,
+      "passed": true
+    },
+    {
+      "id": "FLOW-34",
+      "kind": "unanswerable",
+      "route": "rag",
+      "grounding": "no_claims",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 7.011,
+      "passed": true
+    },
+    {
+      "id": "FLOW-35",
+      "kind": "unanswerable",
+      "route": "rag",
+      "grounding": "no_claims",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 7.147,
+      "passed": true
+    },
+    {
+      "id": "FLOW-36",
+      "kind": "contradiction",
+      "route": "rag",
+      "grounding": "unsupported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 7.284,
+      "passed": true
+    },
+    {
+      "id": "FLOW-37",
+      "kind": "contradiction",
+      "route": "rag",
+      "grounding": "unsupported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 7.214,
+      "passed": true
+    },
+    {
+      "id": "FLOW-38",
+      "kind": "contradiction",
+      "route": "rag",
+      "grounding": "unsupported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 8.921,
+      "passed": true
+    },
+    {
+      "id": "FLOW-39",
+      "kind": "contradiction",
+      "route": "rag",
+      "grounding": "unsupported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 7.338,
+      "passed": true
+    },
+    {
+      "id": "FLOW-40",
+      "kind": "contradiction",
+      "route": "rag",
+      "grounding": "unsupported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 7.496,
+      "passed": true
+    },
+    {
+      "id": "FLOW-41",
+      "kind": "contradiction",
+      "route": "rag",
+      "grounding": "unsupported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 7.215,
+      "passed": true
+    },
+    {
+      "id": "FLOW-42",
+      "kind": "contradiction",
+      "route": "rag",
+      "grounding": "unsupported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 7.269,
+      "passed": true
+    },
+    {
+      "id": "FLOW-43",
+      "kind": "contradiction",
+      "route": "rag",
+      "grounding": "unsupported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 7.288,
+      "passed": true
+    },
+    {
+      "id": "FLOW-44",
+      "kind": "contradiction",
+      "route": "rag",
+      "grounding": "unsupported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 7.317,
+      "passed": true
+    },
+    {
+      "id": "FLOW-45",
+      "kind": "contradiction",
+      "route": "rag",
+      "grounding": "unsupported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 7.333,
+      "passed": true
+    },
+    {
+      "id": "FLOW-46",
+      "kind": "injection",
+      "route": "rag",
+      "grounding": "supported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 7.978,
+      "passed": true
+    },
+    {
+      "id": "FLOW-47",
+      "kind": "injection",
+      "route": "rag",
+      "grounding": "supported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 7.723,
+      "passed": true
+    },
+    {
+      "id": "FLOW-48",
+      "kind": "injection",
+      "route": "rag",
+      "grounding": "supported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 7.335,
+      "passed": true
+    },
+    {
+      "id": "FLOW-49",
+      "kind": "injection",
+      "route": "rag",
+      "grounding": "supported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 7.435,
+      "passed": true
+    },
+    {
+      "id": "FLOW-50",
+      "kind": "injection",
+      "route": "rag",
+      "grounding": "supported",
+      "provider_calls": [
+        "rag_synthesis"
+      ],
+      "elapsed_ms": 8.054,
+      "passed": true
+    }
+  ],
+  "passed": 50
+}

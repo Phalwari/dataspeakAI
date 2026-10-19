@@ -1,0 +1,154 @@
+{
+  "date": "2026-10-19",
+  "scope": "Offline tests across three isolated pytest processes; synthetic provider workflow evidence; no live-service quality or recovery claim",
+  "groups": [
+    {
+      "name": "final_core",
+      "junit_path": ".agents/nr2-remediation/final_core-results.xml",
+      "sha256": "26d523a39be799ddcbfabcfd70c54399fbd283fe1ddb75cbc78722bab513fc35",
+      "tests": 594,
+      "passed": 590,
+      "skipped": 4,
+      "errors": 0,
+      "failures": 0,
+      "duration_seconds": 172.946
+    },
+    {
+      "name": "final_migrations",
+      "junit_path": ".agents/nr2-remediation/final_migrations-results.xml",
+      "sha256": "a3d5f75dfbc800cefcb7220a2033306860ed6bedbf6152bf21b0b3934f3e9bb5",
+      "tests": 32,
+      "passed": 32,
+      "skipped": 0,
+      "errors": 0,
+      "failures": 0,
+      "duration_seconds": 536.805
+    },
+    {
+      "name": "lifecycle_final",
+      "junit_path": ".agents/nr2-remediation/lifecycle_final-results.xml",
+      "sha256": "99c978b915489c34b7facbcd0f8ae01c3d9e33e00f3e910924b4ab6f178dced1",
+      "tests": 53,
+      "passed": 53,
+      "skipped": 0,
+      "errors": 0,
+      "failures": 0,
+      "duration_seconds": 401.706
+    }
+  ],
+  "default_backend": {
+    "passed": 656,
+    "skipped": 4,
+    "errors": 0,
+    "failures": 0,
+    "selected_files": 55,
+    "files_with_collected_cases": 54,
+    "files_without_test_functions": [
+      "tests/test_nr1_permissions.py"
+    ]
+  },
+  "selected_file_groups": {
+    "core": [
+      "tests/test_adaptive_chart_recommender.py",
+      "tests/test_automl_service.py",
+      "tests/test_databases_api_e2e.py",
+      "tests/test_databases_connection_and_preview.py",
+      "tests/test_fix_commit_issues_regression.py",
+      "tests/test_nr0_isolation.py",
+      "tests/test_nr0_regressions.py",
+      "tests/test_nr1_connection_security.py",
+      "tests/test_nr1_permissions.py",
+      "tests/test_nr1_platform_admin.py",
+      "tests/test_nr1_query_safety.py",
+      "tests/test_nr1_widget_isolation.py",
+      "tests/test_nr2_eval_benchmark.py",
+      "tests/test_nr2_grounding_verification.py",
+      "tests/test_nr2_metric_parity.py",
+      "tests/test_phase1_5a_security_and_integrity.py",
+      "tests/test_phase1_5b_metric_engine.py",
+      "tests/test_phase1_5c1_correctness_hardening.py",
+      "tests/test_phase1_5c_dashboard_executor_integration.py",
+      "tests/test_phase1_5d1_silent_fallback_removal.py",
+      "tests/test_phase1_5d2_atomic_regeneration.py",
+      "tests/test_phase1_5d_readiness_gate.py",
+      "tests/test_phase1_dashboard_wiring_regression.py",
+      "tests/test_phase2_1_hardening_regression.py",
+      "tests/test_phase2_stage_b_chat_widget.py",
+      "tests/test_phase2_widget_keys_sessions.py",
+      "tests/test_phase2a_metric_recipe_contract.py",
+      "tests/test_phase2b1_recipe_semantics.py",
+      "tests/test_phase2b2_formula_fidelity.py",
+      "tests/test_phase2b_metric_recipe_generator.py",
+      "tests/test_phase2c1_execution_boundary.py",
+      "tests/test_phase2c_derived_metric_executor.py",
+      "tests/test_phase2d_chart_recommender.py",
+      "tests/test_phase2e_filter_recommender.py",
+      "tests/test_phase2f_dashboard_layout_engine.py",
+      "tests/test_phase3_ai_insights_regression.py",
+      "tests/test_phase4_enterprise_schema_regression.py",
+      "tests/test_phase4_stage_a_regression.py",
+      "tests/test_phase4_stage_b_regression.py",
+      "tests/test_phase5_erd_backend.py",
+      "tests/test_phase7_1_2_streaming_backend.py",
+      "tests/test_phase7_1_4_memory.py",
+      "tests/test_phase7_1_5_titles.py",
+      "tests/test_phase7_2_1_sql_agent.py",
+      "tests/test_phase7_2_2_hierarchical_chunking.py",
+      "tests/test_phase7_2_3_citation_grounding.py",
+      "tests/test_phase7_2_4_vector_versioning.py",
+      "tests/test_phase7_sprint7_1_stage1.py",
+      "tests/test_source_profiler.py",
+      "tests/test_stage_c2_verification.py"
+    ],
+    "migrations": [
+      "tests/test_nr0_migrations.py",
+      "tests/test_phase2_security_qa_followups.py"
+    ],
+    "lifecycle": [
+      "tests/test_nr2_2_b_ingestion_lifecycle.py",
+      "tests/test_nr2_readiness.py",
+      "tests/test_nr2_workflow_evidence.py"
+    ]
+  },
+  "fyp": {
+    "passed": 19
+  },
+  "frontend": {
+    "passed": 35,
+    "test_files": 3,
+    "production_build": "passed",
+    "existing_large_chunk_warning": true
+  },
+  "remediation_regressions": {
+    "passed": 16,
+    "included_in_default_backend": true
+  },
+  "workflow": {
+    "cases_passed": 50,
+    "stream_samples_passed": 30,
+    "pytest_tests": 2,
+    "included_in_default_backend": true
+  },
+  "skipped_cases": [
+    {
+      "classname": "tests.test_databases_api_e2e",
+      "name": "test_api_test_postgresql_connection",
+      "time": "0.000"
+    },
+    {
+      "classname": "tests.test_databases_api_e2e",
+      "name": "test_api_test_mysql_connection",
+      "time": "0.000"
+    },
+    {
+      "classname": "tests.test_databases_connection_and_preview",
+      "name": "test_postgresql_live_connection_and_preview",
+      "time": "0.000"
+    },
+    {
+      "classname": "tests.test_databases_connection_and_preview",
+      "name": "test_mysql_live_connection_and_preview_with_ansi_quotes",
+      "time": "0.000"
+    }
+  ]
+}

@@ -77,19 +77,18 @@ def test_compute_period_trend_does_not_compare_sum_to_mean():
     df = pd.DataFrame({"revenue": [100.0] * 10})
     trend = compute_period_trend(df, "revenue", "sum")
 
-    assert trend["trend_pct"] == 0.0
-    assert trend["trend_pct"] != 900.0
-    assert trend["trend_status"] == "ok" or trend["trend_status"] == "flat"
+    assert trend["trend_pct"] is None
+    assert trend["trend_status"] == "no_prior_data"
 
 
 def test_compute_period_trend_typed_zero_baseline():
     """NR-2.1-A-T06: When prior period aggregate is zero and current > 0, return unavailable_zero_baseline."""
     df = pd.DataFrame({
-        "period": ["2026-Q1", "2026-Q1", "2026-Q2", "2026-Q2"],
+        "period": ["2026-01-01", "2026-01-02", "2026-04-01", "2026-04-02"],
         "revenue": [0.0, 0.0, 100.0, 200.0],
     })
 
-    trend = compute_period_trend(df, "revenue", "sum", date_col="period")
+    trend = compute_period_trend(df, "revenue", "sum", date_col="period", comparison={"prior_start": "2026-01-01", "prior_end": "2026-04-01", "current_start": "2026-04-01", "current_end": "2026-07-01"})
 
     assert trend["trend_status"] == "unavailable_zero_baseline"
     assert trend["trend_pct"] is None
@@ -297,8 +296,8 @@ def test_compute_period_trend_odd_row_flat_series():
         "revenue": [100.0, 100.0, 100.0],
     })
     trend = compute_period_trend(df, "revenue", "sum")
-    assert trend["trend_status"] in ("ok", "flat")
-    assert trend["trend_pct"] == 0.0
+    assert trend["trend_status"] == "no_prior_data"
+    assert trend["trend_pct"] is None
     assert trend["trend_direction"] == "flat"
 
 
@@ -308,7 +307,7 @@ def test_compute_period_trend_temporal_midpoint_split():
         "revenue": [10.0, 20.0, 30.0, 40.0],
         "date": ["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-31"],
     })
-    trend = compute_period_trend(df, "revenue", "sum", date_col="date")
+    trend = compute_period_trend(df, "revenue", "sum", date_col="date", comparison={"prior_start": "2026-01-01", "prior_end": "2026-01-16", "current_start": "2026-01-16", "current_end": "2026-02-01"})
     assert trend["trend_status"] == "ok"
     assert trend["trend_pct"] is not None
 

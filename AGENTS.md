@@ -299,6 +299,14 @@ backend/
 ---
 
 
+### 4.11 NR-2 Correctness and Verification Contracts
+
+* **Dataframe trends:** `compute_period_trend` requires `date_col` and an explicit `comparison` containing `prior_start`, `prior_end`, `current_start`, `current_end`, and optional IANA `timezone` (UTC default). Intervals are half-open and non-overlapping. Missing/invalid periods return an unavailable percentage; never infer growth from row order.
+* **AutoML execution:** `run_automl_pipeline` owns a bounded spawned worker. Keep estimator work inside `_run_automl_pipeline`; do not restore a thread-only timeout. Temporal/grouped splits apply to both outer holdout and training validation. Only the selected candidate receives a final holdout score; other scores must remain labelled validation scores.
+* **Ingestion publication:** Propagate processing errors to the task wrapper; retain durable originals for retries. Serialize duplicate document jobs. Dense and sparse indexes must share the same merged generation manifest. Never mutate a published generation or prune a generation that readers may still hold.
+* **Streaming cleanup:** Explicitly close the upstream async generator on cancellation, error, and normal completion; exiting an `async for` alone does not guarantee upstream resource cleanup.
+* **Evidence:** `tests/test_nr2_readiness.py` contains permanent remediation regressions; `tests/test_nr2_workflow_evidence.py` runs 50 synthetic-provider workflows and records optional JSON via `NR2_EVIDENCE_DIR`. Offline checks are not live-provider quality or production recovery evidence. Public database integration checks require `RUN_LIVE_DATABASE_TESTS=1`.
+
 ## 5. Instructions for AI Agents
 
 ### 5.1 Pre-Task Context Reading Protocol

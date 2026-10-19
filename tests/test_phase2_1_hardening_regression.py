@@ -68,7 +68,7 @@ def test_sec02_ast_fail_closed_parsing():
     for mq in malformed_queries:
         valid, msg = validate_widget_sql(mq, allowed_tables=["products"])
         assert valid is False
-        assert "SQL parsing failed" in msg or "Forbidden keyword" in msg or "Only read-only" in msg
+        assert any(reason in msg for reason in ("SQL parse error", "SQL validation error", "SQL parsing failed", "Forbidden keyword", "Only read-only"))
 
     # 2. Extract referenced tables directly raises ValueError on parse failure
     with pytest.raises(ValueError) as excinfo:

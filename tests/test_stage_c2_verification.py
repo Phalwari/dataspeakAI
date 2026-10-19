@@ -105,7 +105,7 @@ def test_non_streaming_chat_json_keys_unit():
         id=999,
         email="test_c2@example.com",
         tenant_id=1,
-        role="admin"
+        role="Admin", is_active=True, is_verified=True
     )
 
     app.dependency_overrides[get_current_user] = lambda: fake_user

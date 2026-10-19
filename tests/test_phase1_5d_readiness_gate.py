@@ -151,7 +151,7 @@ def test_task1_apply_mapping_rejects_missing_or_blank_aggregation(gate_db):
     db, _, db_conn, u1, _ = gate_db
 
     client = TestClient(app)
-    app.dependency_overrides[get_current_user] = lambda: models.User(id=1, tenant_id=1, email="user1@example.com", is_active=True, is_verified=True)
+    app.dependency_overrides[get_current_user] = lambda: models.User(id=1, tenant_id=1, email="user1@example.com", is_active=True, is_verified=True, role="Admin")
 
     try:
         bad_template = get_domain_template("e-commerce")
@@ -285,7 +285,7 @@ def test_task4_ai_insights_get_does_not_invoke_llm(gate_db):
     db, _, db_conn, u1, _ = gate_db
 
     client = TestClient(app)
-    app.dependency_overrides[get_current_user] = lambda: models.User(id=1, tenant_id=1, email="user1@example.com", is_active=True, is_verified=True)
+    app.dependency_overrides[get_current_user] = lambda: models.User(id=1, tenant_id=1, email="user1@example.com", is_active=True, is_verified=True, role="Admin")
 
     try:
         # Invalidate any cached insights
@@ -311,7 +311,7 @@ def test_task4_ai_insights_post_generates_and_caches(gate_db):
     db, _, db_conn, u1, _ = gate_db
 
     client = TestClient(app)
-    app.dependency_overrides[get_current_user] = lambda: models.User(id=1, tenant_id=1, email="user1@example.com", is_active=True, is_verified=True)
+    app.dependency_overrides[get_current_user] = lambda: models.User(id=1, tenant_id=1, email="user1@example.com", is_active=True, is_verified=True, role="Admin")
 
     mock_insights_payload = {
         "business_type": "E-Commerce Retail",
@@ -347,7 +347,7 @@ def test_task4_ai_insights_tenant_isolation(gate_db):
     db, _, db_conn, _, u2 = gate_db
 
     client = TestClient(app)
-    app.dependency_overrides[get_current_user] = lambda: models.User(id=2, tenant_id=2, email="user2@example.com", is_active=True, is_verified=True)
+    app.dependency_overrides[get_current_user] = lambda: models.User(id=2, tenant_id=2, email="user2@example.com", is_active=True, is_verified=True, role="Admin")
 
     try:
         # Connection 1 belongs to Tenant 1
@@ -373,7 +373,7 @@ def test_task5_legacy_generators_not_invoked_during_live_dashboard(gate_db):
     db, ext_engine, db_conn, u1, _ = gate_db
 
     client = TestClient(app)
-    app.dependency_overrides[get_current_user] = lambda: models.User(id=1, tenant_id=1, email="user1@example.com", is_active=True, is_verified=True)
+    app.dependency_overrides[get_current_user] = lambda: models.User(id=1, tenant_id=1, email="user1@example.com", is_active=True, is_verified=True, role="Admin")
 
     # Seed one valid KPI definition
     db.query(models.KpiDefinition).filter(models.KpiDefinition.connection_id == db_conn.id).delete()
@@ -588,7 +588,7 @@ def test_task9_query_error_does_not_leak_credentials_or_raw_driver(gate_db):
     db, _, db_conn, u1, _ = gate_db
 
     client = TestClient(app)
-    app.dependency_overrides[get_current_user] = lambda: models.User(id=1, tenant_id=1, email="user1@example.com", is_active=True, is_verified=True)
+    app.dependency_overrides[get_current_user] = lambda: models.User(id=1, tenant_id=1, email="user1@example.com", is_active=True, is_verified=True, role="Admin")
 
     try:
         # Simulate an unexpected driver crash containing raw connection URL with password

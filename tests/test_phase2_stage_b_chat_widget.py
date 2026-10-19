@@ -401,7 +401,13 @@ def test_widget_monthly_cap_exceeded(stage_b_setup):
 # Test 4: SQL Security Policy & Deterministic Validation
 # ---------------------------------------------------------------------------
 
-def test_sql_disabled_never_executes_sql(stage_b_setup):
+def test_sql_disabled_never_executes_sql(stage_b_setup, monkeypatch):
+    from unittest.mock import Mock
+    from routers import widget
+    execute = Mock(side_effect=AssertionError("SQL must not run for a RAG-only widget"))
+    generate = Mock(side_effect=AssertionError("SQL generation must not run for a RAG-only widget"))
+    monkeypatch.setattr(widget, "execute_safe_sql", execute)
+    monkeypatch.setattr(widget, "generate_sql_from_nl", generate)
     client = stage_b_setup["client"]
     token_rag = stage_b_setup["token_rag"]
 
@@ -421,6 +427,8 @@ def test_sql_disabled_never_executes_sql(stage_b_setup):
         # Because allow_sql is False on token_rag, query_type is strictly RAG
         assert resp.json()["query_type"] == "rag"
         assert "generated_sql" not in resp.json()
+    execute.assert_not_called()
+    generate.assert_not_called()
 
 
 def test_validate_widget_sql_deterministic_security():

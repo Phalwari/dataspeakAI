@@ -9,9 +9,10 @@ _slots = threading.BoundedSemaphore(2)
 
 def _execute(connection, module, function, arguments):
     try:
+        operation = getattr(importlib.import_module(module), function)
         from threadpoolctl import threadpool_limits
         with threadpool_limits(limits=1):
-            result = getattr(importlib.import_module(module), function)(*arguments)
+            result = operation(*arguments)
         connection.send(result)
     except Exception as exc:
         connection.send({"error": str(exc), "status": "failed", "best_model": None, "all_models": []})

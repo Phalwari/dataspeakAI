@@ -13,6 +13,7 @@ from services.sql_engine import execute_safe_sql
 from routers.databases import _get_mongo_client_and_db
 
 
+@pytest.mark.skipif(os.getenv("RUN_LIVE_DATABASE_TESTS") != "1", reason="External database integration: set RUN_LIVE_DATABASE_TESTS=1 in an authorized network environment")
 def test_postgresql_live_connection_and_preview():
     """Verify live public PostgreSQL connects, introspects tables, and returns preview data."""
     ok, err = DatabaseConnectionFactory.test_connection(
@@ -44,6 +45,7 @@ def test_postgresql_live_connection_and_preview():
     assert "upi" in [c.lower() for c in result["columns"]] or len(result["columns"]) > 0
 
 
+@pytest.mark.skipif(os.getenv("RUN_LIVE_DATABASE_TESTS") != "1", reason="External database integration: set RUN_LIVE_DATABASE_TESTS=1 in an authorized network environment")
 def test_mysql_live_connection_and_preview_with_ansi_quotes():
     """Verify live public MySQL connects, and executes data preview with double quotes without OperationalError 1193."""
     ok, err = DatabaseConnectionFactory.test_connection(

@@ -467,6 +467,7 @@ def process_widget_chat(
     exec_res = None
     rows_summary = ""
     context_text = ""
+    rag_hits = []
 
     # 6. SQL Security Policy Evaluation (NR-1.1-B-T07)
     allow_sql = bool(widget_key.allow_sql)
@@ -477,7 +478,7 @@ def process_widget_chat(
     is_asking_db = any(kw in user_query.lower() for kw in db_keywords)
 
     if is_asking_db and not allow_sql:
-        route_type = "sql"
+        route_type = "rag"
         assistant_answer = "Database querying is disabled for this widget. Please ask questions about our knowledge base documentation."
     elif allow_sql and is_asking_db:
         allowed_db_ids = widget_key.allowed_database_ids or []

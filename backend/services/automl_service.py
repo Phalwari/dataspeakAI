@@ -447,7 +447,11 @@ def _run_automl_pipeline(
         y_pred = pipeline.predict(X_te)
 
         if p_type == "regression":
-            test_score = clean_float(r2_score(y_te, y_pred))
+            if len(y_te) < 2:
+                raise ValueError("R² requires at least two holdout observations")
+            test_score = float(r2_score(y_te, y_pred))
+            if not math.isfinite(test_score):
+                raise ValueError("Holdout R² is undefined")
             mae = clean_float(mean_absolute_error(y_te, y_pred))
             metric_label = "R² Score"
         else:
@@ -1615,7 +1619,9 @@ def compute_kpis(df: pd.DataFrame,
                 "trend_label": trend_info["trend_label"],
                 "is_sampled": False,
                 "provenance": {
-                    "definition_version": "1.0",
+                    "definition_version": "2.0",
+                    "date_column": kpi_spec.get("date_column"),
+                    "comparison": kpi_spec.get("comparison"),
                     "source_type": "dataframe",
                     "calculated_at": datetime.now(timezone.utc).isoformat(),
                     "total_rows_evaluated": len(df),

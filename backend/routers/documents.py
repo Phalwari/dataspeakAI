@@ -28,6 +28,12 @@ def _load_hf_embeddings(model_name="all-MiniLM-L6-v2"):
         from langchain_community.embeddings import HuggingFaceEmbeddings
     return HuggingFaceEmbeddings(model_name=model_name)
 
+
+def _document_embeddings(model_name: str):
+    if embeddings_model is not None and getattr(embeddings_model, "model_name", model_name) == model_name:
+        return embeddings_model
+    return _load_hf_embeddings(model_name)
+
 def resolve_tenant_vector_index_path(tenant_id: int, model_name: str = "all-MiniLM-L6-v2") -> Tuple[str, bool]:
     """
     Resolves the active FAISS vector store path for a tenant.
@@ -81,7 +87,26 @@ from search.hybrid import reciprocal_rank_fusion, cross_encoder_rerank
 
 MAX_FILE_SIZE = 25 * 1024 * 1024  # 25 MB Limit (NR-2.2-B-T02)
 
+def _document_lock(tenant_id: int, document_id: int):
+    from contextlib import ExitStack
+    from search.generation_manager import ProcessTenantLock, get_tenant_generation_lock
+    stack = ExitStack()
+    try:
+        stack.enter_context(get_tenant_generation_lock(tenant_id, f"document_{document_id}"))
+        stack.enter_context(ProcessTenantLock(os.path.join("vector_store", f"tenant_{tenant_id}", f".document_{document_id}.lock")))
+        return stack
+    except BaseException:
+        stack.close()
+        raise
+
+
 def process_document(document_id: int, file_path: str, tenant_id: int, chunk_size: int = 512, chunk_overlap: int = 50, strategy: str = "fixed", db: Optional[Session] = None):
+    # Serialize duplicate/retry jobs for the same document across worker processes.
+    with _document_lock(tenant_id, document_id):
+        return _process_document(document_id, file_path, tenant_id, chunk_size, chunk_overlap, strategy, db)
+
+
+def _process_document(document_id: int, file_path: str, tenant_id: int, chunk_size: int = 512, chunk_overlap: int = 50, strategy: str = "fixed", db: Optional[Session] = None):
     close_db = False
     if db is None:
         from database import SessionLocal
@@ -219,11 +244,12 @@ def process_document(document_id: int, file_path: str, tenant_id: int, chunk_siz
             meta["parent_chunk_id"] = db_chunk.parent_chunk_id
             meta["document_id"] = document_id
             meta["source"] = doc.name
+            meta["version"] = doc.version
             all_metadatas.append(meta)
 
         model_name = getattr(doc, "embedding_model", "all-MiniLM-L6-v2") or "all-MiniLM-L6-v2"
         # Support test doubles if monkeypatched on module, else load clean instance
-        active_embeddings = embeddings_model if embeddings_model is not None else _load_hf_embeddings(model_name)
+        active_embeddings = _document_embeddings(model_name)
 
         # Build BM25 input for tenant (strictly active, non-deleted chunks - NR-2.2-B-T05 / Defect I-12)
         all_tenant_chunks = db.query(models.DocumentChunk).options(
@@ -274,7 +300,11 @@ def process_document(document_id: int, file_path: str, tenant_id: int, chunk_siz
                 models.Document.tenant_id == tenant_id, models.Document.is_deleted == False).all()},
         )
 
+        db.refresh(doc)
+        if doc.is_deleted:
+            return
         doc.status = "Completed"
+        doc.error_message = None
         doc.progress_step = "ready"
         doc.embeddings_count = len(all_chunks)
         doc.pages_processed = extracted.stats.pages_processed
@@ -284,6 +314,9 @@ def process_document(document_id: int, file_path: str, tenant_id: int, chunk_siz
 
     except Exception as e:
         db.rollback()
+        db.refresh(doc)
+        if doc.is_deleted:
+            raise
         doc.status = "Failed"
         doc.progress_step = "failed"
         doc.error_message = str(e)
@@ -298,6 +331,11 @@ def process_document(document_id: int, file_path: str, tenant_id: int, chunk_siz
             db.close()
 
 def reembed_stored_chunks(document_id: int, tenant_id: int, db: Session = None):
+    with _document_lock(tenant_id, document_id):
+        return _reembed_stored_chunks(document_id, tenant_id, db)
+
+
+def _reembed_stored_chunks(document_id: int, tenant_id: int, db: Session = None):
     close_db = False
     if db is None:
         from database import SessionLocal
@@ -314,13 +352,13 @@ def reembed_stored_chunks(document_id: int, tenant_id: int, db: Session = None):
         db.commit()
 
         model_name = getattr(doc, "embedding_model", "all-MiniLM-L6-v2") or "all-MiniLM-L6-v2"
-        active_embeddings = embeddings_model
-        if active_embeddings is None or getattr(active_embeddings, "model_name", None) != model_name:
-            active_embeddings = _load_hf_embeddings(model_name)
+        active_embeddings = _document_embeddings(model_name)
 
         db_chunks = db.query(models.DocumentChunk).filter(
             models.DocumentChunk.document_id == document_id
         ).order_by(models.DocumentChunk.chunk_index).all()
+        children = [chunk for chunk in db_chunks if chunk.parent_chunk_id is not None]
+        db_chunks = children or db_chunks
 
         all_chunks = []
         all_metadatas = []
@@ -332,6 +370,7 @@ def reembed_stored_chunks(document_id: int, tenant_id: int, db: Session = None):
                 "parent_chunk_id": c.parent_chunk_id,
                 "hierarchy_level": c.hierarchy_level,
                 "source": doc.name,
+                "version": doc.version,
                 "page_number": c.page_number,
                 "content_type": c.content_type,
                 "section_heading": c.section_heading,
@@ -376,7 +415,12 @@ def reembed_stored_chunks(document_id: int, tenant_id: int, db: Session = None):
                 models.Document.tenant_id == tenant_id, models.Document.is_deleted == False).all()},
         )
 
+        db.refresh(doc)
+        if doc.is_deleted:
+            return
         doc.status = "Completed"
+        doc.progress_step = "ready"
+        doc.last_heartbeat_at = datetime.utcnow()
         doc.embeddings_count = len(db_chunks)
         doc.progress = 1.0
         doc.error_message = None
@@ -384,6 +428,9 @@ def reembed_stored_chunks(document_id: int, tenant_id: int, db: Session = None):
 
     except Exception as e:
         db.rollback()
+        db.refresh(doc)
+        if doc.is_deleted:
+            raise
         doc.status = "Failed"
         doc.error_message = str(e)
         doc.progress = 0.0
@@ -621,25 +668,27 @@ def delete_document(
     doc.progress_step = "deleted"
     db.commit()
 
-    # Purge chunk rows and widget key associations from database (F07)
-    db.query(models.DocumentChunk).filter(models.DocumentChunk.document_id == document_id).delete()
-    db.query(models.WidgetKeyDocument).filter(models.WidgetKeyDocument.document_id == document_id).delete()
-    db.commit()
+    with _document_lock(current_user.tenant_id, document_id):
+        # Purge chunk rows and widget key associations from database (F07)
+        db.query(models.DocumentChunk).filter(models.DocumentChunk.document_id == document_id).delete()
+        db.query(models.WidgetKeyDocument).filter(models.WidgetKeyDocument.document_id == document_id).delete()
+        db.commit()
 
-    try:
-        model_name = getattr(doc, "embedding_model", "all-MiniLM-L6-v2") or "all-MiniLM-L6-v2"
-        emb = embeddings_model if embeddings_model is not None else _load_hf_embeddings(model_name)
-        index_path, exists = resolve_tenant_vector_index_path(current_user.tenant_id, model_name)
-        if exists and os.path.exists(index_path):
-            from langchain_community.vectorstores import FAISS
-            vectorstore = FAISS.load_local(index_path, emb, allow_dangerous_deserialization=True)
-            docstore_dict = vectorstore.docstore._dict
-            ids_to_delete = [uid for uid, doc_data in docstore_dict.items() if doc_data.metadata.get("document_id") == document_id]
-            if ids_to_delete:
-                vectorstore.delete(ids_to_delete)
-                vectorstore.save_local(index_path)
-    except Exception as e:
-        print(f"Failed to delete embeddings for document {document_id}: {e}")
+        try:
+            model_name = getattr(doc, "embedding_model", "all-MiniLM-L6-v2") or "all-MiniLM-L6-v2"
+            emb = _document_embeddings(model_name)
+            index_path, exists = resolve_tenant_vector_index_path(current_user.tenant_id, model_name)
+            if exists and os.path.exists(index_path):
+                from search.generation_manager import IndexGenerationManager
+                # Publish a new generation; never rewrite files pinned by active readers.
+                IndexGenerationManager(current_user.tenant_id, model_name).build_and_publish_generation(
+                    embeddings_model=emb, new_chunks=[], new_metadatas=[], all_bm25_chunks=[],
+                    live_document_ids=lambda: {row.id for row in db.query(models.Document.id).filter(
+                        models.Document.tenant_id == current_user.tenant_id,
+                        models.Document.is_deleted == False).all()},
+                )
+        except Exception as e:
+            print(f"Failed to delete embeddings for document {document_id}: {e}")
 
     return {"message": "Document deleted"}
 
@@ -658,7 +707,7 @@ def reindex_document(
         models.Document.tenant_id == current_user.tenant_id
     ).first()
 
-    if not doc:
+    if not doc or doc.is_deleted:
         raise HTTPException(status_code=404, detail="Document not found")
 
     doc.status = "Processing"
@@ -673,7 +722,7 @@ def reindex_document(
         doc.celery_task_id = task.id
         db.commit()
     else:
-        background_tasks.add_task(reembed_stored_chunks, doc.id, current_user.tenant_id, db)
+        background_tasks.add_task(reembed_stored_chunks, doc.id, current_user.tenant_id)
 
     return doc
 

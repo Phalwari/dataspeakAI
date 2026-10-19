@@ -52,6 +52,7 @@ def auth_headers(api_client):
     return {"Authorization": f"Bearer {token}"}
 
 
+@pytest.mark.skipif(os.getenv("RUN_LIVE_DATABASE_TESTS") != "1", reason="External database integration: set RUN_LIVE_DATABASE_TESTS=1 in an authorized network environment")
 def test_api_test_postgresql_connection(api_client, auth_headers):
     """E2E Test: POST /api/databases/test with live free PostgreSQL."""
     payload = {
@@ -69,6 +70,7 @@ def test_api_test_postgresql_connection(api_client, auth_headers):
     assert data["status"] == "success"
 
 
+@pytest.mark.skipif(os.getenv("RUN_LIVE_DATABASE_TESTS") != "1", reason="External database integration: set RUN_LIVE_DATABASE_TESTS=1 in an authorized network environment")
 def test_api_test_mysql_connection(api_client, auth_headers):
     """E2E Test: POST /api/databases/test with live free MySQL."""
     payload = {

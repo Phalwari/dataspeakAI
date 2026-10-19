@@ -236,6 +236,7 @@ class CitationService:
 
         # Filter patterns for non-factual conversational fluff and polite abstentions
         skip_patterns = [
+            r"^i (?:do not|don't) have (?:enough information|sufficient information) to answer",
             r'^(hello|hi|hey|greetings|thank you|thanks|sure|certainly|here is|here are|hope this helps)',
             r'^(in summary|in conclusion|to conclude|let me know)',
             r'^(note:|disclaimer:|warning:)',

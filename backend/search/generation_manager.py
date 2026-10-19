@@ -4,6 +4,7 @@ import time
 import uuid
 import shutil
 import threading
+import hashlib
 from typing import List, Dict, Any, Tuple, Optional, Callable, Set
 from search.bm25_index import BM25IndexManager
 
@@ -114,6 +115,7 @@ class IndexGenerationManager:
         all_bm25_chunks: List[Dict[str, Any]],
         full_rebuild: bool = False,
         live_document_ids: Optional[Callable[[], Set[int]]] = None,
+        source_snapshot: Optional[Callable[[], Tuple[List[str], List[Dict[str, Any]]]]] = None,
     ) -> str:
         """
         Builds a new immutable index generation in a staging area, runs integrity validation,
@@ -134,6 +136,9 @@ class IndexGenerationManager:
             target_gen_dir = os.path.join(self.tenant_dir, gen_id)
 
             try:
+                if source_snapshot is not None:
+                    new_chunks, new_metadatas = source_snapshot()
+                    full_rebuild = True
                 # 1. FAISS Build
                 active_path, active_exists = self.get_active_generation_path()
                 if active_exists and not full_rebuild:
@@ -192,6 +197,13 @@ class IndexGenerationManager:
                     if not entry.metadata.get("is_placeholder")
                 ]
                 bm25_manager.build_index(generation_chunks)
+                # Compare SQL/index state without deserializing a vector-store pickle.
+                manifest = [{"chunk_id": chunk["id"], "document_id": chunk["metadata"].get("document_id"),
+                             "version": chunk["metadata"].get("version", 1),
+                             "sha256": hashlib.sha256(chunk["content"].encode("utf-8")).hexdigest()}
+                            for chunk in generation_chunks]
+                with open(os.path.join(staging_gen_dir, "manifest.json"), "w", encoding="utf-8") as handle:
+                    json.dump(manifest, handle)
 
                 # 3. Integrity Probe
                 probe_store = FAISS.load_local(staging_gen_dir, embeddings_model, allow_dangerous_deserialization=True)

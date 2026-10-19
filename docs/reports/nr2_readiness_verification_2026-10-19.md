@@ -1,6 +1,8 @@
 # NR-2 readiness verification — 2026-10-19
 
-**Decision: NR-2 is not ready for completion sign-off.** The current frontend and focused FYP checks pass, but seven additional acceptance probes reproduce unresolved correctness/reliability defects. Continue corrective work in NR-2. The independent NR-3.1-A infrastructure work and NR-3.2-A verification work may start according to their dependencies; this is not permission to skip the NR-2 gate or begin NR-4/NR-5 features.
+> Historical pre-remediation audit at revision `6764c57`. See [the remediation and current verification record](nr2_remediation_2026-10-19.md) for subsequent fixes and remaining release gates.
+
+**Original decision: NR-2 is not ready for completion sign-off.** The current frontend and focused FYP checks pass, but seven additional acceptance probes reproduce unresolved correctness/reliability defects. Continue corrective work in NR-2. The independent NR-3.1-A infrastructure work and NR-3.2-A verification work may start according to their dependencies; this is not permission to skip the NR-2 gate or begin NR-4/NR-5 features.
 
 ## Scope and baseline
 

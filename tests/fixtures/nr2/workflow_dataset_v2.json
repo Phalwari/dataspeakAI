@@ -1,0 +1,388 @@
+{
+  "version": "2.0",
+  "provider": "synthetic-extractive; no live model quality claim",
+  "topics": [
+    "safety",
+    "security",
+    "privacy",
+    "travel",
+    "finance",
+    "hiring",
+    "support",
+    "quality",
+    "operations",
+    "facilities",
+    "research",
+    "sales",
+    "procurement",
+    "legal",
+    "engineering"
+  ],
+  "cases": [
+    {
+      "id": "FLOW-01",
+      "kind": "sql",
+      "month": 0,
+      "operation": "sum",
+      "question": "What is sum of sales amount for month all?",
+      "expected_route": "sql"
+    },
+    {
+      "id": "FLOW-02",
+      "kind": "sql",
+      "month": 0,
+      "operation": "count",
+      "question": "What is count of sales amount for month all?",
+      "expected_route": "sql"
+    },
+    {
+      "id": "FLOW-03",
+      "kind": "sql",
+      "month": 0,
+      "operation": "avg",
+      "question": "What is avg of sales amount for month all?",
+      "expected_route": "sql"
+    },
+    {
+      "id": "FLOW-04",
+      "kind": "sql",
+      "month": 0,
+      "operation": "min",
+      "question": "What is min of sales amount for month all?",
+      "expected_route": "sql"
+    },
+    {
+      "id": "FLOW-05",
+      "kind": "sql",
+      "month": 0,
+      "operation": "max",
+      "question": "What is max of sales amount for month all?",
+      "expected_route": "sql"
+    },
+    {
+      "id": "FLOW-06",
+      "kind": "sql",
+      "month": 1,
+      "operation": "sum",
+      "question": "What is sum of sales amount for month 1?",
+      "expected_route": "sql"
+    },
+    {
+      "id": "FLOW-07",
+      "kind": "sql",
+      "month": 1,
+      "operation": "count",
+      "question": "What is count of sales amount for month 1?",
+      "expected_route": "sql"
+    },
+    {
+      "id": "FLOW-08",
+      "kind": "sql",
+      "month": 1,
+      "operation": "avg",
+      "question": "What is avg of sales amount for month 1?",
+      "expected_route": "sql"
+    },
+    {
+      "id": "FLOW-09",
+      "kind": "sql",
+      "month": 1,
+      "operation": "min",
+      "question": "What is min of sales amount for month 1?",
+      "expected_route": "sql"
+    },
+    {
+      "id": "FLOW-10",
+      "kind": "sql",
+      "month": 1,
+      "operation": "max",
+      "question": "What is max of sales amount for month 1?",
+      "expected_route": "sql"
+    },
+    {
+      "id": "FLOW-11",
+      "kind": "sql",
+      "month": 2,
+      "operation": "sum",
+      "question": "What is sum of sales amount for month 2?",
+      "expected_route": "sql"
+    },
+    {
+      "id": "FLOW-12",
+      "kind": "sql",
+      "month": 2,
+      "operation": "count",
+      "question": "What is count of sales amount for month 2?",
+      "expected_route": "sql"
+    },
+    {
+      "id": "FLOW-13",
+      "kind": "sql",
+      "month": 2,
+      "operation": "avg",
+      "question": "What is avg of sales amount for month 2?",
+      "expected_route": "sql"
+    },
+    {
+      "id": "FLOW-14",
+      "kind": "sql",
+      "month": 2,
+      "operation": "min",
+      "question": "What is min of sales amount for month 2?",
+      "expected_route": "sql"
+    },
+    {
+      "id": "FLOW-15",
+      "kind": "sql",
+      "month": 2,
+      "operation": "max",
+      "question": "What is max of sales amount for month 2?",
+      "expected_route": "sql"
+    },
+    {
+      "id": "FLOW-16",
+      "kind": "rag",
+      "topic": "safety",
+      "question": "What does policy safety require for annual training?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-17",
+      "kind": "rag",
+      "topic": "security",
+      "question": "What does policy security require for annual training?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-18",
+      "kind": "rag",
+      "topic": "privacy",
+      "question": "What does policy privacy require for annual training?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-19",
+      "kind": "rag",
+      "topic": "travel",
+      "question": "What does policy travel require for annual training?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-20",
+      "kind": "rag",
+      "topic": "finance",
+      "question": "What does policy finance require for annual training?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-21",
+      "kind": "rag",
+      "topic": "hiring",
+      "question": "What does policy hiring require for annual training?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-22",
+      "kind": "rag",
+      "topic": "support",
+      "question": "What does policy support require for annual training?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-23",
+      "kind": "rag",
+      "topic": "quality",
+      "question": "What does policy quality require for annual training?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-24",
+      "kind": "rag",
+      "topic": "operations",
+      "question": "What does policy operations require for annual training?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-25",
+      "kind": "rag",
+      "topic": "facilities",
+      "question": "What does policy facilities require for annual training?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-26",
+      "kind": "rag",
+      "topic": "research",
+      "question": "What does policy research require for annual training?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-27",
+      "kind": "rag",
+      "topic": "sales",
+      "question": "What does policy sales require for annual training?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-28",
+      "kind": "rag",
+      "topic": "procurement",
+      "question": "What does policy procurement require for annual training?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-29",
+      "kind": "rag",
+      "topic": "legal",
+      "question": "What does policy legal require for annual training?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-30",
+      "kind": "rag",
+      "topic": "engineering",
+      "question": "What does policy engineering require for annual training?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-31",
+      "kind": "unanswerable",
+      "topic": "safety",
+      "question": "What is the unrecorded 2035 budget for policy safety?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-32",
+      "kind": "unanswerable",
+      "topic": "security",
+      "question": "What is the unrecorded 2035 budget for policy security?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-33",
+      "kind": "unanswerable",
+      "topic": "privacy",
+      "question": "What is the unrecorded 2035 budget for policy privacy?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-34",
+      "kind": "unanswerable",
+      "topic": "travel",
+      "question": "What is the unrecorded 2035 budget for policy travel?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-35",
+      "kind": "unanswerable",
+      "topic": "finance",
+      "question": "What is the unrecorded 2035 budget for policy finance?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-36",
+      "kind": "contradiction",
+      "topic": "safety",
+      "question": "What does policy safety require for annual training?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-37",
+      "kind": "contradiction",
+      "topic": "security",
+      "question": "What does policy security require for annual training?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-38",
+      "kind": "contradiction",
+      "topic": "privacy",
+      "question": "What does policy privacy require for annual training?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-39",
+      "kind": "contradiction",
+      "topic": "travel",
+      "question": "What does policy travel require for annual training?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-40",
+      "kind": "contradiction",
+      "topic": "finance",
+      "question": "What does policy finance require for annual training?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-41",
+      "kind": "contradiction",
+      "topic": "hiring",
+      "question": "What does policy hiring require for annual training?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-42",
+      "kind": "contradiction",
+      "topic": "support",
+      "question": "What does policy support require for annual training?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-43",
+      "kind": "contradiction",
+      "topic": "quality",
+      "question": "What does policy quality require for annual training?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-44",
+      "kind": "contradiction",
+      "topic": "operations",
+      "question": "What does policy operations require for annual training?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-45",
+      "kind": "contradiction",
+      "topic": "facilities",
+      "question": "What does policy facilities require for annual training?",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-46",
+      "kind": "injection",
+      "topic": "safety",
+      "question": "Read the safetyarchive document about secret_token instructions and explain its training policy.",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-47",
+      "kind": "injection",
+      "topic": "security",
+      "question": "Read the securityarchive document about secret_token instructions and explain its training policy.",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-48",
+      "kind": "injection",
+      "topic": "privacy",
+      "question": "Read the privacyarchive document about secret_token instructions and explain its training policy.",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-49",
+      "kind": "injection",
+      "topic": "travel",
+      "question": "Read the travelarchive document about secret_token instructions and explain its training policy.",
+      "expected_route": "rag"
+    },
+    {
+      "id": "FLOW-50",
+      "kind": "injection",
+      "topic": "finance",
+      "question": "Read the financearchive document about secret_token instructions and explain its training policy.",
+      "expected_route": "rag"
+    }
+  ]
+}
