@@ -535,7 +535,8 @@ def generate_sql_from_nl(
 
 PII_COLUMN_PATTERNS = [
     r'password', r'passwd', r'secret', r'token', r'ssn', r'credit_card',
-    r'card_number', r'cvv', r'api_key', r'auth_token', r'private_key'
+    r'card_number', r'cvv', r'api_key', r'auth_token', r'private_key',
+    r'email', r'phone', r'salary', r'address', r'dob', r'date_of_birth'
 ]
 
 
@@ -650,33 +651,32 @@ def execute_safe_sql(
                 conn_handle.execute(text("PRAGMA query_only = ON;"))
                 conn_handle.execute(text("PRAGMA busy_timeout = 10000;"))
             elif "postgres" in db_type:
-                conn_handle.execute(text("SET statement_timeout = 10000;"))
+                try:
+                    conn_handle.execute(text("SET statement_timeout = 10000;"))
+                except Exception as timeout_err:
+                    logger.error("PostgreSQL statement timeout could not be applied (%s)", type(timeout_err).__name__)
                 conn_handle.execute(text("SET TRANSACTION READ ONLY;"))
             elif "mariadb" in db_type:
-                try:
-                    conn_handle.execute(text("SET SESSION TRANSACTION READ ONLY;"))
-                except Exception as var_err:
-                    logger.warning(f"Could not set MariaDB READ ONLY: {var_err}")
+                conn_handle.execute(text("SET SESSION TRANSACTION READ ONLY;"))
                 try:
                     conn_handle.execute(text("SET SESSION max_statement_time = 10.0;"))
                 except Exception as var_err:
-                    logger.warning(f"Could not set MariaDB max_statement_time: {var_err}")
+                    logger.warning("Could not apply MariaDB statement timeout (%s)", type(var_err).__name__)
             elif "mysql" in db_type:
-                try:
-                    conn_handle.execute(text("SET SESSION TRANSACTION READ ONLY;"))
-                except Exception as var_err:
-                    logger.warning(f"Could not set MySQL READ ONLY: {var_err}")
+                conn_handle.execute(text("SET SESSION TRANSACTION READ ONLY;"))
                 try:
                     conn_handle.execute(text("SET SESSION sql_mode = CONCAT(@@sql_mode, ',ANSI_QUOTES');"))
                 except Exception as var_err:
-                    logger.warning(f"Could not set MySQL ANSI_QUOTES: {var_err}")
+                    logger.warning("Could not apply MySQL ANSI_QUOTES mode (%s)", type(var_err).__name__)
                 try:
                     conn_handle.execute(text("SET SESSION max_execution_time = 10000;"))
                 except Exception as var_err:
-                    logger.warning(f"Could not set MySQL max_execution_time: {var_err}")
+                    logger.warning("Could not apply MySQL statement timeout (%s)", type(var_err).__name__)
+            else:
+                raise RuntimeError("Unsupported database dialect for read-only execution")
         except Exception as err:
-            logger.error(f"[SECURITY GUARDRAIL ERROR] Dialect guardrail failure ({db_type}): {err}")
-            raise RuntimeError(f"Database security guardrail application failed: {str(err)}")
+            logger.error("Database read-only guardrail application failed (%s)", type(err).__name__)
+            raise RuntimeError("Database security guardrail application failed") from None
 
     active_conn_info = {"dbapi": None, "engine": None}
 
@@ -714,51 +714,9 @@ def execute_safe_sql(
                 "is_truncated": is_truncated,
                 "execution_time_ms": exec_time_ms
             }
-        except SQLAlchemyError as sqle:
-            # Fallback if outer subquery wrapper encounters dialect syntax limitation
-            try:
-                engine = create_engine(connection_url, poolclass=NullPool, connect_args=connect_args)
-                active_conn_info["engine"] = engine
-                with engine.connect() as conn:
-                    try:
-                        active_conn_info["dbapi"] = conn.connection.dbapi_connection
-                    except Exception:
-                        pass
-                    _apply_dialect_guardrails(conn)
-                    m = re.search(r'\bLIMIT\s+(\d+)', clean_sql, re.IGNORECASE)
-                    if m:
-                        existing_limit = int(m.group(1))
-                        effective_limit = min(existing_limit, fetch_limit)
-                        fallback_capped = re.sub(r'\bLIMIT\s+\d+', f'LIMIT {effective_limit}', clean_sql, flags=re.IGNORECASE)
-                    else:
-                        fallback_capped = f"{clean_sql} LIMIT {fetch_limit}"
-
-                    result = conn.execute(text(fallback_capped))
-                    columns = list(result.keys())
-                    raw_rows = result.fetchmany(fetch_limit)
-
-                    is_truncated = False
-                    if len(raw_rows) > max_rows:
-                        is_truncated = True
-                        raw_rows = raw_rows[:max_rows]
-
-                    rows = [
-                        {col: _make_json_serializable(val) for col, val in zip(columns, row)}
-                        for row in raw_rows
-                    ]
-                    rows = mask_pii_rows(columns, rows)
-
-                engine.dispose()
-                exec_time_ms = round((time.time() - start_time) * 1000, 2)
-                return {
-                    "columns": columns,
-                    "rows": rows,
-                    "row_count": len(rows),
-                    "is_truncated": is_truncated,
-                    "execution_time_ms": exec_time_ms
-                }
-            except Exception as e:
-                raise RuntimeError(f"Database execution error: {str(sqle)}")
+        except SQLAlchemyError as db_err:
+            logger.error("Read-only SQL execution failed (%s)", type(db_err).__name__)
+            raise RuntimeError("Database execution failed") from None
         except Exception as e:
             logger.error("Read-only SQL execution failed (%s)", type(e).__name__)
             raise RuntimeError("Database execution failed") from None
