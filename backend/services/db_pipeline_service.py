@@ -281,6 +281,21 @@ def is_monetary_column(col_name: str) -> bool:
     ])
 
 
+def _is_revenue_like_fallback_column(col_name: Optional[str]) -> bool:
+    """Require an explicit sales marker and reject expense or payroll measures."""
+    if not col_name:
+        return False
+    normalized = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", str(col_name))
+    tokens = set(re.findall(r"[a-z0-9]+", normalized.casefold()))
+    non_revenue = {
+        "salary", "salaries", "wage", "wages", "payroll", "compensation",
+        "cost", "costs", "fee", "fees", "balance", "balances",
+        "expense", "expenses", "tax", "taxes", "discount", "discounts",
+    }
+    revenue_like = {"revenue", "sales", "sale", "amount", "total", "price"}
+    return bool(tokens & revenue_like) and not bool(tokens & non_revenue)
+
+
 def is_date_column(col_name: str, col_type: str = "") -> bool:
     """Identifies date, time, or timestamp columns."""
     t_str = col_type.lower()
@@ -776,6 +791,7 @@ class DatabasePipelineService:
         computed_kpis: List[Dict[str, Any]] = []
         computed_charts: List[Dict[str, Any]] = []
         all_filters: List[Dict[str, Any]] = []
+        fallback_revenue_column: Optional[str] = None
 
         is_federated_mode = not selected_table or selected_table == "" or selected_table == "All Tables"
         is_mongodb = str(db_conn.db_type).lower() == "mongodb"
@@ -844,6 +860,7 @@ class DatabasePipelineService:
 
             if has_genuine_fact_revenue:
                 money_col = money_cols[0]
+                fallback_revenue_column = money_col
                 q_money = _clean_sql_identifier(money_col, db_conn.db_type)
                 if is_unit_price_column(money_col) and qty_col:
                     q_qty = _clean_sql_identifier(qty_col, db_conn.db_type)
@@ -893,6 +910,7 @@ class DatabasePipelineService:
                         aov_val = round(rev_val / ord_val, 2) if ord_val > 0 else 0.0
                         aov_raw_value = aov_val
                         money_expr = line_money_expr
+                        fallback_revenue_column = l_price_col
 
             # Status & Lifecycle introspection (Truthful accounting)
             status_col = next((c for c in fact_prof.get("dim_cols", []) + list(fact_prof.get("columns", {}).keys()) 
@@ -2304,10 +2322,23 @@ class DatabasePipelineService:
         def computed_fallback(category: str) -> Dict[str, Any]:
             metrics = {item.get("id"): item for item in computed_kpis}
             money_metric = metrics.get("total_revenue")
+            if money_metric and not _is_revenue_like_fallback_column(fallback_revenue_column):
+                money_metric = None
             if money_metric is None:
+                def is_revenue_like_sum(item: Dict[str, Any]) -> bool:
+                    metric_id = str(item.get("id", ""))
+                    table_prefix = f"{item.get('table')}_"
+                    return (
+                        metric_id.startswith(table_prefix)
+                        and metric_id.endswith("_sum")
+                        and item.get("format") == "currency"
+                        and _is_revenue_like_fallback_column(
+                            metric_id[len(table_prefix):-len("_sum")]
+                        )
+                    )
+
                 money_metric = next((item for item in computed_kpis
-                    if str(item.get("id", "")).endswith("_sum")
-                    and item.get("format") == "currency"), None)
+                    if is_revenue_like_sum(item)), None)
             count_metric = metrics.get("total_orders")
             if count_metric is None:
                 count_metric = next((item for item in computed_kpis
@@ -2319,9 +2350,10 @@ class DatabasePipelineService:
                     and money_metric.get("status") in {"available", "zero"}
                     and count_metric.get("status") in {"available", "zero"}):
                 monetary_label = "gross revenue" if money_metric.get("id") == "total_revenue" else "monetary sum"
+                record_label = "record" if int(record_count) == 1 else "records"
                 summary = (
                     f"Computed {monetary_label} is ${monetary_sum:,.2f} across "
-                    f"{int(record_count):,} records."
+                    f"{int(record_count):,} {record_label}."
                 )
                 findings = [{
                     "title": "Computed monetary aggregate", "finding": summary,
