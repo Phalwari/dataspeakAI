@@ -28,9 +28,10 @@ const KPI_REASON_LABELS: Record<string, string> = {
   query_failed: 'Database query failed',
   no_rows: 'No rows found',
   date_filter_unavailable: 'Date-filtered value unavailable',
+  unsupported_with_filter: 'This metric cannot use the selected dates',
 };
 const IMPACT_COLORS = { High: '#dc2626', Medium: '#d97706', Low: '#059669' };
-const PRESETS = [
+const PRESETS: [string, string, number | null][] = [
   ['all', 'All time', null],
   ['90d', 'Last 90 days', 90],
   ['30d', 'Last 30 days', 30],
@@ -124,7 +125,7 @@ export function BusinessInsightsPage() {
   const [pipelineData, setPipelineData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // In-place Date presets ('all', '90d', '30d', '7d')
+  // Calendar date presets ('all', '90d', '30d', '7d')
   const [preset, setPreset] = useState('all');
   const [selectedDimensionFilter, setSelectedDimensionFilter] = useState<{ column: string; label: string; value: string } | null>(null);
 
@@ -268,8 +269,22 @@ export function BusinessInsightsPage() {
     return interval;
   }, []);
 
-  // Main Pipeline Runner (Only triggered on Launchpad "Run AI Analytics" or "Refresh")
-  const runDatabaseAnalysis = async (connId = selectedConnection, tableChoice = activeTable, forceRefresh = false) => {
+  const dateRangeForPreset = (presetChoice: string) => {
+    const days = PRESETS.find(([id]) => id === presetChoice)?.[2];
+    if (!days) return null;
+    const today = new Date();
+    const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    start.setDate(start.getDate() - days + 1);
+    const formatLocalDate = (value: Date) =>
+      `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+    return { from: formatLocalDate(start), to: formatLocalDate(today) };
+  };
+
+  // The API computes every metric and chart for the same calendar window.
+  const runDatabaseAnalysis = async (
+    connId = selectedConnection, tableChoice = activeTable,
+    forceRefresh = false, requestedPreset = preset,
+  ) => {
     if (!connId) return;
     setLoading(true);
     setError(null);
@@ -282,6 +297,8 @@ export function BusinessInsightsPage() {
       animationDone = true;
       if (pipelineDone && fetchedData) {
         setPipelineData(fetchedData);
+        setPreset(requestedPreset);
+        setActiveTable(tableChoice);
         setAutoGenerateStep(null);
         setLoading(false);
       }
@@ -291,6 +308,11 @@ export function BusinessInsightsPage() {
       const q = new URLSearchParams();
       if (forceRefresh) q.set('refresh', 'true');
       if (tableChoice) q.set('table', tableChoice);
+      const dateRange = dateRangeForPreset(requestedPreset);
+      if (dateRange) {
+        q.set('date_from', dateRange.from);
+        q.set('date_to', dateRange.to);
+      }
 
       const res = await fetch(`${API_URL}/insights/generate/${connId}${q.toString() ? `?${q}` : ''}`, { headers });
       if (!res.ok) throw new Error(`Could not generate insights (HTTP ${res.status})`);
@@ -300,6 +322,8 @@ export function BusinessInsightsPage() {
 
       if (animationDone) {
         setPipelineData(fetchedData);
+        setPreset(requestedPreset);
+        setActiveTable(tableChoice);
         setAutoGenerateStep(null);
         setLoading(false);
       }
@@ -311,15 +335,13 @@ export function BusinessInsightsPage() {
     }
   };
 
-  // CLIENT-SIDE INSTANT Table Scope Switcher (0ms response, 0 API calls, 0 LLM tokens burned!)
+  // A table switch recomputes the server-side analysis for that scope.
   const handleSelectTableScope = (tbl: string) => {
-    setActiveTable(tbl);
-    // Instant client-side filtering without burning tokens!
+    if (tbl !== activeTable && !loading) void runDatabaseAnalysis(selectedConnection, tbl);
   };
 
-  // CLIENT-SIDE INSTANT Date Presets handler (0ms response, instant smooth rechart animation!)
-  const handleApplyPreset = (id: any) => {
-    setPreset(id);
+  const handleApplyPreset = (id: string) => {
+    if (id !== preset && !loading) void runDatabaseAnalysis(selectedConnection, activeTable, false, id);
   };
 
   // Interactive Drilldown Drawer Opener
@@ -442,7 +464,7 @@ export function BusinessInsightsPage() {
     });
   }, [rawCharts]);
 
-  // 1. DYNAMICALLY FILTER CHARTS: Sliced by horizon preset AND scoped by activeTable (CLIENT-SIDE!)
+  // The backend already applies the requested calendar range to chart queries.
   const charts = useMemo(() => {
     let result = rawCharts;
 
@@ -452,28 +474,10 @@ export function BusinessInsightsPage() {
       if (tableMatches.length > 0) result = tableMatches;
     }
 
-    // Filter by date horizon preset if time series exists
-    if (preset !== 'all' && hasTimeSeriesData) {
-      result = result.map((c: any) => {
-        const type = (c.type || '').toLowerCase();
-        if (type === 'line' || type === 'area') {
-          const rawData = c.data || [];
-          if (!rawData.length) return c;
-          // In monthly series: 90d -> last 4 periods, 30d -> last 2 periods, 7d -> last 1 period
-          const count = preset === '7d' ? 2 : preset === '30d' ? 4 : 8;
-          return {
-            ...c,
-            data: rawData.slice(-Math.min(rawData.length, count))
-          };
-        }
-        return c;
-      });
-    }
-
     return result;
-  }, [rawCharts, activeTable, preset, hasTimeSeriesData]);
+  }, [rawCharts, activeTable]);
 
-  // Date presets slice chart points; the API has not supplied date-filtered KPI values.
+  // KPI values come from the same server-side calendar range as the charts.
   const kpis = useMemo(() => {
     let result = baseKpis;
 
@@ -481,21 +485,6 @@ export function BusinessInsightsPage() {
     if (activeTable) {
       const tableMatches = result.filter((k: any) => k.table?.toLowerCase() === activeTable.toLowerCase());
       if (tableMatches.length > 0) result = tableMatches;
-    }
-
-    if (preset !== 'all') {
-      result = result.map((k: any) => {
-        const existingFailure = k.status === 'unavailable' || k.status === 'error';
-        return {
-          ...k,
-          value: null,
-          raw_value: null,
-          status: k.status === 'error' ? 'error' : 'unavailable',
-          reason: existingFailure ? (k.reason || 'date_filter_unavailable') : 'date_filter_unavailable',
-          trend_text: undefined,
-          trend_pct: null,
-        };
-      });
     }
 
     if (selectedDimensionFilter) {
@@ -506,7 +495,7 @@ export function BusinessInsightsPage() {
     }
 
     return result;
-  }, [baseKpis, activeTable, preset, selectedDimensionFilter]);
+  }, [baseKpis, activeTable, selectedDimensionFilter]);
 
   // Dynamically derive Period Comparison from Time-Series Chart data & KPIs
   const timeSeriesChart = charts.find((c: any) => c.type === 'line' || c.type === 'area') || charts[0];
@@ -1062,6 +1051,12 @@ export function BusinessInsightsPage() {
                   <p style={{ fontSize: '12.5px', color: darkMode ? '#94A3B8' : '#64748B', margin: '3px 0 0' }}>
                     Live Multi-Table Relational Intelligence · {kpis.length} Deterministic Metrics · {charts.length} Analytical Views
                   </p>
+                  <p style={{ fontSize: '12px', color: '#64748B', margin: '3px 0 0' }}>
+                    {pipelineData.applied_date_from || pipelineData.applied_date_to
+                      ? `Applied dates: ${pipelineData.applied_date_from || 'earliest'} to ${pipelineData.applied_date_to || 'latest'}`
+                      : 'All dates'}
+                    {loading ? ' · Updating analysis…' : ''}
+                  </p>
                 </div>
               </div>
             </div>
@@ -1096,11 +1091,11 @@ export function BusinessInsightsPage() {
           </div>
 
           {/* Quick Date Presets & Filter Strip (ONLY shown if time-series data or multi-tables exist!) */}
-          {(hasTimeSeriesData || availableTables.length > 1 || (pipelineData?.filters && pipelineData.filters.some((f: any) => f.options && f.options.length > 0))) && (
+          {(hasTimeSeriesData || preset !== 'all' || availableTables.length > 1 || (pipelineData?.filters && pipelineData.filters.some((f: any) => f.options && f.options.length > 0))) && (
             <div className="glass-card no-export" style={{ padding: '14px 18px', marginBottom: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
                 {/* Only show Date Horizon if date/timeline column actually exists in data! */}
-                {hasTimeSeriesData ? (
+                {(hasTimeSeriesData || preset !== 'all') ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                     <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginRight: '4px' }}>
                       <Clock size={13} style={{ verticalAlign: -2 }} /> Horizon:
@@ -1110,6 +1105,7 @@ export function BusinessInsightsPage() {
                         key={id}
                         className={`chip ${preset === id ? 'active' : ''}`}
                         onClick={() => handleApplyPreset(id)}
+                        disabled={loading}
                       >
                         {label}
                       </button>
@@ -1126,6 +1122,7 @@ export function BusinessInsightsPage() {
                     <button
                       className={`chip ${!activeTable ? 'active' : ''}`}
                       onClick={() => handleSelectTableScope('')}
+                      disabled={loading}
                     >
                       Federated (All)
                     </button>
@@ -1134,6 +1131,7 @@ export function BusinessInsightsPage() {
                         key={tbl}
                         className={`chip ${activeTable === tbl ? 'active' : ''}`}
                         onClick={() => handleSelectTableScope(tbl)}
+                        disabled={loading}
                       >
                         {tbl}
                       </button>
