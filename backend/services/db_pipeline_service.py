@@ -329,6 +329,7 @@ class DatabasePipelineService:
         # Helper for executing queries
         query_errors: List[str] = []
         metric_query_states: Dict[str, Dict[str, str]] = {}
+        sqlite_live_columns: Dict[str, Optional[set[str]]] = {}
 
         def record_query_state(metric_ids: List[str], rows: List[Dict[str, Any]], failed: bool = False) -> List[Dict[str, Any]]:
             if failed and not metric_ids:
@@ -346,6 +347,12 @@ class DatabasePipelineService:
                 else:
                     metric_query_states[metric_id] = {"status": "available", "reason": ""}
             return rows
+
+        def mark_missing_role(metric_ids: List[str]) -> None:
+            for metric_id in metric_ids:
+                metric_query_states[metric_id] = {
+                    "status": "unavailable", "reason": "missing_role"
+                }
 
         active_date_filter: Optional[Tuple[str, str]] = None
         date_bindings: Dict[str, Any] = {}
@@ -394,9 +401,49 @@ class DatabasePipelineService:
                 conn_url = get_connection_url(db_conn)
                 if conn_url:
                     engine = get_engine(conn_url)
+                    if str(db_conn.db_type).lower() == "sqlite":
+                        try:
+                            from sqlalchemy import inspect
+
+                            inspector = inspect(engine)
+                            referenced_tables = re.findall(
+                                r'\b(?:FROM|JOIN)\s+"([^"]+)"', query_str, re.IGNORECASE
+                            )
+                            for table_name in referenced_tables:
+                                if table_name not in sqlite_live_columns:
+                                    sqlite_live_columns[table_name] = (
+                                        {col["name"].casefold() for col in inspector.get_columns(table_name)}
+                                        if inspector.has_table(table_name) else None
+                                    )
+                            valid_names = {table.casefold() for table in referenced_tables}
+                            for table_name in referenced_tables:
+                                columns = sqlite_live_columns[table_name]
+                                if columns is not None:
+                                    valid_names.update(columns)
+                            quoted_names = re.findall(r'"([^"]+)"', query_str)
+                            missing_identifier = (
+                                not referenced_tables
+                                or any(sqlite_live_columns[table] is None for table in referenced_tables)
+                                or any(name.casefold() not in valid_names for name in quoted_names)
+                                or any(
+                                    column.casefold() not in (sqlite_live_columns.get(table) or set())
+                                    for table, column in re.findall(
+                                        r'"([^"]+)"\s*\.\s*"([^"]+)"', query_str
+                                    )
+                                )
+                            )
+                        except Exception:
+                            logger.exception("SQLite live schema validation failed")
+                            return record_query_state(tracked_metric_ids, [], failed=True)
+                        if missing_identifier:
+                            logger.warning("SQLite insights query references an identifier missing from live schema")
+                            mark_missing_role(tracked_metric_ids)
+                            return []
                     with engine.connect() as conn:
                         res = conn.execute(text(query_str), query_params)
                         return record_query_state(tracked_metric_ids, [dict(r._mapping) for r in res])
+                if str(db_conn.db_type).lower() == "sqlite":
+                    return record_query_state(tracked_metric_ids, [], failed=True)
                 if query_params:
                     return record_query_state(tracked_metric_ids, [], failed=True)
             except Exception:
@@ -1839,46 +1886,51 @@ class DatabasePipelineService:
             # Non-ID numeric measures
             for m_col in prof["measure_cols"][:3]:
                 col_name_title = m_col.replace("_", " ").title()
-                q_m = _clean_sql_identifier(m_col, db_conn.db_type)
                 fmt = "currency" if is_monetary_column(m_col) else "number"
-                
-                stats_res = execute_sql(
-                    f"SELECT ROUND(SUM({q_m}), 2) as s_val, ROUND(AVG({q_m}), 2) as a_val FROM {q_tbl}",
-                    [f"{tbl}_{m_col}_sum", f"{tbl}_{m_col}_avg"],
-                )
-                if stats_res:
-                    s_raw = stats_res[0].get("s_val")
-                    a_raw = stats_res[0].get("a_val")
-                    s_v = float(s_raw) if s_raw is not None else None
-                    a_v = float(a_raw) if a_raw is not None else None
-                    
-                    computed_kpis.append({
-                        "id": f"{tbl}_{m_col}_sum",
-                        "label": f"Total {col_name_title}",
-                        "value": (f"${s_v:,.2f}" if fmt == "currency" else f"{s_v:,.1f}") if s_v is not None else None,
-                        "raw_value": s_raw,
-                        "table": tbl,
-                        "format": fmt,
-                        "format_type": fmt,
-                        "recipe_type": "atomic",
-                        "trend_direction": "neutral",
-                        "trend_pct": None,
-                        "trend_text": "cumulative sum"
-                    })
-                    
-                    computed_kpis.append({
-                        "id": f"{tbl}_{m_col}_avg",
-                        "label": f"Average {col_name_title}",
-                        "value": (f"${a_v:,.2f}" if fmt == "currency" else f"{a_v:,.1f}") if a_v is not None else None,
-                        "raw_value": a_raw,
-                        "table": tbl,
-                        "format": fmt,
-                        "format_type": fmt,
-                        "recipe_type": "atomic",
-                        "trend_direction": "neutral",
-                        "trend_pct": None,
-                        "trend_text": "mean value"
-                    })
+                metric_ids = [f"{tbl}_{m_col}_sum", f"{tbl}_{m_col}_avg"]
+                live_columns = sqlite_live_columns.get(tbl)
+                if str(db_conn.db_type).lower() == "sqlite" and live_columns is not None and m_col.casefold() not in live_columns:
+                    mark_missing_role(metric_ids)
+                    stats_res = []
+                else:
+                    q_m = _clean_sql_identifier(m_col, db_conn.db_type)
+                    stats_res = execute_sql(
+                        f"SELECT ROUND(SUM({q_m}), 2) as s_val, ROUND(AVG({q_m}), 2) as a_val FROM {q_tbl}",
+                        metric_ids,
+                    )
+                stats_row = stats_res[0] if stats_res else {}
+                s_raw = stats_row.get("s_val")
+                a_raw = stats_row.get("a_val")
+                s_v = float(s_raw) if s_raw is not None else None
+                a_v = float(a_raw) if a_raw is not None else None
+
+                computed_kpis.append({
+                    "id": f"{tbl}_{m_col}_sum",
+                    "label": f"Total {col_name_title}",
+                    "value": (f"${s_v:,.2f}" if fmt == "currency" else f"{s_v:,.1f}") if s_v is not None else None,
+                    "raw_value": s_raw,
+                    "table": tbl,
+                    "format": fmt,
+                    "format_type": fmt,
+                    "recipe_type": "atomic",
+                    "trend_direction": "neutral",
+                    "trend_pct": None,
+                    "trend_text": "cumulative sum"
+                })
+
+                computed_kpis.append({
+                    "id": f"{tbl}_{m_col}_avg",
+                    "label": f"Average {col_name_title}",
+                    "value": (f"${a_v:,.2f}" if fmt == "currency" else f"{a_v:,.1f}") if a_v is not None else None,
+                    "raw_value": a_raw,
+                    "table": tbl,
+                    "format": fmt,
+                    "format_type": fmt,
+                    "recipe_type": "atomic",
+                    "trend_direction": "neutral",
+                    "trend_pct": None,
+                    "trend_text": "mean value"
+                })
 
             # Distinct categorical entities
             for d_col in prof["dim_cols"][:2]:

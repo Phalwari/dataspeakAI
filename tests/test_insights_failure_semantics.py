@@ -90,6 +90,53 @@ def test_sql_null_sum_is_unavailable_and_empty_count_is_zero(isolated_db, tmp_pa
     assert metrics["orders_total_rows"]["raw_value"] == 0
 
 
+def test_sqlite_stale_column_is_missing_role_without_query_or_zero(isolated_db, tmp_path, monkeypatch):
+    """A stale schema column must not be treated as a SQLite string literal."""
+    sqlite_path = tmp_path / "generic_orders.sqlite"
+    with sqlite3.connect(sqlite_path) as sqlite_db:
+        sqlite_db.execute(
+            "CREATE TABLE orders (id INTEGER, customer_ref TEXT, amount REAL, created_on TEXT, state TEXT)"
+        )
+        sqlite_db.execute(
+            "INSERT INTO orders VALUES (?, ?, ?, ?, ?)",
+            (1, "synthetic-customer", 37.5, "2026-01-02", "paid"),
+        )
+
+    schema = {
+        "orders": {
+            "columns": {
+                "id": "INTEGER",
+                "customer_ref": "TEXT",
+                "amount": "REAL",
+                "created_on": "TEXT",
+                "state": "TEXT",
+                "ghost_amount": "REAL",
+            },
+            "row_count": 1,
+        }
+    }
+    connection = _add_connection(isolated_db, database=str(sqlite_path), schema=schema)
+    engine = _prepare_pipeline(monkeypatch, sqlite_path)
+    executed_sql = []
+    event.listen(
+        engine,
+        "before_cursor_execute",
+        lambda _conn, _cursor, statement, _params, _context, _many: executed_sql.append(statement),
+    )
+    try:
+        result = _run_pipeline(isolated_db, connection, selected_table="orders", monkeypatch=monkeypatch)
+    finally:
+        engine.dispose()
+
+    metrics = {item["id"]: item for item in result["key_metrics"]}
+    ghost_metric = metrics["orders_ghost_amount_sum"]
+    assert ghost_metric["status"] == "unavailable"
+    assert ghost_metric["reason"] == "missing_role"
+    assert ghost_metric["raw_value"] is None
+    assert not any('"ghost_amount"' in statement for statement in executed_sql)
+    assert metrics["orders_amount_sum"]["status"] == "available"
+
+
 def test_missing_role_is_reported_for_federated_revenue(isolated_db, tmp_path, monkeypatch):
     sqlite_path = tmp_path / "orders_without_revenue.sqlite"
     with sqlite3.connect(sqlite_path) as sqlite_db:
@@ -111,9 +158,9 @@ def test_missing_role_is_reported_for_federated_revenue(isolated_db, tmp_path, m
 
 
 def test_query_failure_is_reported_by_mocked_service_unit(isolated_db, monkeypatch):
-    """Unit test: a mocked service error maps to error/query_failed without DB access."""
+    """Unit test: a mocked non-SQLite fallback maps to error/query_failed."""
     schema = {"orders": {"columns": {"order_id": "INTEGER", "amount": "REAL"}, "row_count": 0}}
-    connection = _add_connection(isolated_db, database="offline-test-database", schema=schema)
+    connection = _add_connection(isolated_db, database="offline-test-database", schema=schema, db_type="mysql")
     _prepare_pipeline(monkeypatch)
     monkeypatch.setattr(db_utils, "get_connection_url", lambda _connection: None)
     fallback_calls = []
@@ -130,6 +177,7 @@ def test_query_failure_is_reported_by_mocked_service_unit(isolated_db, monkeypat
         f"reason={metrics['orders_amount_sum'].get('reason')}, fallback_calls={len(fallback_calls)}"
     )
     assert metrics["orders_amount_sum"]["reason"] == "query_failed"
+    assert fallback_calls
     assert all("synthetic query failure" not in warning for warning in result["data_quality"]["warnings"])
 
 
