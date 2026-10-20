@@ -37,6 +37,7 @@ from services.sql_dialect import (
 )
 
 logger = logging.getLogger(__name__)
+INSIGHTS_CACHE_VERSION = 3
 
 
 def _normalize_date_range(
@@ -111,7 +112,7 @@ def _cache_key(
     date_from: Optional[str], date_to: Optional[str],
 ) -> str:
     return make_cache_key(
-        "db_insights_d2", str(tenant_id), str(connection_id),
+        f"db_insights_v{INSIGHTS_CACHE_VERSION}", str(tenant_id), str(connection_id),
         selected_table or "all", date_from or "none", date_to or "none",
     )
 
@@ -382,7 +383,7 @@ class DatabasePipelineService:
                             res = json.loads(res)
                         except Exception:
                             pass
-                    if isinstance(res, dict):
+                    if isinstance(res, dict) and res.get("insights_version") == INSIGHTS_CACHE_VERSION:
                         res["cached"] = True
                         res["cache_source"] = "db_l2"
                         cache_set(cache_key, res, ttl_seconds=86400)
@@ -2303,6 +2304,7 @@ class DatabasePipelineService:
         )
 
         response_payload = {
+            "insights_version": INSIGHTS_CACHE_VERSION,
             "success": True,
             "status": "success",
             "connection_id": connection_id,
@@ -2415,7 +2417,7 @@ class DatabasePipelineService:
                             res = json.loads(res)
                         except Exception:
                             pass
-                    if isinstance(res, dict):
+                    if isinstance(res, dict) and res.get("insights_version") == INSIGHTS_CACHE_VERSION:
                         res["cached"] = True
                         res["cache_source"] = "db_l2"
                         cache_set(cache_key, res, ttl_seconds=86400)

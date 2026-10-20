@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+import datetime
 
 import pytest
 from fastapi import HTTPException
@@ -133,6 +134,16 @@ def test_date_ranges_use_distinct_cache_entries(orders_case):
     _run(orders_case, date_from="2026-01-01", date_to="2026-01-02")
     _run(orders_case, date_from="2026-01-03", date_to="2026-01-03")
     assert len(cache) == 2
+
+
+def test_old_unfiltered_db_cache_is_not_served(orders_case):
+    db, connection, _, _ = orders_case
+    connection.insights_cache = {"success": True, "key_metrics": [{"id": "stale"}]}
+    connection.insights_cached_at = datetime.datetime.now(datetime.timezone.utc)
+    db.flush()
+    result = _run(orders_case)
+    assert result["insights_version"] == pipeline.INSIGHTS_CACHE_VERSION
+    assert "stale" not in {item["id"] for item in result["key_metrics"]}
 
 
 def test_dates_are_bound_not_interpolated(orders_case):
