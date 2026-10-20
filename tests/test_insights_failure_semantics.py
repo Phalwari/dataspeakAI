@@ -269,7 +269,7 @@ def test_mongo_filtered_count_failure_never_uses_unfiltered_count(isolated_db, m
         def aggregate(self, _pipeline):
             return []
 
-        def distinct(self, _field):
+        def distinct(self, _field, _query=None):
             return []
 
         def find_one(self, *_args, **_kwargs):

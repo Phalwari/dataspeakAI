@@ -1586,22 +1586,18 @@ class DatabasePipelineService:
             if not decrypted_conn_str:
                 raise ValueError("MongoDB connection URI is not configured")
 
-            # Parse date bounds into datetime for MongoDB queries
+            # Use the same half-open calendar window as relational queries.
             date_match = {}
             if date_from:
-                try:
-                    dt_f = datetime.datetime.fromisoformat(str(date_from).replace("Z", "+00:00"))
-                    date_match["$gte"] = dt_f
-                except Exception:
-                    pass
+                date_match["$gte"] = datetime.datetime.combine(
+                    datetime.date.fromisoformat(date_from), datetime.time.min,
+                    tzinfo=datetime.timezone.utc,
+                )
             if date_to:
-                try:
-                    dt_t = datetime.datetime.fromisoformat(str(date_to).replace("Z", "+00:00"))
-                    if len(str(date_to)) == 10:
-                        dt_t = dt_t.replace(hour=23, minute=59, second=59, microsecond=999999)
-                    date_match["$lte"] = dt_t
-                except Exception:
-                    pass
+                date_match["$lt"] = datetime.datetime.combine(
+                    datetime.date.fromisoformat(date_bindings["date_to_excl"]),
+                    datetime.time.min, tzinfo=datetime.timezone.utc,
+                )
 
             tables_to_analyze = [selected_table] if (selected_table and selected_table in schema) else available_tables[:3]
             primary_tbl = tables_to_analyze[0]
@@ -1620,7 +1616,7 @@ class DatabasePipelineService:
                     coll = mongo_db[tbl]
                     tbl_title = tbl.replace("_", " ").title()
                     date_cols = prof.get("date_cols", [])
-                    t_col = date_cols[0] if date_cols else None
+                    t_col = _pick_date_column(date_cols)
 
                     # 1. Total document count (never discard a requested date filter)
                     count_metric_id = f"{tbl}_total_rows"
@@ -1630,14 +1626,9 @@ class DatabasePipelineService:
                         trend_sub = "unavailable: no date field was detected"
                         metric_query_states[count_metric_id] = {"status": "unavailable", "reason": "missing_role"}
                         query_errors.append(f"{count_metric_id}: Date-filtered document count is unavailable because no date field was detected.")
-                    elif date_filter_requested and not date_match:
-                        total_records = None
-                        trend_sub = "unavailable: date filter could not be applied"
-                        metric_query_states[count_metric_id] = {"status": "error", "reason": "query_failed"}
-                        query_errors.append(f"{count_metric_id}: Date-filtered document count could not be computed.")
                     elif date_filter_requested:
                         try:
-                            total_records = coll.count_documents({t_col: date_match})
+                            total_records = coll.count_documents({t_col: {"$ne": None, **date_match}})
                             trend_sub = "documents in filtered horizon"
                         except Exception:
                             logger.exception("MongoDB date-filtered count failed for collection %s", tbl)
@@ -1674,6 +1665,10 @@ class DatabasePipelineService:
                         "trend_text": f"{total_records:,} {trend_sub}" if total_records is not None else trend_sub
                     })
 
+                    # A collection without an unambiguous date cannot provide any filtered outputs.
+                    if date_filter_requested and not t_col:
+                        continue
+
                     # 2. Measures (sum and avg)
                     for m_col in prof.get("measure_cols", [])[:3]:
                         col_name_title = m_col.split(".")[-1].replace("_", " ").title()
@@ -1687,7 +1682,7 @@ class DatabasePipelineService:
 
                             match_criteria = {m_col: {"$ne": None}}
                             if date_match and t_col:
-                                match_criteria[t_col] = date_match
+                                match_criteria[t_col] = {"$ne": None, **date_match}
                             m_pipe.append({"$match": match_criteria})
                             m_pipe.append({
                                 "$group": {
@@ -1754,7 +1749,10 @@ class DatabasePipelineService:
                                 parent_arr = d_col.split(".")[0]
                                 if schema.get(tbl, {}).get("columns", {}).get(parent_arr) == "list":
                                     continue
-                            d_vals = coll.distinct(d_col)
+                            d_vals = (
+                                coll.distinct(d_col, {t_col: {"$ne": None, **date_match}})
+                                if date_match else coll.distinct(d_col)
+                            )
                             d_cnt = len(d_vals)
                             computed_kpis.append({
                                 "id": f"{tbl}_{d_col.replace('.', '_')}_distinct",
@@ -1776,8 +1774,8 @@ class DatabasePipelineService:
                             query_errors.append(f"{distinct_id}: MongoDB distinct-value query failed.")
 
                     # 4. Charts for this collection
-                    use_sample = total_records > 50000
-                    sample_stage = [{"$sample": {"size": 25000}}] if use_sample else []
+                    # Exact aggregates: sampling would turn displayed totals into estimates.
+                    sample_stage = []
 
                     # 4A. Time Series Trend Chart (Area Chart)
                     if t_col:
@@ -1792,7 +1790,7 @@ class DatabasePipelineService:
 
                             match_criteria = {t_col: {"$ne": None}}
                             if date_match:
-                                match_criteria = {**match_criteria, **date_match}
+                                match_criteria[t_col].update(date_match)
 
                             t_pipe.append({"$match": match_criteria})
                             t_pipe.append({
@@ -1840,7 +1838,7 @@ class DatabasePipelineService:
 
                             match_criteria = {d_col: {"$ne": None}}
                             if date_match and t_col:
-                                match_criteria[t_col] = date_match
+                                match_criteria[t_col] = {"$ne": None, **date_match}
                             if m_col:
                                 match_criteria[m_col] = {"$ne": None}
 
@@ -1924,7 +1922,10 @@ class DatabasePipelineService:
                                 parent_arr = d_col.split(".")[0]
                                 if schema.get(tbl, {}).get("columns", {}).get(parent_arr) == "list":
                                     continue
-                            raw_opts = coll.distinct(d_col)
+                            raw_opts = (
+                                coll.distinct(d_col, {t_col: {"$ne": None, **date_match}})
+                                if date_match else coll.distinct(d_col)
+                            )
                             clean_opts = [
                                 str(v).strip() for v in raw_opts 
                                 if v and not str(v).startswith(("[", "{")) and len(str(v)) <= 40
