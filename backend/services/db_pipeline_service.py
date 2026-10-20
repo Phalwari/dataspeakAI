@@ -31,7 +31,10 @@ from services.metric_recipes import (
 )
 from services.dashboard_composer import compose_dashboard_layout, DashboardLayoutPlan
 from services.redis_service import cache_get, cache_set, make_cache_key
-from services.sql_dialect import cast_text, concat, month_bucket, round_money
+from services.sql_dialect import (
+    UnsupportedDialectError, cast_text, concat, month_bucket, quote_ident,
+    round_money,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -303,9 +306,7 @@ def is_dimension_column(col_name: str, col_type: str = "") -> bool:
 def _clean_sql_identifier(name: str, db_type: str) -> str:
     """Quotes an identifier safely based on database type, allowing spaces for valid quoted identifiers."""
     cleaned = re.sub(r'[^a-zA-Z0-9_\s\-]', '', name).strip()
-    if db_type.lower() in ["postgresql", "sqlite"]:
-        return f'"{cleaned}"'
-    return f"`{cleaned}`"
+    return quote_ident(cleaned, db_type)
 
 
 class DatabasePipelineService:
@@ -394,7 +395,10 @@ class DatabasePipelineService:
         if not decrypted_conn_str and getattr(db_conn, "host", None) and ("mongodb://" in str(db_conn.host) or "mongodb+srv://" in str(db_conn.host)):
             decrypted_conn_str = db_conn.host
 
-        is_sql = str(db_conn.db_type).lower() in ["postgresql", "mysql", "sqlite"]
+        db_type = str(db_conn.db_type).lower()
+        is_sql = db_type in {"postgresql", "mysql", "mariadb", "sqlite"}
+        if not is_sql and db_type != "mongodb":
+            raise UnsupportedDialectError("Unsupported SQL dialect for insights")
 
         # Helper for executing queries
         query_errors: List[str] = []
@@ -2244,6 +2248,8 @@ class DatabasePipelineService:
 
         def run_anomaly_detection() -> List[Dict[str, Any]]:
             anomalies: List[Dict[str, Any]] = []
+            if not is_sql:
+                return anomalies
             target_tbl = fact_table if (is_federated_mode and fact_table) else (selected_table or available_tables[0])
             prof = table_profiles.get(target_tbl, {})
             if prof.get("monetary_cols"):

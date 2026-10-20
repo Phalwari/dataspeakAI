@@ -8,6 +8,7 @@ from services.sql_dialect import (
     UnsupportedDialectError, cast_text, concat, month_bucket, quote_ident,
     round_money,
 )
+from services.db_pipeline_service import _clean_sql_identifier
 
 
 @pytest.mark.parametrize("dialect,expected", [
@@ -43,6 +44,13 @@ def test_other_dialect_fragments(dialect, joiner, cast_target, round_expr, ident
 def test_unknown_dialect_fails_closed(helper, args):
     with pytest.raises(UnsupportedDialectError):
         helper(*args, "unknown")
+
+
+def test_pipeline_identifier_quoting_has_no_mysql_fallback():
+    assert _clean_sql_identifier("order items", "sqlite") == '"order items"'
+    assert _clean_sql_identifier("order items", "mysql") == "`order items`"
+    with pytest.raises(UnsupportedDialectError):
+        _clean_sql_identifier("order items", "unknown")
 
 
 def test_sqlite_fragments_execute_on_temporary_database(tmp_path):
