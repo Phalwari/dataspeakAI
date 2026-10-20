@@ -1117,6 +1117,7 @@ The implementation session must receive the saved plan in the same up-to-date ch
 ---
 
 ### 📌 Backlog & Technical Debt Items
+- [ ] **Insights Phase F — Planner V2 parity and safe cutover**: F0 design, F1–F7 opt-in implementation, and F10 verification docs are present on `feat/insights-planner-v2`. F8 is partial (direct legacy/V2 comparison covers the orders/status fixture; broader fixture expectations run against V2 only). F9 legacy vocabulary removal and default switch are gated on ten-family parity review and explicit owner approval. Live PostgreSQL, MySQL/MariaDB, MongoDB, browser, multi-worker cache and load remain not verified by execution. See `docs/insights/PLANNER_V2.md`.
 - [ ] **CI Lint & Type Checks**: Add `tsc --noEmit` and `ruff` or `pyright` to continuous integration pipeline.
 - [ ] **Legacy ApiKey Hashing**: Hash legacy `ApiKey` values at rest (e.g. SHA-256) rather than storing plaintext keys in database.
 - [ ] **CORS Origin Strictness**: Replace wildcard `allow_origins=["*"]` + `allow_credentials=True` on dashboard routes with strict explicit origin allowlists.

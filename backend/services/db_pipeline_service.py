@@ -13,6 +13,7 @@ Designed for high concurrency (200 concurrent users) with Redis L1 and DB L2 cac
 from __future__ import annotations
 import json
 import math
+import os
 import re
 import datetime
 import logging
@@ -112,11 +113,26 @@ def _with_date_predicate(query: str, table: str, column: str, bindings: Dict[str
 def _cache_key(
     tenant_id: Optional[int], connection_id: Any, selected_table: Optional[str],
     date_from: Optional[str], date_to: Optional[str], cache_version: int = 0,
+    *, planner_mode: str = "legacy", catalog_version: str | None = None,
+    plan_hash: str | None = None,
 ) -> str:
-    return make_cache_key(
+    key_parts = [
         "db_insights", str(tenant_id), str(connection_id), f"v{cache_version}",
         selected_table or "all", date_from or "none", date_to or "none",
-    )
+    ]
+    if planner_mode == "v2":
+        key_parts.extend(("planner_v2", catalog_version or "unknown", plan_hash or "unknown"))
+    return make_cache_key(*key_parts)
+
+
+def _insights_planner_mode() -> str:
+    configured = os.getenv("INSIGHTS_PLANNER", "legacy").strip().casefold()
+    if configured in {"", "legacy"}:
+        return "legacy"
+    if configured == "v2":
+        return "v2"
+    logger.warning("Unsupported INSIGHTS_PLANNER value; using legacy planner")
+    return "legacy"
 
 
 def classify_status(value: Any) -> str:
@@ -374,6 +390,267 @@ class DatabasePipelineService:
         db.commit()
         return int(cache_version or 0)
 
+    def _run_planner_v2(
+        self,
+        db: Session,
+        db_conn: Any,
+        *,
+        tenant_id: int,
+        connection_id: Any,
+        cache_version: int,
+        date_from: Optional[str],
+        date_to: Optional[str],
+        date_bindings: Dict[str, str],
+        selected_table: Optional[str],
+    ) -> Dict[str, Any]:
+        """Execute opt-in V2 planning, using tenant and schema-derived cache namespaces."""
+        from services.insights.runner import (
+            execute_prepared_mongo_plan, execute_prepared_sql_plan,
+            prepare_mongo_plan, prepare_sql_plan,
+        )
+
+        db_type = str(getattr(db_conn, "db_type", "")).casefold()
+        date_to_excl = date_bindings.get("date_to_excl")
+
+        def fresh_l2_cache(catalog_version: str, plan_hash: str) -> Optional[Dict[str, Any]]:
+            if selected_table or date_from or date_to:
+                return None
+            cached_at = getattr(db_conn, "insights_cached_at", None)
+            if not cached_at:
+                return None
+            now_utc = datetime.datetime.now(datetime.timezone.utc)
+            if getattr(cached_at, "tzinfo", None) is not None:
+                age = (now_utc - cached_at).total_seconds()
+            else:
+                age = (now_utc.replace(tzinfo=None) - cached_at).total_seconds()
+            if age < 0 or age >= 86400:
+                return None
+            value = getattr(db_conn, "insights_cache", None)
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except (TypeError, ValueError):
+                    return None
+            if (
+                isinstance(value, dict)
+                and value.get("insights_version") == INSIGHTS_CACHE_VERSION
+                and value.get("connection_cache_version") == cache_version
+                and value.get("planner_mode") == "v2"
+                and value.get("catalog_version") == catalog_version
+                and value.get("plan_hash") == plan_hash
+            ):
+                return value
+            return None
+
+        if db_type in {"sqlite", "postgresql", "mysql", "mariadb"}:
+            from services.db_pool import get_engine
+            from services.db_utils import get_connection_url
+
+            connection_url = get_connection_url(db_conn)
+            if not connection_url:
+                raise ValueError("Database connection is not configured")
+            engine = get_engine(connection_url)
+            with engine.connect() as source_connection:
+                prepared = prepare_sql_plan(
+                    source_connection,
+                    selected_table=selected_table,
+                    sample_size=10_000,
+                    max_tables=100,
+                    max_columns_per_table=256,
+                    time_budget_seconds=30.0,
+                    profile_cache_namespace=(
+                        f"db_insights_profile:{tenant_id}:{connection_id}:v{cache_version}"
+                    ),
+                    profile_cache_get=cache_get,
+                    profile_cache_set=lambda key, value: cache_set(key, value, ttl_seconds=300),
+                )
+                catalog_version = prepared.catalog.version
+                plan_hash = prepared.plan.plan_hash
+                available_tables = [table.name for table in prepared.catalog.tables]
+                cache_key = _cache_key(
+                    tenant_id, connection_id, selected_table, date_from, date_to,
+                    cache_version, planner_mode="v2", catalog_version=catalog_version,
+                    plan_hash=plan_hash,
+                )
+                cached_data = cache_get(cache_key)
+                if (
+                    isinstance(cached_data, dict)
+                    and cached_data.get("insights_version") == INSIGHTS_CACHE_VERSION
+                    and cached_data.get("connection_cache_version") == cache_version
+                    and cached_data.get("planner_mode") == "v2"
+                    and cached_data.get("catalog_version") == catalog_version
+                    and cached_data.get("plan_hash") == plan_hash
+                ):
+                    cached_data["cached"] = True
+                    cached_data["cache_source"] = "redis_l1"
+                    return cached_data
+                l2_data = fresh_l2_cache(catalog_version, plan_hash)
+                if l2_data is not None:
+                    l2_data["cached"] = True
+                    l2_data["cache_source"] = "db_l2"
+                    cache_set(cache_key, l2_data, ttl_seconds=86400)
+                    return l2_data
+                result = execute_prepared_sql_plan(
+                    source_connection, prepared, date_from=date_from,
+                    date_to_excl=date_to_excl, selected_table=selected_table,
+                )
+        elif db_type == "mongodb":
+            from pymongo import MongoClient
+
+            encrypted_uri = getattr(db_conn, "connection_string", None)
+            decrypted_uri = encryption_service.decrypt(encrypted_uri) if encrypted_uri else None
+            if not decrypted_uri and getattr(db_conn, "host", None):
+                host_value = str(db_conn.host)
+                if host_value.startswith(("mongodb://", "mongodb+srv://")):
+                    decrypted_uri = host_value
+            if not decrypted_uri:
+                raise ValueError("MongoDB connection is not configured")
+            client = MongoClient(decrypted_uri, serverSelectionTimeoutMS=5000)
+            try:
+                try:
+                    mongo_database = client.get_default_database()
+                except Exception:
+                    mongo_database = client[getattr(db_conn, "database", None) or "test"]
+                prepared = prepare_mongo_plan(
+                    mongo_database, sample_size=1_000, max_collections=100,
+                    time_budget_seconds=30.0,
+                    catalog_cache_namespace=(
+                        f"db_insights_mongo_catalog:{tenant_id}:{connection_id}:v{cache_version}"
+                    ),
+                    catalog_cache_get=cache_get,
+                    catalog_cache_set=lambda key, value: cache_set(key, value, ttl_seconds=300),
+                )
+                catalog_version = prepared.catalog.version
+                plan_hash = prepared.plan.plan_hash
+                available_tables = [collection.name for collection in prepared.catalog.collections]
+                cache_key = _cache_key(
+                    tenant_id, connection_id, selected_table, date_from, date_to,
+                    cache_version, planner_mode="v2", catalog_version=catalog_version,
+                    plan_hash=plan_hash,
+                )
+                cached_data = cache_get(cache_key)
+                if (
+                    isinstance(cached_data, dict)
+                    and cached_data.get("insights_version") == INSIGHTS_CACHE_VERSION
+                    and cached_data.get("connection_cache_version") == cache_version
+                    and cached_data.get("planner_mode") == "v2"
+                    and cached_data.get("catalog_version") == catalog_version
+                    and cached_data.get("plan_hash") == plan_hash
+                ):
+                    cached_data["cached"] = True
+                    cached_data["cache_source"] = "redis_l1"
+                    return cached_data
+                l2_data = fresh_l2_cache(catalog_version, plan_hash)
+                if l2_data is not None:
+                    l2_data["cached"] = True
+                    l2_data["cache_source"] = "db_l2"
+                    cache_set(cache_key, l2_data, ttl_seconds=86400)
+                    return l2_data
+                result = execute_prepared_mongo_plan(
+                    mongo_database, prepared, date_from=date_from,
+                    date_to_excl=date_to_excl, selected_collection=selected_table,
+                )
+            finally:
+                client.close()
+        else:
+            raise ValueError("Unsupported database type for insights")
+
+        key_metrics = result["key_metrics"]
+        gross = next((item for item in key_metrics if item["id"] == "revenue_total"), None)
+        row_count = next((
+            item for item in key_metrics
+            if item["id"].startswith("row_count_") or item["id"].startswith("document_count_")
+        ), None)
+        if (
+            gross and gross.get("status") in {"available", "zero"}
+            and isinstance(gross.get("raw_value"), (int, float))
+        ):
+            row_value = row_count.get("raw_value") if row_count else None
+            suffix = f" across {int(row_value):,} records" if isinstance(row_value, (int, float)) else ""
+            summary_text = f"Computed gross revenue is ${gross['raw_value']:,.2f}{suffix}."
+        else:
+            summary_text = "Insufficient data to generate a reliable business summary."
+        summary = {
+            "business_domain": "Unknown",
+            "executive_summary": summary_text,
+            "strategic_insights": [],
+            "tactical_recommendations": [],
+            "source": "deterministic_fallback",
+            "llm_error": None,
+        }
+        filters = [
+            {"id": "date_from", "value": date_from},
+            {"id": "date_to", "value": date_to},
+        ]
+        layout = compose_dashboard_layout(
+            table_name=selected_table or "All Tables", metrics=key_metrics,
+            charts=result["charts"], filters=filters, executive_summary=summary,
+        )
+        response_payload = {
+            "insights_version": INSIGHTS_CACHE_VERSION,
+            "connection_cache_version": cache_version,
+            "planner_mode": "v2",
+            "catalog_version": result["catalog_version"],
+            "plan_hash": result.get("plan_hash"),
+            "success": True,
+            "status": "success",
+            "connection_id": connection_id,
+            "db_name": getattr(db_conn, "name", getattr(db_conn, "db_name", "Database")),
+            "name": getattr(db_conn, "name", getattr(db_conn, "db_name", "Database")),
+            "db_type": db_type,
+            "available_tables": available_tables,
+            "selected_table": selected_table or "All Tables",
+            "key_metrics": key_metrics,
+            "charts": result["charts"],
+            "auto_charts": result["charts"],
+            "filters": filters,
+            "executive_summary": summary,
+            "business_summary": summary,
+            "strategic_insights": [],
+            "playbook": {"strategic_insights": [], "tactical_recommendations": []},
+            "anomalies": [],
+            "data_quality": result["data_quality"],
+            "applied_date_from": date_from,
+            "applied_date_to": date_to,
+            "layout_plan": layout.model_dump(),
+            "pipeline_layers": [
+                {"layer": index, "name": name, "status": "completed"}
+                for index, name in enumerate((
+                    "Catalog discovery", "Bounded profiling", "Role classification",
+                    "Metric planning", "Safe query execution", "Result quality",
+                ), start=1)
+            ],
+            "cached": False,
+            "cached_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+        clean_payload = json.loads(json.dumps(response_payload, default=str))
+        cache_set(cache_key, clean_payload, ttl_seconds=86400)
+        if not selected_table and not date_from and not date_to:
+            try:
+                updated = (
+                    db.query(models.DatabaseConnection)
+                    .filter(
+                        models.DatabaseConnection.id == connection_id,
+                        models.DatabaseConnection.tenant_id == tenant_id,
+                        models.DatabaseConnection.insights_cache_version == cache_version,
+                    )
+                    .update(
+                        {
+                            models.DatabaseConnection.insights_cache: clean_payload,
+                            models.DatabaseConnection.insights_cached_at: datetime.datetime.now(datetime.timezone.utc),
+                        }, synchronize_session=False,
+                    )
+                )
+                if updated == 1:
+                    db.commit()
+                else:
+                    db.rollback()
+                    logger.info("Skipped stale V2 database insights cache write")
+            except Exception:
+                db.rollback()
+                logger.exception("V2 database insights cache write failed")
+        return response_payload
+
     def run_db_pipeline(
         self,
         db: Session,
@@ -410,11 +687,18 @@ class DatabasePipelineService:
             cache_version = self.invalidate_connection_cache(db, tenant_id, connection_id)
             db_conn = query.first()
 
+        if _insights_planner_mode() == "v2":
+            return self._run_planner_v2(
+                db, db_conn, tenant_id=tenant_id, connection_id=connection_id,
+                cache_version=cache_version, date_from=date_from, date_to=date_to,
+                date_bindings=date_bindings, selected_table=selected_table,
+            )
+
         # 2. Check Cache if not force_refresh
         cache_key = _cache_key(
             tenant_id, connection_id, selected_table, date_from, date_to, cache_version,
         )
-        if not force_refresh:
+        if not force_refresh and _insights_planner_mode() != "v2":
             cached_data = cache_get(cache_key)
             if (
                 isinstance(cached_data, dict)
@@ -2545,7 +2829,7 @@ class DatabasePipelineService:
         cache_key = _cache_key(
             tenant_id, connection_id, selected_table, date_from, date_to, cache_version,
         )
-        if not force_refresh:
+        if not force_refresh and _insights_planner_mode() == "legacy":
             cached_data = cache_get(cache_key)
             if (
                 isinstance(cached_data, dict)

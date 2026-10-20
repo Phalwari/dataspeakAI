@@ -42,6 +42,13 @@ def cast_text(expression: str, dialect: str) -> str:
     return f"CAST({expression} AS {target})"
 
 
+def cast_numeric(expression: str, dialect: str) -> str:
+    """Cast an aggregate to a portable fractional numeric type for safe division."""
+    kind = _dialect(dialect)
+    target = "DECIMAL(38, 10)" if kind == "mysql" else "DOUBLE PRECISION" if kind == "postgresql" else "REAL"
+    return f"CAST({expression} AS {target})"
+
+
 def round_money(expression: str, dialect: str) -> str:
     kind = _dialect(dialect)
     if kind == "postgresql":
