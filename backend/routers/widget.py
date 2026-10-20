@@ -467,6 +467,7 @@ def process_widget_chat(
     exec_res = None
     rows_summary = ""
     context_text = ""
+    rag_hits: List[Dict[str, Any]] = []
 
     # 6. SQL Security Policy Evaluation (NR-1.1-B-T07)
     allow_sql = bool(widget_key.allow_sql)
@@ -477,7 +478,7 @@ def process_widget_chat(
     is_asking_db = any(kw in user_query.lower() for kw in db_keywords)
 
     if is_asking_db and not allow_sql:
-        route_type = "sql"
+        route_type = "rag"
         assistant_answer = "Database querying is disabled for this widget. Please ask questions about our knowledge base documentation."
     elif allow_sql and is_asking_db:
         allowed_db_ids = widget_key.allowed_database_ids or []
@@ -657,9 +658,19 @@ def process_widget_chat(
                 except Exception as g_err:
                     print(f"Widget stream grounding error: {g_err}")
 
+            from routers.chat import extract_suggested_followups
+            stream_sugg = extract_suggested_followups(full_answer)
+            if not stream_sugg:
+                stream_sugg = [
+                    "Can you tell me more about this?",
+                    "Where can I find more details?",
+                    "How can I contact support?"
+                ]
+
             meta_json = {
                 "source": "widget",
-                "citations": [c.model_dump() for c in verified_citations]
+                "citations": [c.model_dump() for c in verified_citations],
+                "suggestions": stream_sugg
             }
             if grounding_data:
                 meta_json["grounding"] = grounding_data
@@ -690,6 +701,7 @@ def process_widget_chat(
                 "message_id": int(assistant_msg.id),
                 "sources": meta_json.get("citations"),
                 "grounding": meta_json.get("grounding"),
+                "suggestions": stream_sugg
             }
 
         return StreamingResponse(
@@ -754,9 +766,19 @@ def process_widget_chat(
             print(f"Widget sync grounding error: {g_err}")
 
     exec_duration_ms = round((time.time() - start_time) * 1000, 2)
+    from routers.chat import extract_suggested_followups
+    sync_sugg = extract_suggested_followups(assistant_answer)
+    if not sync_sugg:
+        sync_sugg = [
+            "Can you tell me more about this?",
+            "Where can I find more details?",
+            "How can I contact support?"
+        ]
+
     meta_json = {
         "source": "widget",
-        "citations": [c.model_dump() for c in verified_citations]
+        "citations": [c.model_dump() for c in verified_citations],
+        "suggestions": sync_sugg
     }
     if grounding_data:
         meta_json["grounding"] = grounding_data
@@ -793,6 +815,7 @@ def process_widget_chat(
         sources=verified_citations,
         grounding=grounding_data,
         grounding_status=grounding_data.get("status") if grounding_data else None,
+        suggestions=sync_sugg,
         created_at=assistant_msg.created_at
     )
 

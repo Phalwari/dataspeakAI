@@ -17,6 +17,25 @@ To maintain seamless multi-developer and AI agent collaboration:
 
 ## [Unreleased]
 
+### Added
+
+- **Conversational Intelligence, Multi-Turn Memory & Suggested Follow-ups (`backend/routers/chat.py`, `backend/routers/widget.py`, `backend/services/query_router.py`, `backend/services/conversation_memory.py`, `backend/services/sql_agent.py`, `backend/schemas.py`, `src/app/pages/dashboard/ChatPage.tsx`, `src/app/components/SafeMarkdown.tsx`, `tests/test_conversational_and_suggestions.py`)**:
+  - **Dedicated Conversational Routing**: Introduced explicit `"conversational"` classification in `QueryRouter` equipped with DataSpeakAI platform knowledge so greetings, product capability questions, and general dialogue return helpful executive guidance rather than empty RAG chunks or inappropriate SQL attempts.
+  - **Rich Multi-Turn Context & Anaphora**: Injected prior query history, referenced database tables, and key entities into `SQLAgent` and conversational synthesis, resolving follow-up pronouns and filter requests against preceding turns.
+  - **Structured Executive Synthesis & Follow-Up Suggestions**: Overhauled synthesis prompts across SQL and RAG to produce structured Markdown takeaways, bold statistics, formatted Markdown tables, and structured follow-up suggestions (`suggestions: List[str]`) extracted automatically into interactive chips. Added table list guidance for missing columns or schema errors.
+  - **Frontend Safe Markdown & Suggestion Chips UI**: Integrated sanitized Markdown rendering with syntax highlighting, lists, and alternating table rows in `ChatPage.tsx`; rendered clickable follow-up suggestion chips beneath assistant replies that auto-populate the chat input.
+  - **Automated Verification**: Added comprehensive test suite `tests/test_conversational_and_suggestions.py` covering conversational routing, context memory propagation, suggestion extraction, and schema compliance (16/16 tests passing).
+
+- **Demonstration Databases & Multi-Dialect Compatibility (`backend/services/sql_agent.py`, `backend/services/llm_generation_service.py`, `backend/.env`, `.trail/learnings/2026-10-20-demo-databases-mariadb-llm-fallback.md`)**:
+  - **Containerized Demo Databases**: Provisioned and seeded three live Docker databases registered in platform catalog:
+    1. **PostgreSQL 15** (`dataspeak_ecommerce` on port 5432) with `customers`, `products`, `orders`, `order_items`, and a `users` alias view.
+    2. **MySQL / MariaDB 10.11** (`retail_inventory` on port 3306) with `warehouses`, `suppliers`, `inventory`, and `shipments`.
+    3. **MongoDB** (`analytics_store` on port 27017) with `events`, `customer_feedback`, and `system_telemetry`.
+  - **MariaDB Timeout Compatibility**: Removed connection-level `init_command: SET SESSION MAX_EXECUTION_TIME=6000` from `sql_agent.py` to prevent MariaDB connection handshake crashes (`OperationalError 1193`), delegating timeout enforcement to post-connection execution and caller watchdog timers.
+  - **LLMGateway Model Fallback & Groq 404 Recovery**: Updated `GEMINI_MODELS` to active supported candidates (`gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3.8-flash`, `gemini-flash-latest`) and `GROQ_MODELS` to (`openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `qwen/qwen3.8-27b`), handling HTTP 404 gracefully so Groq falls through to available models.
+  - **Local Development SSRF Authorization**: Enabled `ALLOW_PRIVATE_DB_HOSTS=true` for local Docker database exploration.
+  - **Trail Knowledge Base**: Initialized `.trail/learnings/` store with decision and watch-out records for multi-dialect database exploration.
+
 ### Fixed
 
 - **Insights Phase D (INS-D2-01..03, INS-D3-01..07, INS-D4-01..03, INS-GEN-01):** Applied strict, bound calendar windows to generated SQL Insights queries and server-backed date presets; added response range metadata, matching prior-year comparisons, and versioned Redis/DB cache payloads. Centralized SQLite/PostgreSQL/MySQL/MariaDB SQL fragments, rejected unknown dialects, prioritized Mongo analytics, and aligned Mongo counts/charts to exact exclusive date bounds. Corrected misleading money and quantity role classification. Added temporary SQLite and offline Mongo tests; live connectors, browser rendering, and concurrent-user capacity remain unverified.
