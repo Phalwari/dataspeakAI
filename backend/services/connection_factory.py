@@ -98,7 +98,7 @@ class DatabaseConnectionFactory:
                 ):
                     logger.warning("SSRF violation blocked for a database host")
                     raise SSRFSecurityViolation(
-                        "Database host resolves to a prohibited address."
+                        "Database host resolves to a prohibited IP address (private or internal IP)."
                     )
         
         return host_clean

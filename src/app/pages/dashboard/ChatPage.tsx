@@ -41,6 +41,7 @@ import {
   canModifyConversation,
   getConversationAccessBadge,
 } from "../../utils/permissions";
+import { SafeMarkdown } from "../../components/SafeMarkdown";
 
 interface SourceCitation {
   document_name: string;
@@ -75,10 +76,12 @@ interface ChatMessage {
   id: number;
   sender_role: "user" | "assistant" | "system";
   content: string;
-  query_type?: "rag" | "sql" | "hybrid" | "user";
+  query_type?: "rag" | "sql" | "hybrid" | "conversational" | "user";
   metadata_json?: {
     sources?: SourceCitation[];
     sql_data?: SqlData;
+    suggestions?: string[];
+    suggested_questions?: string[];
     sql_agent?: {
       attempts?: number;
       corrections_made?: boolean;
@@ -146,10 +149,44 @@ export function ChatPage() {
   const [expandedSources, setExpandedSources] = useState<Record<number, boolean>>({});
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeRequestIdRef = useRef<string | null>(null);
   const activeConvIdRef = useRef<number | null>(activeConvId);
   const token = localStorage.getItem("token");
+
+  const getMessageSuggestions = (msg: ChatMessage): string[] => {
+    if (msg.metadata_json?.suggestions && msg.metadata_json.suggestions.length > 0) {
+      return msg.metadata_json.suggestions;
+    }
+    if (msg.metadata_json?.suggested_questions && msg.metadata_json.suggested_questions.length > 0) {
+      return msg.metadata_json.suggested_questions;
+    }
+    if (msg.content) {
+      const match = msg.content.match(/(?:\*{0,2}(?:suggested\s+follow[- ]?ups?|suggested\s+questions?|follow[- ]?up\s+questions?):?\*{0,2})\s*\n([\s\S]+)$/i);
+      if (match) {
+        const lines = match[1].split("\n");
+        const res: string[] = [];
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          const isBullet = /^(?:\d+[\.\)]|\-|\*|•)\s+/.test(trimmed);
+          if (!isBullet && !trimmed.endsWith("?")) {
+            if (res.length > 0) break;
+            continue;
+          }
+          let cleaned = trimmed.replace(/^(?:\d+[\.\)]|\-|\*|•)\s*/, "").trim();
+          cleaned = cleaned.replace(/^\*{1,2}(.*?)\*{1,2}$/, "$1").trim();
+          cleaned = cleaned.replace(/^["'](.*?)["']$/, "$1").trim();
+          if (cleaned && cleaned.length > 5 && !cleaned.toLowerCase().startsWith("suggested")) {
+            res.push(cleaned);
+          }
+        }
+        return res.slice(0, 4);
+      }
+    }
+    return [];
+  };
 
   useEffect(() => {
     activeConvIdRef.current = activeConvId;
@@ -410,7 +447,8 @@ export function ChatPage() {
                           sources: parsed.sources,
                           sql_data: parsed.sql_data,
                           grounding: parsed.grounding,
-                          sql_agent: parsed.sql_agent
+                          sql_agent: parsed.sql_agent,
+                          suggestions: parsed.suggestions || parsed.suggested_questions || []
                         }
                       }
                     : m
@@ -543,10 +581,10 @@ export function ChatPage() {
   );
 
   const samplePrompts = [
-    { text: "Summarize key findings from our latest uploaded document", icon: FileText, pref: "documents" },
-    { text: "How many total users or records are in our database?", icon: Database, pref: "database" },
-    { text: "Compare structured database numbers with our policy manual", icon: Layers, pref: "auto" },
-    { text: "What are the key guidelines and compliance rules mentioned in the handbook?", icon: FileText, pref: "documents" }
+    { text: "What can DataSpeakAI do and how do I get started?", icon: Sparkles, pref: "auto" },
+    { text: "How many total records or users are in our database?", icon: Database, pref: "database" },
+    { text: "Summarize key findings from our uploaded documents", icon: FileText, pref: "documents" },
+    { text: "Compare structured database numbers with our policy manual", icon: Layers, pref: "auto" }
   ];
 
   return (
@@ -799,6 +837,7 @@ export function ChatPage() {
               const sqlData = msg.metadata_json?.sql_data;
               const routeType = msg.query_type || "rag";
               const isSourcesExpanded = !!expandedSources[msg.id];
+              const suggestions = getMessageSuggestions(msg);
 
               return (
                 <div
@@ -828,7 +867,7 @@ export function ChatPage() {
                       {/* Engine Tag for Assistant */}
                       {!isUser && (
                         <div className="flex items-center justify-between gap-2 mb-2 pb-2 border-b border-gray-200">
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
                             {routeType === "rag" && (
                               <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px]">
                                 <FileText className="w-2.5 h-2.5 mr-1" />
@@ -845,6 +884,12 @@ export function ChatPage() {
                               <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-[10px]">
                                 <Layers className="w-2.5 h-2.5 mr-1" />
                                 Hybrid Multi-Source
+                              </Badge>
+                            )}
+                            {routeType === "conversational" && (
+                              <Badge variant="outline" className="bg-sky-50 text-sky-700 border-sky-200 text-[10px]">
+                                <Bot className="w-2.5 h-2.5 mr-1" />
+                                Platform Assistant
                               </Badge>
                             )}
                             {msg.metadata_json?.sql_agent?.corrections_made && (
@@ -865,16 +910,30 @@ export function ChatPage() {
                       )}
 
                       {/* Natural Language Message Body */}
-                      <div className="whitespace-pre-wrap">
-                        {msg.content || (!isUser && isLoading ? (
-                          <span className="inline-flex items-center gap-1.5 text-gray-400 py-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse [animation-delay:150ms]" />
-                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse [animation-delay:300ms]" />
-                            <span className="text-[11px] ml-1 text-gray-400">Thinking & streaming...</span>
-                          </span>
-                        ) : null)}
-                      </div>
+                      {isUser ? (
+                        <div className="whitespace-pre-wrap">{msg.content}</div>
+                      ) : (
+                        <div>
+                          {msg.content ? (
+                            <SafeMarkdown
+                              content={msg.content}
+                              onCitationClick={(citeText) => {
+                                const match = sources.find((s) =>
+                                  citeText.toLowerCase().includes(s.document_name.toLowerCase())
+                                );
+                                if (match) setSelectedCitation(match);
+                              }}
+                            />
+                          ) : isLoading ? (
+                            <span className="inline-flex items-center gap-1.5 text-gray-400 py-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse [animation-delay:150ms]" />
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse [animation-delay:300ms]" />
+                              <span className="text-[11px] ml-1 text-gray-400">Thinking & streaming...</span>
+                            </span>
+                          ) : null}
+                        </div>
+                      )}
 
                       {/* Hallucination / Low Grounding Disclaimer */}
                       {msg.metadata_json?.grounding?.disclaimer && (
@@ -1042,6 +1101,36 @@ export function ChatPage() {
                         )}
                       </div>
                     )}
+
+                    {/* Suggested Follow-up Questions Chips */}
+                    {!isUser && suggestions.length > 0 && (
+                      <div className="pt-1 flex flex-wrap items-center gap-1.5">
+                        <div className="flex items-center gap-1 text-[11px] text-gray-500 font-medium mr-0.5">
+                          <Sparkles className="w-3 h-3 text-blue-500" />
+                          <span>Suggested:</span>
+                        </div>
+                        {suggestions.map((sugg, sIdx) => (
+                          <button
+                            key={sIdx}
+                            type="button"
+                            disabled={isLoading}
+                            onClick={() => {
+                              setInputText(sugg);
+                              inputRef.current?.focus();
+                            }}
+                            className={`text-[11px] bg-white text-gray-700 border border-gray-200 rounded-full px-2.5 py-1 transition-all shadow-xs flex items-center gap-1 group text-left ${
+                              isLoading
+                                ? "opacity-50 cursor-not-allowed"
+                                : "hover:bg-blue-50 hover:text-blue-700 hover:border-blue-300 cursor-pointer"
+                            }`}
+                            title={isLoading ? "Please wait for response" : "Click to populate chat input"}
+                          >
+                            <span>{sugg}</span>
+                            <ArrowRight className="w-2.5 h-2.5 opacity-0 group-hover:opacity-100 transition-opacity text-blue-600" />
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -1082,6 +1171,7 @@ export function ChatPage() {
               className="relative flex items-center max-w-4xl mx-auto"
             >
               <Input
+                ref={inputRef}
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 placeholder="Ask anything about your documents or databases... (Press Enter to send)"

@@ -29,8 +29,11 @@ def get_engine(url: str, connect_args: Mapping[str, Any] | None = None) -> Engin
     key = _cache_key(url, connect_args)
     with _lock:
         engine = _engine_cache.get(key)
+        if engine is None and url in _engine_cache:
+            engine = _engine_cache[url]
         if engine is not None:
-            _engine_cache.move_to_end(key)
+            if key in _engine_cache:
+                _engine_cache.move_to_end(key)
             return engine
 
         options: dict[str, Any] = {
@@ -39,7 +42,9 @@ def get_engine(url: str, connect_args: Mapping[str, Any] | None = None) -> Engin
             "connect_args": dict(connect_args or {}),
         }
         if url.startswith("sqlite"):
-            is_memory = ":memory:" in url or url.rstrip("/") in {
+            from urllib.parse import unquote
+            unquoted = unquote(url).lower()
+            is_memory = ":memory:" in url or ":memory:" in unquoted or url.rstrip("/") in {
                 "sqlite:", "sqlite+pysqlite:"
             }
             if not is_memory:

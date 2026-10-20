@@ -95,6 +95,7 @@ async def stream_chat_response(
             static_sources = None
             static_grounding = None
             static_sql_agent = None
+            static_suggestions = None
             if on_complete:
                 try:
                     if inspect.iscoroutinefunction(on_complete):
@@ -109,6 +110,7 @@ async def stream_chat_response(
                         static_sources = res.get("sources")
                         static_grounding = res.get("grounding")
                         static_sql_agent = res.get("sql_agent")
+                        static_suggestions = res.get("suggestions")
                 except Exception as cb_err:
                     logger.error(f"[ChatStream Callback Error in static fallback] {cb_err}")
                     err_payload = json.dumps({
@@ -144,6 +146,8 @@ async def stream_chat_response(
                 final_payload["grounding"] = static_grounding
             if static_sql_agent is not None:
                 final_payload["sql_agent"] = static_sql_agent
+            if static_suggestions is not None:
+                final_payload["suggestions"] = static_suggestions
             yield f"data: {json.dumps(final_payload)}\n\n"
             return
 
@@ -177,6 +181,7 @@ async def stream_chat_response(
         callback_sources = None
         callback_grounding = None
         callback_sql_agent = None
+        callback_suggestions = None
 
         if on_complete:
             try:
@@ -191,6 +196,7 @@ async def stream_chat_response(
                     callback_sources = res.get("sources")
                     callback_grounding = res.get("grounding")
                     callback_sql_agent = res.get("sql_agent")
+                    callback_suggestions = res.get("suggestions")
             except Exception as cb_err:
                 logger.error(f"[ChatStream Callback Error] {cb_err}")
                 err_payload = json.dumps({
@@ -227,6 +233,8 @@ async def stream_chat_response(
             final_payload["grounding"] = callback_grounding
         if callback_sql_agent is not None:
             final_payload["sql_agent"] = callback_sql_agent
+        if callback_suggestions is not None:
+            final_payload["suggestions"] = callback_suggestions
 
         yield f"data: {json.dumps(final_payload)}\n\n"
 

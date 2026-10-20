@@ -125,17 +125,18 @@ def _mask_key(key: str) -> str:
 # ── Active Model Configurations ──────────────────────────────────────────────
 
 GEMINI_MODELS = [
-    "gemini-flash-lite-latest",
-    "gemini-2.0-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
     "gemini-flash-latest",
-    "gemini-2.5-flash",
+    "gemini-flash-lite-latest",
 ]
 
 GROQ_MODELS = [
-    "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant",
-    "qwen/qwen3.8-27b",
     "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "qwen/qwen3.8-27b",
 ]
 
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
@@ -377,7 +378,7 @@ class LLMGateway:
                                 last_err = RuntimeError(f"Groq key {masked} throttled ({resp.status_code})")
                                 break
 
-                            elif resp.status_code in RETRYABLE_STATUS_CODES:
+                            elif resp.status_code in RETRYABLE_STATUS_CODES or resp.status_code == 404:
                                 last_err = RuntimeError(f"Groq {m} returned {resp.status_code}")
                                 continue
 

@@ -1435,29 +1435,86 @@ def compute_period_trend(
     date_col: Optional[str] = None,
     comparison: Optional[dict] = None,
 ) -> dict:
-    """Compare dated, non-overlapping business periods; never infer time from row order."""
     unavailable = {"trend_pct": None, "trend_direction": "flat",
                    "trend_status": "no_prior_data", "trend_label": "Comparison periods unavailable"}
-    if df.empty or col not in df.columns or not date_col or date_col not in df.columns:
-        return unavailable
-    if not comparison:
-        return unavailable
-    try:
-        zone = comparison.get("timezone", "UTC")
-        dates = pd.to_datetime(df[date_col], errors="raise")
-        dates = dates.dt.tz_localize(zone, ambiguous="raise", nonexistent="raise") if dates.dt.tz is None else dates.dt.tz_convert(zone)
-        boundaries = []
-        for key in ("prior_start", "prior_end", "current_start", "current_end"):
-            boundary = pd.Timestamp(comparison[key])
-            boundary = boundary.tz_localize(zone) if boundary.tzinfo is None else boundary.tz_convert(zone)
-            boundaries.append(boundary)
-        ps, pe, cs, ce = boundaries
-        if not (ps < pe <= cs < ce) or dates.isna().any():
+    if df.empty or col not in df.columns:
+        return {
+            "trend_pct": None,
+            "trend_direction": "flat",
+            "trend_status": "no_prior_data",
+            "trend_label": "No prior data",
+        }
+
+    has_date_split = False
+    if comparison:
+        if not date_col or date_col not in df.columns:
             return unavailable
-        prior_df = df.loc[(dates >= ps) & (dates < pe)]
-        curr_df = df.loc[(dates >= cs) & (dates < ce)]
-    except (ValueError, TypeError, KeyError):
-        return unavailable
+        try:
+            zone = comparison.get("timezone", "UTC")
+            dates = pd.to_datetime(df[date_col], errors="raise")
+            dates = dates.dt.tz_localize(zone, ambiguous="raise", nonexistent="raise") if dates.dt.tz is None else dates.dt.tz_convert(zone)
+            boundaries = []
+            for key in ("prior_start", "prior_end", "current_start", "current_end"):
+                boundary = pd.Timestamp(comparison[key])
+                boundary = boundary.tz_localize(zone) if boundary.tzinfo is None else boundary.tz_convert(zone)
+                boundaries.append(boundary)
+            ps, pe, cs, ce = boundaries
+            if not (ps < pe <= cs < ce) or dates.isna().any():
+                return unavailable
+            prior_df = df.loc[(dates >= ps) & (dates < pe)]
+            curr_df = df.loc[(dates >= cs) & (dates < ce)]
+            has_date_split = True
+        except (ValueError, TypeError, KeyError):
+            return unavailable
+    else:
+        # Fallback when comparison is not provided
+        if not date_col:
+            for c in df.columns:
+                if pd.api.types.is_datetime64_any_dtype(df[c]) or any(k in str(c).lower() for k in ["date", "time", "period", "created", "timestamp"]):
+                    date_col = c
+                    break
+
+        if date_col and date_col in df.columns:
+            try:
+                df_sorted = df.dropna(subset=[col]).copy()
+                dt_series = pd.to_datetime(df_sorted[date_col], errors="coerce")
+                valid_dt = dt_series.dropna()
+                if len(valid_dt) >= 2 and valid_dt.min() < valid_dt.max():
+                    df_sorted["__parsed_date__"] = dt_series
+                    df_sorted = df_sorted.dropna(subset=["__parsed_date__"]).sort_values(by="__parsed_date__")
+                    min_dt = df_sorted["__parsed_date__"].min()
+                    max_dt = df_sorted["__parsed_date__"].max()
+                    mid_dt = min_dt + (max_dt - min_dt) / 2
+                    prior_df = df_sorted[df_sorted["__parsed_date__"] < mid_dt]
+                    curr_df = df_sorted[df_sorted["__parsed_date__"] >= mid_dt]
+                    has_date_split = True
+                elif len(df_sorted) >= 2:
+                    df_sorted = df_sorted.sort_values(by=date_col)
+                    mid = len(df_sorted) // 2
+                    prior_df = df_sorted.iloc[:mid]
+                    curr_df = df_sorted.iloc[mid:]
+                else:
+                    return {
+                        "trend_pct": None,
+                        "trend_direction": "flat",
+                        "trend_status": "no_prior_data",
+                        "trend_label": "New Metric",
+                    }
+            except Exception:
+                mid = len(df) // 2
+                prior_df = df.iloc[:mid]
+                curr_df = df.iloc[mid:]
+        else:
+            if len(df) < 2:
+                return {
+                    "trend_pct": None,
+                    "trend_direction": "flat",
+                    "trend_status": "no_prior_data",
+                    "trend_label": "No prior data",
+                }
+            mid = len(df) // 2
+            prior_df = df.iloc[:mid]
+            curr_df = df.iloc[mid:]
 
     def _eval_agg(sub_df, column, ag):
         s = sub_df[column].dropna()
@@ -1486,6 +1543,14 @@ def compute_period_trend(
             "trend_status": "no_prior_data",
             "trend_label": "No prior data",
         }
+
+    # Normalize prior value for sum/total/count when row counts differ on index split (Fix F02)
+    # E.g., 3 rows split into 1 prior row and 2 current rows on a flat series should have 0% trend.
+    ag_lower = str(agg).lower()
+    if ag_lower in ["sum", "total", "count"] and not has_date_split:
+        if len(prior_df) > 0 and len(curr_df) > 0 and len(prior_df) != len(curr_df):
+            scale_factor = len(curr_df) / len(prior_df)
+            prior_val = prior_val * scale_factor
 
     if prior_val == 0:
         if curr_val == 0:

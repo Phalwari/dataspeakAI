@@ -1,3 +1,4 @@
+import json
 from enum import Enum
 import re
 from pydantic import BaseModel, EmailStr, model_validator, field_validator, Field, ConfigDict
@@ -625,6 +626,21 @@ class MessageResponse(BaseModel):
     metadata_json: Optional[dict] = None
     created_at: datetime
 
+    @field_validator("metadata_json", mode="before")
+    @classmethod
+    def parse_metadata_json(cls, v: Any) -> Optional[dict]:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            try:
+                parsed = json.loads(v)
+                return parsed if isinstance(parsed, dict) else None
+            except Exception:
+                return None
+        if isinstance(v, dict):
+            return v
+        return None
+
     class Config:
         from_attributes = True
 
@@ -725,6 +741,8 @@ class ChatResponse(BaseModel):
     verified_claims_count: Optional[int] = None
     skipped_claims_count: Optional[int] = None
     sql_agent: Optional[Dict[str, Any]] = None
+    suggestions: Optional[List[str]] = []
+    suggested_questions: Optional[List[str]] = []
     created_at: datetime
 
 class WidgetChatRequest(BaseModel):
@@ -742,6 +760,7 @@ class WidgetChatResponse(BaseModel):
     sources: List[SourceCitation] = []
     grounding: Optional[Dict[str, Any]] = None
     grounding_status: Optional[str] = None
+    suggestions: Optional[List[str]] = []
     created_at: datetime
 
 class WidgetConfigResponse(BaseModel):
