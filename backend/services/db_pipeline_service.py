@@ -31,7 +31,7 @@ from services.metric_recipes import (
 )
 from services.dashboard_composer import compose_dashboard_layout, DashboardLayoutPlan
 from services.redis_service import cache_get, cache_set, make_cache_key
-from services.sql_dialect import cast_text, concat, month_bucket
+from services.sql_dialect import cast_text, concat, month_bucket, round_money
 
 logger = logging.getLogger(__name__)
 
@@ -725,6 +725,9 @@ class DatabasePipelineService:
         is_federated_mode = not selected_table or selected_table == "" or selected_table == "All Tables"
         is_mongodb = str(db_conn.db_type).lower() == "mongodb"
 
+        def round_aggregate(function: str, expression: str) -> str:
+            return round_money(f"{function}({expression})", db_conn.db_type)
+
         if is_mongodb:
             logger.debug("MongoDB pipeline selected before relational federation")
         if not is_mongodb and is_federated_mode and fact_table:
@@ -787,14 +790,14 @@ class DatabasePipelineService:
                 if is_unit_price_column(money_col) and qty_col:
                     q_qty = _clean_sql_identifier(qty_col, db_conn.db_type)
                     money_expr = f"({q_money} * {q_qty})"
-                    avg_expr = f"ROUND(AVG({q_money} * {q_qty}), 2)"
+                    avg_expr = round_aggregate("AVG", f"{q_money} * {q_qty}")
                 else:
                     money_expr = q_money
-                    avg_expr = f"ROUND(AVG({q_money}), 2)"
+                    avg_expr = round_aggregate("AVG", q_money)
 
                 fact_summary = execute_sql(f"""
                     SELECT 
-                        ROUND(SUM({money_expr}), 2) as total_rev,
+                        {round_aggregate('SUM', money_expr)} as total_rev,
                         COUNT(*) as total_orders,
                         {avg_expr} as avg_order_val
                     FROM {q_fact}
@@ -819,12 +822,12 @@ class DatabasePipelineService:
                         q_jf = _clean_sql_identifier(join_col[0], db_conn.db_type)
                         q_jl = _clean_sql_identifier(join_col[1], db_conn.db_type)
                         line_rev_query = f"""
-                            SELECT ROUND(SUM({line_money_expr}), 2) as total_rev
+                            SELECT {round_aggregate('SUM', line_money_expr)} as total_rev
                             FROM {q_fact}
                             JOIN {q_line} ON {q_fact}.{q_jf} = {q_line}.{q_jl}
                         """
                     else:
-                        line_rev_query = f"SELECT ROUND(SUM({line_money_expr}), 2) as total_rev FROM {q_line}"
+                        line_rev_query = f"SELECT {round_aggregate('SUM', line_money_expr)} as total_rev FROM {q_line}"
                     line_rev_res = execute_sql(line_rev_query, ["total_revenue", "average_order_value"])
                     if line_rev_res and line_rev_res[0].get("total_rev") is not None:
                         revenue_raw_value = line_rev_res[0].get("total_rev")
@@ -845,7 +848,7 @@ class DatabasePipelineService:
             if status_col and money_expr:
                 q_status = _clean_sql_identifier(status_col, db_conn.db_type)
                 status_res = execute_sql(f"""
-                    SELECT {q_status} as st, COUNT(*) as cnt, ROUND(SUM({money_expr}), 2) as rev
+                    SELECT {q_status} as st, COUNT(*) as cnt, {round_aggregate('SUM', money_expr)} as rev
                     FROM {q_fact}
                     WHERE {q_status} IS NOT NULL
                     GROUP BY {q_status}
@@ -948,7 +951,7 @@ class DatabasePipelineService:
                     q_jf = _clean_sql_identifier(join_col[0], db_conn.db_type)
                     q_jl = _clean_sql_identifier(join_col[1], db_conn.db_type)
                     country_query = f"""
-                        SELECT {q_fact}.{q_country} as name, ROUND(SUM({line_money_expr}), 2) as val 
+                        SELECT {q_fact}.{q_country} as name, {round_aggregate('SUM', line_money_expr)} as val
                         FROM {q_fact} 
                         JOIN {q_line} ON {q_fact}.{q_jf} = {q_line}.{q_jl}
                         WHERE {q_fact}.{q_country} IS NOT NULL 
@@ -958,7 +961,7 @@ class DatabasePipelineService:
                     """
                 elif money_expr:
                     country_query = f"""
-                        SELECT {q_country} as name, ROUND(SUM({money_expr}), 2) as val 
+                        SELECT {q_country} as name, {round_aggregate('SUM', money_expr)} as val
                         FROM {q_fact} 
                         WHERE {q_country} IS NOT NULL 
                         GROUP BY {q_country} 
@@ -989,7 +992,7 @@ class DatabasePipelineService:
                     q_ad = _clean_sql_identifier(table_norm_map["address"], db_conn.db_type)
                     q_cu = _clean_sql_identifier(customer_table, db_conn.db_type)
                     rel_geo_query = f"""
-                        SELECT {q_co}.country as name, ROUND(SUM({money_expr}), 2) as val
+                        SELECT {q_co}.country as name, {round_aggregate('SUM', money_expr)} as val
                         FROM {q_fact}
                         JOIN {q_cu} ON {q_fact}.customer_id = {q_cu}.customer_id
                         JOIN {q_ad} ON {q_cu}.address_id = {q_ad}.address_id
@@ -1007,7 +1010,7 @@ class DatabasePipelineService:
                         q_cu = _clean_sql_identifier(customer_table, db_conn.db_type)
                         q_cg = _clean_sql_identifier(c_geo_col, db_conn.db_type)
                         rel_geo_query = f"""
-                            SELECT {q_cu}.{q_cg} as name, ROUND(SUM({money_expr}), 2) as val
+                            SELECT {q_cu}.{q_cg} as name, {round_aggregate('SUM', money_expr)} as val
                             FROM {q_fact}
                             JOIN {q_cu} ON {q_fact}.customer_id = {q_cu}.customer_id
                             WHERE {q_cu}.{q_cg} IS NOT NULL
@@ -1063,12 +1066,18 @@ class DatabasePipelineService:
 
                         previous_start = previous_year(current_start)
                         previous_end = previous_year(current_end)
+                        current_case = (
+                            f"CASE WHEN {q_date} >= :current_start AND {q_date} < :current_end "
+                            f"THEN {money_expr} END"
+                        )
+                        previous_case = (
+                            f"CASE WHEN {q_date} >= :previous_start AND {q_date} < :previous_end "
+                            f"THEN {money_expr} END"
+                        )
                         sply_query = f"""
                             SELECT
-                                ROUND(SUM(CASE WHEN {q_date} >= :current_start
-                                    AND {q_date} < :current_end THEN {money_expr} END), 2) as curr_val,
-                                ROUND(SUM(CASE WHEN {q_date} >= :previous_start
-                                    AND {q_date} < :previous_end THEN {money_expr} END), 2) as prev_val
+                                {round_aggregate('SUM', current_case)} as curr_val,
+                                {round_aggregate('SUM', previous_case)} as prev_val
                             FROM {q_fact}
                         """
                         sply_res = execute_sql(
@@ -1239,7 +1248,7 @@ class DatabasePipelineService:
                     q_jl = _clean_sql_identifier(join_col[1], db_conn.db_type)
                     month_expr = month_bucket(f"{q_fact}.{q_date}", db_conn.db_type)
                     monthly_query = f"""
-                        SELECT {month_expr} as period, ROUND(SUM({line_money_expr}), 2) as value 
+                        SELECT {month_expr} as period, {round_aggregate('SUM', line_money_expr)} as value
                         FROM {q_fact} 
                         JOIN {q_line} ON {q_fact}.{q_jf} = {q_line}.{q_jl}
                         WHERE {q_fact}.{q_date} IS NOT NULL 
@@ -1249,7 +1258,7 @@ class DatabasePipelineService:
                 elif money_expr:
                     month_expr = month_bucket(q_date, db_conn.db_type)
                     monthly_query = f"""
-                        SELECT {month_expr} as period, ROUND(SUM({money_expr}), 2) as value 
+                        SELECT {month_expr} as period, {round_aggregate('SUM', money_expr)} as value
                         FROM {q_fact} 
                         WHERE {q_date} IS NOT NULL 
                         GROUP BY period 
@@ -1306,7 +1315,7 @@ class DatabasePipelineService:
             if segment_dim and money_expr:
                 q_seg = _clean_sql_identifier(segment_dim, db_conn.db_type)
                 seg_res = execute_sql(f"""
-                    SELECT {q_seg} as name, ROUND(SUM({money_expr}), 2) as value
+                    SELECT {q_seg} as name, {round_aggregate('SUM', money_expr)} as value
                     FROM {q_fact}
                     WHERE {q_seg} IS NOT NULL
                     GROUP BY {q_seg}
@@ -1339,7 +1348,7 @@ class DatabasePipelineService:
                     q_fc = _clean_sql_identifier(t_fc, db_conn.db_type)
                     q_cat = _clean_sql_identifier(t_cat, db_conn.db_type)
                     cat_rev_query = f"""
-                        SELECT {q_cat}.name as name, ROUND(SUM({money_expr}), 2) as value
+                        SELECT {q_cat}.name as name, {round_aggregate('SUM', money_expr)} as value
                         FROM {q_fact}
                         JOIN {q_rent} ON {q_fact}.rental_id = {q_rent}.rental_id
                         JOIN {q_inv} ON {q_rent}.inventory_id = {q_inv}.inventory_id
@@ -1405,7 +1414,7 @@ class DatabasePipelineService:
 
                     if name_expr and money_expr:
                         cust_spend_query = f"""
-                            SELECT {cast_text(f'{q_fact}.{q_cid}', db_conn.db_type)} as name, ROUND(SUM({money_expr}), 2) as value
+                            SELECT {cast_text(f'{q_fact}.{q_cid}', db_conn.db_type)} as name, {round_aggregate('SUM', money_expr)} as value
                             FROM {q_fact}
                             JOIN {q_cu} ON {q_fact}.{q_cid} = {q_cu}.{q_cid}
                             WHERE {q_fact}.{q_cid} IS NOT NULL
@@ -1419,7 +1428,7 @@ class DatabasePipelineService:
                         q_jf = _clean_sql_identifier(join_col[0], db_conn.db_type)
                         q_jl = _clean_sql_identifier(join_col[1], db_conn.db_type)
                         cust_spend_query = f"""
-                            SELECT {cast_text(f'{q_fact}.{q_cid}', db_conn.db_type)} as name, ROUND(SUM({line_money_expr}), 2) as value
+                            SELECT {cast_text(f'{q_fact}.{q_cid}', db_conn.db_type)} as name, {round_aggregate('SUM', line_money_expr)} as value
                             FROM {q_fact}
                             JOIN {q_line} ON {q_fact}.{q_jf} = {q_line}.{q_jl}
                             WHERE {q_fact}.{q_cid} IS NOT NULL
@@ -1429,7 +1438,7 @@ class DatabasePipelineService:
                         """
                     elif money_expr:
                         cust_spend_query = f"""
-                            SELECT {cast_text(q_cid, db_conn.db_type)} as name, ROUND(SUM({money_expr}), 2) as value
+                            SELECT {cast_text(q_cid, db_conn.db_type)} as name, {round_aggregate('SUM', money_expr)} as value
                             FROM {q_fact}
                             WHERE {q_cid} IS NOT NULL
                             GROUP BY {q_cid}
@@ -1983,7 +1992,7 @@ class DatabasePipelineService:
                 else:
                     q_m = _clean_sql_identifier(m_col, db_conn.db_type)
                     stats_res = execute_sql(
-                        f"SELECT ROUND(SUM({q_m}), 2) as s_val, ROUND(AVG({q_m}), 2) as a_val FROM {q_tbl}",
+                        f"SELECT {round_aggregate('SUM', q_m)} as s_val, {round_aggregate('AVG', q_m)} as a_val FROM {q_tbl}",
                         metric_ids,
                     )
                 stats_row = stats_res[0] if stats_res else {}
@@ -2045,7 +2054,7 @@ class DatabasePipelineService:
                 t_col = table_date_col
                 q_t = _clean_sql_identifier(t_col, db_conn.db_type)
                 m_col = prof["measure_cols"][0] if prof["measure_cols"] else None
-                m_expr = f"ROUND(SUM({_clean_sql_identifier(m_col, db_conn.db_type)}), 2)" if m_col else "COUNT(*)"
+                m_expr = round_aggregate("SUM", _clean_sql_identifier(m_col, db_conn.db_type)) if m_col else "COUNT(*)"
                 
                 t_query = f"""
                     SELECT {month_bucket(q_t, db_conn.db_type)} as period, {m_expr} as value
@@ -2075,7 +2084,7 @@ class DatabasePipelineService:
             for idx, d_col in enumerate(prof["dim_cols"][:2]):
                 q_d = _clean_sql_identifier(d_col, db_conn.db_type)
                 m_col = prof["measure_cols"][0] if prof["measure_cols"] else None
-                m_expr = f"ROUND(SUM({_clean_sql_identifier(m_col, db_conn.db_type)}), 2)" if m_col else "COUNT(*)"
+                m_expr = round_aggregate("SUM", _clean_sql_identifier(m_col, db_conn.db_type)) if m_col else "COUNT(*)"
                 
                 c_query = f"""
                     SELECT {q_d} as name, {m_expr} as value 
@@ -2109,7 +2118,7 @@ class DatabasePipelineService:
                 m_col2 = prof["measure_cols"][1]
                 q_m2 = _clean_sql_identifier(m_col2, db_conn.db_type)
                 m2_query = f"""
-                    SELECT {q_d} as name, ROUND(SUM({q_m2}), 2) as value 
+                    SELECT {q_d} as name, {round_aggregate('SUM', q_m2)} as value
                     FROM {q_tbl} 
                     WHERE {q_d} IS NOT NULL AND {q_m2} IS NOT NULL
                     GROUP BY {q_d} 
