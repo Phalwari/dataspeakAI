@@ -1603,6 +1603,7 @@ class DatabasePipelineService:
             tables_to_analyze = [selected_table] if (selected_table and selected_table in schema) else available_tables[:3]
             primary_tbl = tables_to_analyze[0]
 
+            mongo_client = None
             try:
                 mongo_client = pymongo.MongoClient(decrypted_conn_str, serverSelectionTimeoutMS=5000)
                 try:
@@ -1951,9 +1952,15 @@ class DatabasePipelineService:
                             "options": []
                         })
 
-                mongo_client.close()
-            except Exception as mongo_err:
+            except Exception:
                 logger.exception("MongoDB analytics failed")
+                query_errors.append("MongoDB analytics failed; some results are unavailable.")
+            finally:
+                if mongo_client is not None:
+                    try:
+                        mongo_client.close()
+                    except Exception:
+                        logger.exception("MongoDB client cleanup failed")
 
         else:
             # -------------------------------------------------------------

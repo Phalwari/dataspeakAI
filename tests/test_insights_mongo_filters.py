@@ -17,6 +17,7 @@ class FakeCollection:
         self.aggregate_pipelines = []
         self.distinct_queries = []
         self.estimated_calls = 0
+        self.client_closes = 0
 
     def count_documents(self, query):
         self.count_queries.append(query)
@@ -40,7 +41,10 @@ class FakeCollection:
         return None
 
 
-def run_mongo_case(isolated_db, monkeypatch, collection, *, with_date=True, date_from="2026-01-01", date_to="2026-01-02"):
+def run_mongo_case(
+    isolated_db, monkeypatch, collection, *, with_date=True,
+    date_from="2026-01-01", date_to="2026-01-02", fail_lookup=False,
+):
     columns = {"amount": "number", "state": "string"}
     if with_date:
         columns["created_on"] = "date"
@@ -60,6 +64,8 @@ def run_mongo_case(isolated_db, monkeypatch, collection, *, with_date=True, date
 
     class FakeDatabase:
         def __getitem__(self, _collection_name):
+            if fail_lookup:
+                raise RuntimeError("synthetic collection lookup failure")
             return collection
 
     class FakeClient:
@@ -70,7 +76,7 @@ def run_mongo_case(isolated_db, monkeypatch, collection, *, with_date=True, date
             return FakeDatabase()
 
         def close(self):
-            pass
+            collection.client_closes += 1
 
     pymongo_module = ModuleType("pymongo")
     pymongo_module.MongoClient = FakeClient
@@ -132,3 +138,9 @@ def test_missing_date_role_does_not_run_unfiltered_aggregates(isolated_db, monke
     assert not collection.count_queries
     assert not collection.aggregate_pipelines
     assert not collection.distinct_queries
+
+
+def test_mongo_client_closes_after_unexpected_collection_error(isolated_db, monkeypatch):
+    collection = FakeCollection()
+    run_mongo_case(isolated_db, monkeypatch, collection, fail_lookup=True)
+    assert collection.client_closes == 1
