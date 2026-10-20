@@ -470,10 +470,22 @@ class DatabaseConnectionService:
                 try:
                     collection = db[collection_name]
                     sample = collection.find_one()
-                    fields = {}
-                    if sample and isinstance(sample, dict):
-                        for k, v in sample.items():
-                            fields[k] = type(v).__name__
+                    def _extract_mongo_fields(obj: Any, prefix: str = "", depth: int = 2) -> Dict[str, str]:
+                        res = {}
+                        if not isinstance(obj, dict) or depth <= 0:
+                            return res
+                        for k, v in obj.items():
+                            key_path = f"{prefix}.{k}" if prefix else k
+                            if isinstance(v, dict):
+                                res.update(_extract_mongo_fields(v, key_path, depth - 1))
+                            elif isinstance(v, list) and v and isinstance(v[0], dict):
+                                res[key_path] = "list"
+                                res.update(_extract_mongo_fields(v[0], key_path, depth - 1))
+                            else:
+                                res[key_path] = type(v).__name__
+                        return res
+
+                    fields = _extract_mongo_fields(sample) if sample and isinstance(sample, dict) else {}
                     count = 0
                     try:
                         count = collection.estimated_document_count()

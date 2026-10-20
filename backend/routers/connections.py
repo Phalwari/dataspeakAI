@@ -194,6 +194,9 @@ def retest_connection(
         raise HTTPException(status_code=404, detail="Database connection not found.")
 
     pwd = decrypt_password(c.password) if c.password else ""
+    raw_conn = c.connection_string or (c.host if c.host and ("://" in str(c.host) or "mongodb" in str(c.host)) else None)
+    decrypted_conn = (decrypt_password(raw_conn) if raw_conn else None) or raw_conn or ""
+
     db_type = (c.db_type or "").lower().strip()
     success = False
     msg = ""
@@ -203,12 +206,12 @@ def retest_connection(
         if db_type == "postgresql":
             success, msg = db_connection_service.test_postgresql(
                 c.host, c.port or 5432, c.username or "", pwd, c.database or "postgres",
-                connection_string=c.connection_string
+                connection_string=decrypted_conn or None
             )
             if success:
                 schema = db_connection_service.get_postgresql_schema(
                     c.host, c.port or 5432, c.username or "", pwd, c.database or "postgres",
-                    connection_string=c.connection_string
+                    connection_string=decrypted_conn or None
                 )
 
         elif db_type in ("mysql", "mariadb"):
@@ -227,7 +230,7 @@ def retest_connection(
                 schema = db_connection_service.get_sqlite_schema(db_path)
 
         elif db_type == "mongodb":
-            conn_str = c.connection_string or c.host or ""
+            conn_str = decrypted_conn
             success, msg = db_connection_service.test_mongodb(conn_str)
             if success:
                 schema = db_connection_service.get_mongodb_schema(conn_str)
@@ -457,6 +460,8 @@ def execute_ai_query(
         generated_query = f"SELECT * FROM {ai_req.table_name} LIMIT 50"
 
     decrypted_password = decrypt_password(c.password) if c.password else ""
+    raw_conn = c.connection_string or (c.host if c.host and ("://" in str(c.host) or "mongodb" in str(c.host)) else None)
+    decrypted_conn = (decrypt_password(raw_conn) if raw_conn else None) or raw_conn or ""
     results = db_connection_service.execute_query(
         db_type=c.db_type,
         host=c.host,
@@ -464,7 +469,7 @@ def execute_ai_query(
         username=c.username,
         password=decrypted_password,
         database=c.database,
-        connection_string=c.connection_string,
+        connection_string=decrypted_conn,
         query=generated_query
     )
     return {"query": generated_query, "results": results}

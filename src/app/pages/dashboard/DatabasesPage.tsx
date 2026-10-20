@@ -124,7 +124,7 @@ export function DatabasesPage() {
             if (statsRes.ok) {
               const stats = await statsRes.json();
               setDatabases(currentDbs => 
-                currentDbs.map(d => d.id === db.id ? { ...d, stats } : d)
+                currentDbs.map(d => d.id === db.id ? { ...d, stats, status: "connected" } : d)
               );
             }
           } catch (e) {

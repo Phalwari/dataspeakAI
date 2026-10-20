@@ -314,7 +314,9 @@ class DatabaseConnectionFactory:
         timeout_sec = max(1, int(statement_timeout_ms / 1000))
         
         if dialect == "postgresql":
-            connect_args["options"] = f"-c statement_timeout={statement_timeout_ms}"
+            url_str = str(url).lower()
+            if "pooler" not in url_str and "pgbouncer" not in url_str:
+                connect_args["options"] = f"-c statement_timeout={statement_timeout_ms}"
             connect_args["connect_timeout"] = timeout_sec
         elif dialect in ("mysql", "mariadb"):
             connect_args["connect_timeout"] = timeout_sec

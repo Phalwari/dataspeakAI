@@ -105,7 +105,6 @@ def sync_database_catalog(db_conn: models.DatabaseConnection, db_session) -> Opt
                 models.TableMetadata.schema_id == db_schema.id
             ).delete(synchronize_session=False)
             db_session.flush()
-            db_session.expunge_all()
 
         pii_patterns = re.compile(r"(email|password|secret|ssn|token|phone|credit|card|cvv|hash|salary|auth)", re.IGNORECASE)
 
@@ -635,7 +634,11 @@ def execute_safe_sql(
     if "sqlite" in db_type:
         connect_args = {"timeout": 10.0}
     elif "postgres" in db_type:
-        connect_args = {"options": "-c default_transaction_read_only=on -c statement_timeout=10000"}
+        conn_str_repr = (str(connection_url) + " " + str(getattr(db_conn, "host", ""))).lower()
+        if "pooler" in conn_str_repr or "pgbouncer" in conn_str_repr:
+            connect_args = {"connect_timeout": 10}
+        else:
+            connect_args = {"options": "-c default_transaction_read_only=on -c statement_timeout=10000", "connect_timeout": 10}
     elif "mariadb" in db_type:
         connect_args = {
             "connect_timeout": 10

@@ -84,7 +84,11 @@ def _get_mongo_client_and_db(db_conn: models.DatabaseConnection):
         try:
             db_obj = client.get_default_database()
         except Exception:
-            db_name = db_conn.database or "test"
+            if db_conn.database:
+                db_name = db_conn.database
+            else:
+                user_dbs = [d for d in client.list_database_names() if d not in ("admin", "local", "config")]
+                db_name = user_dbs[0] if user_dbs else "test"
             db_obj = client[db_name]
         return client, db_obj
     else:
@@ -100,6 +104,26 @@ def _get_mongo_client_and_db(db_conn: models.DatabaseConnection):
         db_name = db_conn.database or "test"
         db_obj = client[db_name]
         return client, db_obj
+
+
+def _serialize_mongo_val(v):
+    """Recursively converts BSON types (ObjectId, Binary/vector bytes, Decimal128, datetime) to JSON-serializable types."""
+    if v is None:
+        return None
+    from bson import ObjectId, Binary, Decimal128
+    if isinstance(v, ObjectId):
+        return str(v)
+    if isinstance(v, (bytes, Binary)):
+        return f"<Binary data ({len(v)} bytes)>"
+    if isinstance(v, Decimal128):
+        return str(v)
+    if hasattr(v, "isoformat"):
+        return v.isoformat()
+    if isinstance(v, dict):
+        return {str(k): _serialize_mongo_val(item) for k, item in v.items()}
+    if isinstance(v, list):
+        return [_serialize_mongo_val(item) for item in v]
+    return v
 
 
 @router.post("", response_model=schemas.DatabaseConnectionResponse)
@@ -200,7 +224,8 @@ def get_database_tables(
         inspector = inspect(engine)
         return inspector.get_table_names()
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to fetch tables: {str(e)}")
+        logger.error("Database table listing failed (%s)", type(e).__name__)
+        raise HTTPException(status_code=400, detail="Failed to fetch database tables") from None
 
 
 @router.get("/{db_id}/tables/{table_name}/data")
@@ -216,22 +241,19 @@ def get_table_data(
         try:
             client, db_obj = _get_mongo_client_and_db(db_conn)
             cursor = db_obj[table_name].find().limit(100)
+            import json
             rows = []
             for doc in cursor:
                 row = {}
                 for k, v in doc.items():
-                    if k == "_id":
-                        row[k] = str(v)
-                    elif hasattr(v, "isoformat"):
-                        row[k] = v.isoformat()
-                    elif isinstance(v, (dict, list)):
-                        import json
+                    val = _serialize_mongo_val(v)
+                    if isinstance(val, (dict, list)):
                         try:
-                            row[k] = json.dumps(v, default=str)
+                            row[k] = json.dumps(val, default=str)
                         except Exception:
-                            row[k] = str(v)
+                            row[k] = str(val)
                     else:
-                        row[k] = v
+                        row[k] = val
                 rows.append(row)
             client.close()
             return rows
@@ -281,6 +303,10 @@ def get_database_stats(
                     r_cnt = 0
                 tables_info.append({"name": c, "rows": r_cnt})
             client.close()
+            if db_conn.status != "connected":
+                db_conn.status = "connected"
+                db.commit()
+
             return {
                 "table_count": len(collections),
                 "tables": tables_info
@@ -299,14 +325,49 @@ def get_database_stats(
         inspector = inspect(engine)
         table_names = inspector.get_table_names()
         
+        # Fast PostgreSQL metadata query using pg_class to avoid slow sequential COUNT(*) on huge tables
+        if (db_conn.db_type or "").lower() == "postgresql":
+            try:
+                pg_query = (
+                    "SELECT c.relname AS name, GREATEST(0, CAST(c.reltuples AS BIGINT)) AS rows "
+                    "FROM pg_class c "
+                    "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "WHERE c.relkind = 'r' AND n.nspname NOT IN ('pg_catalog', 'information_schema') "
+                    "ORDER BY rows DESC"
+                )
+                pg_res = execute_safe_sql(db_conn, pg_query, max_rows=500)
+                if pg_res.get("rows"):
+                    tables_info = pg_res["rows"]
+                    # If all row counts are 0 (e.g. newly created tables not yet analyzed by autovacuum) on a small table set:
+                    if sum(t.get("rows", 0) for t in tables_info) == 0 and len(tables_info) <= 50:
+                        for item in tables_info:
+                            try:
+                                c_res = execute_safe_sql(db_conn, f'SELECT COUNT(*) AS cnt FROM "{item["name"]}"', max_rows=1)
+                                item["rows"] = list(c_res["rows"][0].values())[0] if c_res.get("rows") else 0
+                            except Exception:
+                                pass
+                    if db_conn.status != "connected":
+                        db_conn.status = "connected"
+                        db.commit()
+                    return {
+                        "table_count": len(tables_info),
+                        "tables": tables_info
+                    }
+            except Exception:
+                pass
+
         tables_info = []
-        for t in table_names:
+        for t in table_names[:50]:
             try:
                 c_res = execute_safe_sql(db_conn, f'SELECT COUNT(*) AS cnt FROM "{t}"', max_rows=1)
                 r_cnt = list(c_res["rows"][0].values())[0] if c_res.get("rows") else 0
             except Exception:
                 r_cnt = 0
             tables_info.append({"name": t, "rows": r_cnt})
+
+        if db_conn.status != "connected":
+            db_conn.status = "connected"
+            db.commit()
 
         stats = {
             "table_count": len(table_names),

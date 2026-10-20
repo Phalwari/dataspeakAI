@@ -36,6 +36,10 @@ def flatten_document(doc: Dict[str, Any], prefix: str = "", max_depth: int = 2) 
             # Record list length or take first scalar for inference
             if value and all(isinstance(v, (int, float, str, bool)) for v in value):
                 items[new_key] = value[0]
+            elif value and isinstance(value[0], dict) and max_depth > 0:
+                items[new_key] = f"ARRAY[{len(value)}]"
+                sub_items = flatten_document(value[0], prefix=new_key, max_depth=max_depth - 1)
+                items.update(sub_items)
             else:
                 items[new_key] = f"ARRAY[{len(value)}]"
         else:
@@ -116,7 +120,7 @@ def profile_sampled_documents(
             1 for v in values 
             if isinstance(v, (datetime.date, datetime.datetime)) or (isinstance(v, str) and is_iso_date_str(v))
         )
-        num_arrays = sum(1 for v in values if isinstance(v, str) and v.startswith("ARRAY["))
+        num_arrays = sum(1 for v in values if isinstance(v, (list, tuple)) or (isinstance(v, str) and v.startswith("ARRAY[")))
 
         val_count = len(values)
         if val_count > 0:
@@ -147,6 +151,11 @@ def profile_sampled_documents(
         is_measure = is_num and not is_id
         is_time = (inferred_raw_type == "DATETIME") or any(k in lclean for k in ("date", "time", "timestamp", "created_at", "updated_at"))
         
+        # Coordinates or bounding box / geometry heuristic
+        if any(g in lclean for g in ["coord", "coordinate", "geometry", "polygon", "lat", "lon", "lng", "location"]):
+            is_measure = False
+            is_dim = False
+
         # Penalize non-additive rate / ratio / percentage metrics from being default measures
         if any(non_additive in lclean for non_additive in ["rate", "pct", "percent", "ratio", "margin_ratio", "score", "index", "prob"]):
             is_measure = False
@@ -243,18 +252,32 @@ def profile_document_database(
     if db_type == "mongodb":
         try:
             import pymongo  # type: ignore[import-not-found, import-untyped]
-            pwd = decrypt_password(str(db_conn.password or ""))
-            host = str(db_conn.host or "localhost:27017")
-            db_name = str(db_conn.database or "test")
-            
-            if "://" in host:
-                uri = host
+            from services.crypto_service import decrypt_secret
+
+            raw_str = db_conn.connection_string or db_conn.host
+            decrypted = ""
+            if raw_str:
+                decrypted = decrypt_secret(raw_str) or decrypt_password(raw_str) or str(raw_str)
+
+            if decrypted and ("://" in decrypted or "mongodb" in decrypted):
+                uri = decrypted
             else:
+                pwd = decrypt_password(str(db_conn.password or ""))
+                host = str(db_conn.host or "localhost:27017")
+                db_name = str(db_conn.database or "test")
                 user_part = f"{db_conn.username}:{pwd}@" if db_conn.username else ""
                 uri = f"mongodb://{user_part}{host}/{db_name}"
 
-            client: Any = pymongo.MongoClient(uri, serverSelectionTimeoutMS=3000)
-            mongo_db = client[db_name]
+            client: Any = pymongo.MongoClient(uri, serverSelectionTimeoutMS=5000)
+            try:
+                mongo_db = client.get_default_database()
+            except Exception:
+                db_name = str(db_conn.database or "")
+                if not db_name:
+                    user_dbs = [d for d in client.list_database_names() if d not in ("admin", "local", "config")]
+                    db_name = user_dbs[0] if user_dbs else "test"
+                mongo_db = client[db_name]
+
             coll_names = [c for c in mongo_db.list_collection_names() if not c.startswith("system.")]
             
             for coll_name in coll_names:
