@@ -1,5 +1,6 @@
 """Offline HTML export checks for distinct unavailable and zero KPI values."""
 
+import re
 from types import SimpleNamespace
 
 from routers import insights
@@ -33,3 +34,11 @@ def test_export_shows_unavailable_as_na_and_preserves_zero(monkeypatch):
     assert '<div class="metric-value">0</div>' in content
     assert '&lt;script&gt;metric&lt;/script&gt;' in content
     assert '<script>metric</script>' not in content
+
+    csp_meta = re.search(
+        r'<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]+)"', content
+    )
+    assert csp_meta is not None
+    assert "default-src 'none'" in [
+        directive.strip() for directive in csp_meta.group(1).split(";")
+    ]
