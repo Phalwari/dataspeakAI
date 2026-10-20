@@ -17,6 +17,12 @@ To maintain seamless multi-developer and AI agent collaboration:
 
 ## [Unreleased]
 
+### Fixed
+
+- **Insights Phase D (INS-D2-01/02, INS-D3-01..07, INS-D4-01..03, INS-GEN-01):** Applied strict, bound calendar windows to generated SQL Insights queries and server-backed date presets; added response range metadata and matching prior-year comparisons. Centralized SQLite/PostgreSQL/MySQL/MariaDB SQL fragments, rejected unknown dialects, prioritized Mongo analytics, and aligned Mongo counts/charts to exact exclusive date bounds. Corrected misleading money and quantity role classification. Added temporary SQLite and offline Mongo tests; live connectors, browser rendering, and concurrent-user capacity remain unverified.
+
+### Changed
+
 - **Database Connections & Data Preview Support (`backend/services/connection_factory.py`, `backend/services/sql_engine.py`, `backend/routers/databases.py`, `src/app/pages/dashboard/DatabasesPage.tsx`, `tests/test_databases_connection_and_preview.py`, `tests/test_databases_api_e2e.py`)**:
   - **MySQL ANSI_QUOTES & Execution Timeout**: Handled `SET SESSION max_execution_time` gracefully to eliminate MySQL error 1193 on versions lacking the variable; injected `SET SESSION sql_mode = CONCAT(@@sql_mode, ',ANSI_QUOTES')` so table preview queries (`SELECT * FROM "{table_name}"`) execute seamlessly across all MySQL versions.
   - **MongoDB Driver & Introspection Support**: Added PyMongo `ping` routing in `DatabaseConnectionFactory.test_connection`, bypassing SQLAlchemy engine crashes on MongoDB strings; added `_get_mongo_client_and_db()` in `databases.py` supporting collection listing, document preview with `ObjectId` serialization, and collection statistics.
