@@ -2286,8 +2286,16 @@ class DatabasePipelineService:
                 raise LLMFailure("InvalidResponse") from None
             if (not isinstance(parsed, dict)
                     or not isinstance(parsed.get("executive_summary"), str)
+                    or not parsed["executive_summary"].strip()
+                    or not isinstance(parsed.get("business_domain"), str)
                     or not isinstance(parsed.get("strategic_insights"), list)
-                    or not isinstance(parsed.get("tactical_recommendations"), list)):
+                    or not isinstance(parsed.get("tactical_recommendations"), list)
+                    or any(not isinstance(item, dict)
+                           or any(not isinstance(item.get(field, ""), str)
+                                  for field in ("title", "finding", "impact", "category"))
+                           for item in parsed["strategic_insights"])
+                    or any(not isinstance(item, str)
+                           for item in parsed["tactical_recommendations"])):
                 raise LLMFailure("InvalidResponse")
             parsed["source"] = "llm"
             parsed.pop("llm_error", None)
@@ -2356,7 +2364,7 @@ class DatabasePipelineService:
                         })
             return anomalies
 
-        from services.llm_generation_service import LLMFailure, _configured_seconds, _classify_failure
+        from services.llm_generation_service import _configured_seconds, _classify_failure
         budget = _configured_seconds("LLM_PIPELINE_BUDGET_SECONDS", 30.0)
         deadline = time.monotonic() + budget
         executor = ThreadPoolExecutor(max_workers=2)

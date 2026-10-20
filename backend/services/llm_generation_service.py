@@ -65,6 +65,8 @@ def _configured_seconds(name: str, default: float, *, allow_zero: bool = False) 
 def _classify_failure(error: Exception) -> LLMFailure:
     if isinstance(error, LLMFailure):
         return error
+    if isinstance(error, json.JSONDecodeError):
+        return LLMFailure("InvalidResponse")
     if isinstance(error, (httpx.TimeoutException, TimeoutError, asyncio.TimeoutError)):
         return LLMFailure("Timeout", retryable=True)
     if isinstance(error, httpx.TransportError):
@@ -79,6 +81,20 @@ def _remaining(deadline: Optional[float], default: float) -> float:
     if remaining <= 0:
         raise LLMFailure("Timeout", retryable=True)
     return min(default, remaining)
+
+
+def _provider_text(response: httpx.Response, provider: str) -> str:
+    try:
+        data = response.json()
+        if provider == "gemini":
+            value = data["candidates"][0]["content"]["parts"][0]["text"]
+        else:
+            value = data["choices"][0]["message"]["content"]
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError
+        return value
+    except (ValueError, TypeError, KeyError, IndexError):
+        raise LLMFailure("InvalidResponse") from None
 
 # ── Key Harvesting & Extraction ───────────────────────────────────────────────
 
@@ -298,13 +314,7 @@ class LLMGateway:
 
                             if resp.status_code == 200:
                                 _key_cooldowns.pop(key, None)
-                                data = resp.json()
-                                candidates = data.get("candidates", [])
-                                text_out = ""
-                                if candidates and "content" in candidates[0]:
-                                    parts = candidates[0]["content"].get("parts", [])
-                                    if parts:
-                                        text_out = parts[0].get("text", "")
+                                text_out = _provider_text(resp, "gemini")
 
                                 comp_tokens_est = max(1, len(text_out) // 4)
                                 llm_metrics.record_request(
@@ -318,8 +328,6 @@ class LLMGateway:
                                     status_code=200,
                                     masked_key=masked
                                 )
-                                if not isinstance(text_out, str) or not text_out.strip():
-                                    raise LLMFailure("InvalidResponse")
                                 return text_out
 
                             elif resp.status_code in {429, 403}:
@@ -392,11 +400,7 @@ class LLMGateway:
 
                             if resp.status_code == 200:
                                 _key_cooldowns.pop(key, None)
-                                data = resp.json()
-                                choices = data.get("choices", [])
-                                text_out = ""
-                                if choices and "message" in choices[0]:
-                                    text_out = choices[0]["message"].get("content", "")
+                                text_out = _provider_text(resp, "groq")
 
                                 comp_tokens_est = max(1, len(text_out) // 4)
                                 llm_metrics.record_request(
@@ -410,8 +414,6 @@ class LLMGateway:
                                     status_code=200,
                                     masked_key=masked
                                 )
-                                if not isinstance(text_out, str) or not text_out.strip():
-                                    raise LLMFailure("InvalidResponse")
                                 return text_out
 
                             elif resp.status_code in {429, 403}:
@@ -894,9 +896,10 @@ def generate(
             )
         except Exception as error:
             failure = _classify_failure(error)
+            safe_provider = provider if provider in {"auto", "gemini", "groq", "ollama"} else "unknown"
             logger.warning(
                 "provider=%s category=%s duration_ms=%d",
-                provider, failure.category, int((time.monotonic() - started) * 1000),
+                safe_provider, failure.category, int((time.monotonic() - started) * 1000),
             )
             if attempt == 0 and failure.retryable:
                 remaining = deadline - time.monotonic()

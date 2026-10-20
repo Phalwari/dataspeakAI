@@ -180,3 +180,34 @@ def test_T8_default_generate_preserves_apology_string(monkeypatch):
     result = llm.generate("aggregate-only")
     assert isinstance(result, str)
     assert "currently unavailable" in result
+
+
+def test_malformed_provider_json_is_invalid_response_without_retry(monkeypatch):
+    calls = []
+    real_client = httpx.AsyncClient
+
+    def http_client(*_args, **_kwargs):
+        async def handler(request):
+            calls.append(request)
+            return httpx.Response(200, text="{not-json")
+
+        return real_client(transport=httpx.MockTransport(handler), timeout=0.1)
+
+    monkeypatch.setattr(llm.httpx, "AsyncClient", http_client)
+    monkeypatch.setattr(llm.llm_gateway, "_get_gemini_candidates", lambda *_args: (["fixture-key"], ["fixture-model"]))
+    monkeypatch.setattr(llm.llm_gateway, "_get_groq_candidates", lambda *_args: ([], []))
+    monkeypatch.setattr(llm, "generate_with_ollama", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("offline")))
+    with pytest.raises(llm.LLMFailure) as exc:
+        llm.generate("aggregate-only", raise_on_failure=True)
+    assert exc.value.category == "InvalidResponse"
+    assert len(calls) == 1
+
+
+def test_malformed_insight_shape_uses_invalid_response_fallback(orders_case, monkeypatch):
+    monkeypatch.setattr(llm, "generate", lambda *_args, **_kwargs: json.dumps({
+        "business_domain": "Unknown", "executive_summary": "Malformed insight",
+        "strategic_insights": ["not an object"], "tactical_recommendations": [],
+    }))
+    result = _run(orders_case)
+    assert result["executive_summary"]["source"] == "deterministic_fallback"
+    assert result["executive_summary"]["llm_error"] == "InvalidResponse"
