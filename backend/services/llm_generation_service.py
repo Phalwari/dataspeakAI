@@ -36,6 +36,50 @@ load_dotenv()
 
 logger = logging.getLogger("dataspeak.llm_generation")
 
+
+class LLMFailure(RuntimeError):
+    """A safe, categorized LLM failure; provider details stay internal."""
+
+    def __init__(self, category: str, *, retryable: bool = False):
+        if category not in {"Timeout", "Quota", "ProviderError", "InvalidResponse"}:
+            raise ValueError("Unsupported LLM failure category")
+        self.category = category
+        self.retryable = retryable
+        super().__init__(category)
+
+
+def _configured_seconds(name: str, default: float, *, allow_zero: bool = False) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+        if not (value >= 0 if allow_zero else value > 0) or not value < float("inf"):
+            raise ValueError
+        return value
+    except ValueError:
+        logger.warning("Invalid LLM setting %s; using default", name)
+        return default
+
+
+def _classify_failure(error: Exception) -> LLMFailure:
+    if isinstance(error, LLMFailure):
+        return error
+    if isinstance(error, (httpx.TimeoutException, TimeoutError, asyncio.TimeoutError)):
+        return LLMFailure("Timeout", retryable=True)
+    if isinstance(error, httpx.TransportError):
+        return LLMFailure("ProviderError", retryable=True)
+    return LLMFailure("ProviderError")
+
+
+def _remaining(deadline: Optional[float], default: float) -> float:
+    if deadline is None:
+        return default
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise LLMFailure("Timeout", retryable=True)
+    return min(default, remaining)
+
 # ── Key Harvesting & Extraction ───────────────────────────────────────────────
 
 def _extract_keys(val: Optional[str]) -> List[str]:
@@ -217,14 +261,15 @@ class LLMGateway:
         api_key: Optional[str] = None,
         user: Optional[Any] = None,
         tenant_id: Optional[int] = None,
-        purpose: str = "general"
+        purpose: str = "general",
+        deadline: Optional[float] = None,
     ) -> str:
         """
         Non-blocking async text generation with multi-key rotation and Groq failover.
         """
         start_time = time.time()
         prompt_tokens_est = max(1, len(prompt) // 4)
-        last_err: Optional[Exception] = None
+        last_err: Optional[LLMFailure] = None
 
         prov = (provider or "auto").lower()
         try_gemini_first = prov in ("gemini", "auto")
@@ -241,13 +286,14 @@ class LLMGateway:
                         continue
 
                     for m in gemini_models:
+                        request_timeout = _remaining(deadline, self.request_timeout)
                         url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={key}"
                         payload = {
                             "contents": [{"parts": [{"text": prompt}]}],
                             "generationConfig": {"temperature": temperature},
                         }
                         try:
-                            resp = await client.post(url, json=payload)
+                            resp = await client.post(url, json=payload, timeout=request_timeout)
                             latency_ms = (time.time() - start_time) * 1000
 
                             if resp.status_code == 200:
@@ -272,6 +318,8 @@ class LLMGateway:
                                     status_code=200,
                                     masked_key=masked
                                 )
+                                if not isinstance(text_out, str) or not text_out.strip():
+                                    raise LLMFailure("InvalidResponse")
                                 return text_out
 
                             elif resp.status_code in {429, 403}:
@@ -286,8 +334,8 @@ class LLMGateway:
                                     error="Quota / Rate limit exhausted",
                                     masked_key=masked
                                 )
-                                logger.warning(f"[Gemini Rate Limit] Key {masked} exhausted (HTTP {resp.status_code}). Switching to next key...")
-                                last_err = RuntimeError(f"Gemini key {masked} throttled ({resp.status_code})")
+                                logger.warning("provider=gemini category=Quota duration_ms=%d", int(latency_ms))
+                                last_err = LLMFailure("Quota")
                                 break  # Break model loop to switch key immediately
 
                             elif resp.status_code in RETRYABLE_STATUS_CODES or resp.status_code == 404:
@@ -300,17 +348,19 @@ class LLMGateway:
                                     error=f"Server status {resp.status_code}",
                                     masked_key=masked
                                 )
-                                logger.warning(f"[Gemini] {m} (key {masked}) returned {resp.status_code}, trying next model...")
-                                last_err = RuntimeError(f"Gemini {m} returned {resp.status_code}")
+                                last_err = LLMFailure("ProviderError", retryable=resp.status_code >= 500)
+                                logger.warning("provider=gemini category=%s duration_ms=%d", last_err.category, int(latency_ms))
                                 continue
 
                             else:
-                                last_err = RuntimeError(f"Gemini error {resp.status_code}: {resp.text[:200]}")
+                                last_err = LLMFailure("ProviderError")
                                 break
 
                         except Exception as ex:
-                            last_err = ex
-                            logger.warning(f"[Gemini Exception] {m} key {masked}: {ex}")
+                            last_err = _classify_failure(ex)
+                            logger.warning("provider=gemini category=%s duration_ms=%d", last_err.category, int((time.time() - start_time) * 1000))
+                            if last_err.category == "InvalidResponse":
+                                break
                             continue
 
         # ── Step 2: Attempt Groq Candidates (Failover) ────────────────────────
@@ -325,6 +375,7 @@ class LLMGateway:
                         continue
 
                     for m in groq_models:
+                        request_timeout = _remaining(deadline, self.request_timeout)
                         url = "https://api.groq.com/openai/v1/chat/completions"
                         payload = {
                             "model": m,
@@ -336,7 +387,7 @@ class LLMGateway:
                             "Content-Type": "application/json",
                         }
                         try:
-                            resp = await client.post(url, json=payload, headers=headers)
+                            resp = await client.post(url, json=payload, headers=headers, timeout=request_timeout)
                             latency_ms = (time.time() - start_time) * 1000
 
                             if resp.status_code == 200:
@@ -359,6 +410,8 @@ class LLMGateway:
                                     status_code=200,
                                     masked_key=masked
                                 )
+                                if not isinstance(text_out, str) or not text_out.strip():
+                                    raise LLMFailure("InvalidResponse")
                                 return text_out
 
                             elif resp.status_code in {429, 403}:
@@ -373,31 +426,37 @@ class LLMGateway:
                                     error="Groq Rate limit exhausted",
                                     masked_key=masked
                                 )
-                                logger.warning(f"[Groq Rate Limit] Key {masked} throttled (HTTP {resp.status_code}). Switching to next key...")
-                                last_err = RuntimeError(f"Groq key {masked} throttled ({resp.status_code})")
+                                logger.warning("provider=groq category=Quota duration_ms=%d", int(latency_ms))
+                                last_err = LLMFailure("Quota")
                                 break
 
                             elif resp.status_code in RETRYABLE_STATUS_CODES:
-                                last_err = RuntimeError(f"Groq {m} returned {resp.status_code}")
+                                last_err = LLMFailure("ProviderError", retryable=True)
                                 continue
 
                             else:
-                                last_err = RuntimeError(f"Groq error {resp.status_code}: {resp.text[:200]}")
+                                last_err = LLMFailure("ProviderError")
                                 break
 
                         except Exception as ex:
-                            last_err = ex
-                            logger.warning(f"[Groq Exception] {m} key {masked}: {ex}")
+                            last_err = _classify_failure(ex)
+                            logger.warning("provider=groq category=%s duration_ms=%d", last_err.category, int((time.time() - start_time) * 1000))
+                            if last_err.category == "InvalidResponse":
+                                break
                             continue
 
         # ── Step 3: Ollama Local Fallback (if running) ─────────────────────────
         try:
-            return generate_with_ollama(prompt, model or os.getenv("OLLAMA_MODEL", "llama3"), temperature)
-        except Exception:
-            pass
+            return generate_with_ollama(
+                prompt, model or os.getenv("OLLAMA_MODEL", "llama3"), temperature,
+                timeout=_remaining(deadline, self.request_timeout),
+            )
+        except Exception as ex:
+            if last_err is None:
+                last_err = _classify_failure(ex)
 
-        logger.error(f"[LLM Gateway] All provider keys and models exhausted. Last error: {last_err}")
-        raise last_err or RuntimeError("All LLM providers and keys exhausted")
+        logger.warning("provider=auto category=%s duration_ms=%d", (last_err or LLMFailure("ProviderError")).category, int((time.time() - start_time) * 1000))
+        raise last_err or LLMFailure("ProviderError")
 
     async def generate_stream(
         self,
@@ -496,7 +555,7 @@ class LLMGateway:
                                 elif resp.status_code in {429, 403}:
                                     _key_cooldowns[key] = time.time() + 60.0
                                     llm_metrics.record_key_cooldown(masked, "gemini", 60.0)
-                                    logger.warning(f"[Gemini Stream Quota] Key {masked} throttled ({resp.status_code}). Switching to next key...")
+                                    logger.warning("provider=gemini category=Quota duration_ms=%d", int((time.time() - start_time) * 1000))
                                     last_err = RuntimeError(f"Gemini key {masked} throttled ({resp.status_code})")
                                     break
 
@@ -506,7 +565,7 @@ class LLMGateway:
 
                         except Exception as ex:
                             last_err = ex
-                            logger.warning(f"[Gemini Stream Exception] {m} key {masked}: {ex}")
+                            logger.warning("provider=gemini category=%s duration_ms=%d", _classify_failure(ex).category, int((time.time() - start_time) * 1000))
                             continue
 
         # ── Step 2: Groq SSE Streaming (Failover) ──────────────────────────────
@@ -586,7 +645,7 @@ class LLMGateway:
                                 elif resp.status_code in {429, 403}:
                                     _key_cooldowns[key] = time.time() + 60.0
                                     llm_metrics.record_key_cooldown(masked, "groq", 60.0)
-                                    logger.warning(f"[Groq Stream Quota] Key {masked} throttled ({resp.status_code}). Switching to next key...")
+                                    logger.warning("provider=groq category=Quota duration_ms=%d", int((time.time() - start_time) * 1000))
                                     last_err = RuntimeError(f"Groq key {masked} throttled ({resp.status_code})")
                                     break
 
@@ -596,11 +655,12 @@ class LLMGateway:
 
                         except Exception as ex:
                             last_err = ex
-                            logger.warning(f"[Groq Stream Exception] {m} key {masked}: {ex}")
+                            logger.warning("provider=groq category=%s duration_ms=%d", _classify_failure(ex).category, int((time.time() - start_time) * 1000))
                             continue
 
-        logger.error(f"[LLM Gateway] All streaming providers exhausted. Last error: {last_err}")
-        raise last_err or RuntimeError("All LLM streaming providers exhausted")
+        failure = _classify_failure(last_err) if last_err else LLMFailure("ProviderError")
+        logger.error("provider=auto category=%s duration_ms=%d", failure.category, int((time.time() - start_time) * 1000))
+        raise failure
 
     def generate_sync(
         self,
@@ -611,7 +671,8 @@ class LLMGateway:
         api_key: Optional[str] = None,
         user: Optional[Any] = None,
         tenant_id: Optional[int] = None,
-        purpose: str = "general"
+        purpose: str = "general",
+        deadline: Optional[float] = None,
     ) -> str:
         """
         Synchronous bridge for existing synchronous services.
@@ -624,7 +685,8 @@ class LLMGateway:
 
         if loop and loop.is_running():
             import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            try:
                 future = pool.submit(
                     asyncio.run,
                     self.generate(
@@ -635,10 +697,13 @@ class LLMGateway:
                         api_key=api_key,
                         user=user,
                         tenant_id=tenant_id,
-                        purpose=purpose
+                        purpose=purpose,
+                        deadline=deadline,
                     )
                 )
-                return future.result()
+                return future.result(timeout=_remaining(deadline, self.request_timeout))
+            finally:
+                pool.shutdown(wait=False, cancel_futures=True)
         else:
             return asyncio.run(
                 self.generate(
@@ -649,7 +714,8 @@ class LLMGateway:
                     api_key=api_key,
                     user=user,
                     tenant_id=tenant_id,
-                    purpose=purpose
+                    purpose=purpose,
+                    deadline=deadline,
                 )
             )
 
@@ -700,6 +766,7 @@ def generate_with_ollama(
     prompt: str,
     model: str = "llama3",
     temperature: float = 0.2,
+    timeout: float = 60.0,
 ) -> str:
     """Local Ollama endpoint fallback."""
     ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
@@ -710,7 +777,7 @@ def generate_with_ollama(
         "stream": False,
         "options": {"temperature": temperature},
     }
-    response = httpx.post(url, json=payload, timeout=60.0)
+    response = httpx.post(url, json=payload, timeout=timeout)
     response.raise_for_status()
     return response.json().get("response", "")
 
@@ -722,6 +789,7 @@ def generate_multimodal_with_gemini(
     temperature: float = 0.2,
     api_key: Optional[str] = None,
     user: Optional[Any] = None,
+    deadline: Optional[float] = None,
 ) -> str:
     """Send text + Base64 PNG images to Gemini with multi-key failover."""
     active_model = model or os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
@@ -759,7 +827,7 @@ def generate_multimodal_with_gemini(
             f"{active_model}:generateContent?key={key}"
         )
         try:
-            resp = httpx.post(url, json=payload, timeout=120.0)
+            resp = httpx.post(url, json=payload, timeout=_remaining(deadline, 120.0))
             if resp.status_code == 200:
                 data = resp.json()
                 candidates = data.get("candidates", [])
@@ -779,7 +847,7 @@ def generate_multimodal_with_gemini(
                 resp.raise_for_status()
         except Exception as e:
             last_err = e
-            logger.warning(f"[Gemini Multimodal] key failover: {e}")
+            logger.warning("provider=gemini category=%s duration_ms=0", _classify_failure(e).category)
             continue
 
     raise last_err or RuntimeError("All Gemini keys failed for multimodal")
@@ -793,11 +861,14 @@ def generate(
     image_b64_list: Optional[List[str]] = None,
     api_key: Optional[str] = None,
     user: Optional[Any] = None,
+    raise_on_failure: bool = False,
 ) -> str:
     """
     Main synchronous generation facade.
     Dispatches multimodal requests or text requests through LLMGateway.
     """
+    deadline = time.monotonic() + _configured_seconds("LLM_HTTP_TIMEOUT_SECONDS", 20.0)
+    backoff = _configured_seconds("LLM_RETRY_BACKOFF_SECONDS", 1.0, allow_zero=True)
     if image_b64_list:
         try:
             return generate_multimodal_with_gemini(
@@ -807,19 +878,31 @@ def generate(
                 temperature=temperature,
                 api_key=api_key,
                 user=user,
+                deadline=deadline,
             )
-        except Exception as e:
-            logger.warning(f"[Multimodal Gemini failed] Falling back to text-only: {e}")
+        except Exception as error:
+            logger.warning("provider=gemini category=%s duration_ms=0", _classify_failure(error).category)
 
-    try:
-        return llm_gateway.generate_sync(
-            prompt=prompt,
-            provider=provider,
-            model=model,
-            temperature=temperature,
-            api_key=api_key,
-            user=user
-        )
-    except Exception as e:
-        logger.error(f"[LLM] All providers failed: {e}")
-        return "Sorry, all AI providers are currently unavailable. Please try again in a moment."
+    for attempt in range(2):
+        started = time.monotonic()
+        try:
+            _remaining(deadline, 20.0)
+            return llm_gateway.generate_sync(
+                prompt=prompt, provider=provider, model=model,
+                temperature=temperature, api_key=api_key, user=user,
+                deadline=deadline,
+            )
+        except Exception as error:
+            failure = _classify_failure(error)
+            logger.warning(
+                "provider=%s category=%s duration_ms=%d",
+                provider, failure.category, int((time.monotonic() - started) * 1000),
+            )
+            if attempt == 0 and failure.retryable:
+                remaining = deadline - time.monotonic()
+                if remaining > backoff:
+                    time.sleep(backoff)
+                    continue
+            if raise_on_failure:
+                raise failure from None
+            return "Sorry, all AI providers are currently unavailable. Please try again in a moment."

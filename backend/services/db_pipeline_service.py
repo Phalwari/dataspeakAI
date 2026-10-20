@@ -16,7 +16,8 @@ import math
 import re
 import datetime
 import logging
-from concurrent.futures import ThreadPoolExecutor
+import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
 from sqlalchemy import func
@@ -38,7 +39,7 @@ from services.sql_dialect import (
 )
 
 logger = logging.getLogger(__name__)
-INSIGHTS_CACHE_VERSION = 3
+INSIGHTS_CACHE_VERSION = 4
 
 
 def _normalize_date_range(
@@ -2273,39 +2274,62 @@ class DatabasePipelineService:
             strategic_insights, and tactical_recommendations. Use empty lists
             when the numeric aggregates do not support an insight or recommendation.
             """
+            from services.llm_generation_service import LLMFailure, generate
+            res_text = generate(prompt, provider="auto", raise_on_failure=True).strip()
+            if res_text.startswith("```json"):
+                res_text = res_text[7:-3].strip()
+            elif res_text.startswith("```"):
+                res_text = res_text[3:-3].strip()
             try:
-                from services.llm_generation_service import generate
-                res_text = generate(prompt, provider="auto").strip()
-                if res_text.startswith("```json"):
-                    res_text = res_text[7:-3].strip()
-                elif res_text.startswith("```"):
-                    res_text = res_text[3:-3].strip()
-                return json.loads(res_text)
-            except Exception:
-                logger.exception("AI synthesis failed; returning a computed-data fallback")
-                metrics = {item.get("id"): item.get("raw_value") for item in computed_kpis}
-                gross_revenue = metrics.get("total_revenue")
-                record_count = metrics.get("total_orders")
-                if isinstance(gross_revenue, (int, float)) and isinstance(record_count, (int, float)):
-                    summary = (
-                        f"Computed gross revenue is ${gross_revenue:,.2f} across "
-                        f"{int(record_count):,} records."
-                    )
-                    findings = [{
-                        "title": "Computed gross revenue",
-                        "finding": summary,
-                        "impact": "Medium",
-                        "category": "Revenue",
-                    }]
-                else:
-                    summary = "Insufficient data to generate a reliable business summary."
-                    findings = []
-                return {
-                    "business_domain": "Business operations",
-                    "executive_summary": summary,
-                    "strategic_insights": findings,
-                    "tactical_recommendations": [],
-                }
+                parsed = json.loads(res_text)
+            except (ValueError, TypeError):
+                raise LLMFailure("InvalidResponse") from None
+            if (not isinstance(parsed, dict)
+                    or not isinstance(parsed.get("executive_summary"), str)
+                    or not isinstance(parsed.get("strategic_insights"), list)
+                    or not isinstance(parsed.get("tactical_recommendations"), list)):
+                raise LLMFailure("InvalidResponse")
+            parsed["source"] = "llm"
+            parsed.pop("llm_error", None)
+            return parsed
+
+        def computed_fallback(category: str) -> Dict[str, Any]:
+            metrics = {item.get("id"): item for item in computed_kpis}
+            money_metric = metrics.get("total_revenue")
+            if money_metric is None:
+                money_metric = next((item for item in computed_kpis
+                    if str(item.get("id", "")).endswith("_sum")
+                    and item.get("format") == "currency"), None)
+            count_metric = metrics.get("total_orders")
+            if count_metric is None:
+                count_metric = next((item for item in computed_kpis
+                    if str(item.get("id", "")).endswith("_total_rows")), None)
+            monetary_sum = money_metric.get("raw_value") if money_metric else None
+            record_count = count_metric.get("raw_value") if count_metric else None
+            if (isinstance(monetary_sum, (int, float)) and not isinstance(monetary_sum, bool)
+                    and isinstance(record_count, (int, float)) and not isinstance(record_count, bool)
+                    and money_metric.get("status") in {"available", "zero"}
+                    and count_metric.get("status") in {"available", "zero"}):
+                monetary_label = "gross revenue" if money_metric.get("id") == "total_revenue" else "monetary sum"
+                summary = (
+                    f"Computed {monetary_label} is ${monetary_sum:,.2f} across "
+                    f"{int(record_count):,} records."
+                )
+                findings = [{
+                    "title": "Computed monetary aggregate", "finding": summary,
+                    "impact": "Medium", "category": "Aggregate",
+                }]
+            else:
+                summary = "Insufficient data to generate a reliable business summary."
+                findings = []
+            return {
+                "business_domain": "Unknown",
+                "executive_summary": summary,
+                "strategic_insights": findings,
+                "tactical_recommendations": [],
+                "source": "deterministic_fallback",
+                "llm_error": category,
+            }
 
         def run_anomaly_detection() -> List[Dict[str, Any]]:
             anomalies: List[Dict[str, Any]] = []
@@ -2332,11 +2356,29 @@ class DatabasePipelineService:
                         })
             return anomalies
 
-        with ThreadPoolExecutor(max_workers=2) as executor:
+        from services.llm_generation_service import LLMFailure, _configured_seconds, _classify_failure
+        budget = _configured_seconds("LLM_PIPELINE_BUDGET_SECONDS", 30.0)
+        deadline = time.monotonic() + budget
+        executor = ThreadPoolExecutor(max_workers=2)
+        try:
             future_ai = executor.submit(run_ai_synthesis)
             future_anom = executor.submit(run_anomaly_detection)
-            ai_summary = future_ai.result()
-            detected_anomalies = future_anom.result()
+            try:
+                ai_summary = future_ai.result(timeout=max(0, deadline - time.monotonic()))
+            except FutureTimeout:
+                logger.warning("provider=auto category=Timeout duration_ms=%d", int(budget * 1000))
+                ai_summary = computed_fallback("Timeout")
+            except Exception as error:
+                failure = _classify_failure(error)
+                logger.warning("provider=auto category=%s duration_ms=0", failure.category)
+                ai_summary = computed_fallback(failure.category)
+            try:
+                detected_anomalies = future_anom.result(timeout=max(0, deadline - time.monotonic()))
+            except FutureTimeout:
+                logger.warning("Anomaly detection exceeded pipeline budget")
+                detected_anomalies = []
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
         # Final Dashboard Plan
         final_layout = compose_dashboard_layout(
