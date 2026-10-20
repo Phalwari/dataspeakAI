@@ -19,6 +19,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 import models
 from services.database_connection_service import db_connection_service, DatabaseConnectionService
@@ -109,10 +110,10 @@ def _with_date_predicate(query: str, table: str, column: str, bindings: Dict[str
 
 def _cache_key(
     tenant_id: Optional[int], connection_id: Any, selected_table: Optional[str],
-    date_from: Optional[str], date_to: Optional[str],
+    date_from: Optional[str], date_to: Optional[str], cache_version: int = 0,
 ) -> str:
     return make_cache_key(
-        f"db_insights_v{INSIGHTS_CACHE_VERSION}", str(tenant_id), str(connection_id),
+        "db_insights", str(tenant_id), str(connection_id), f"v{cache_version}",
         selected_table or "all", date_from or "none", date_to or "none",
     )
 
@@ -318,15 +319,44 @@ class DatabasePipelineService:
     def __init__(self):
         pass
 
-    def invalidate_connection_cache(self, db: Session, connection_id: Any) -> None:
-        connection = db.query(models.DatabaseConnection).filter(
-            models.DatabaseConnection.id == connection_id
-        ).first()
-        if connection:
-            connection.insights_cache = None
-            connection.insights_cached_at = None
-            db.commit()
-        # TODO: Delete matching Redis L1 keys for this connection and tenant.
+    def invalidate_connection_cache(
+        self, db: Session, tenant_id: int, connection_id: Any,
+    ) -> int:
+        """Atomically advance one owned connection's cache generation and clear DB L2."""
+        if tenant_id is None:
+            raise ValueError("Tenant ID is required for cache invalidation")
+
+        updated = (
+            db.query(models.DatabaseConnection)
+            .filter(
+                models.DatabaseConnection.id == connection_id,
+                models.DatabaseConnection.tenant_id == tenant_id,
+            )
+            .update(
+                {
+                    models.DatabaseConnection.insights_cache_version: (
+                        func.coalesce(models.DatabaseConnection.insights_cache_version, 0) + 1
+                    ),
+                    models.DatabaseConnection.insights_cache: None,
+                    models.DatabaseConnection.insights_cached_at: None,
+                },
+                synchronize_session=False,
+            )
+        )
+        if updated != 1:
+            db.rollback()
+            raise ValueError("Database connection not found or unauthorized")
+
+        cache_version = (
+            db.query(models.DatabaseConnection.insights_cache_version)
+            .filter(
+                models.DatabaseConnection.id == connection_id,
+                models.DatabaseConnection.tenant_id == tenant_id,
+            )
+            .scalar()
+        )
+        db.commit()
+        return int(cache_version or 0)
 
     def run_db_pipeline(
         self,
@@ -359,11 +389,22 @@ class DatabasePipelineService:
         if not db_conn:
             raise ValueError(f"Database connection {connection_id} not found or unauthorized.")
 
+        cache_version = int(getattr(db_conn, "insights_cache_version", 0) or 0)
+        if force_refresh:
+            cache_version = self.invalidate_connection_cache(db, tenant_id, connection_id)
+            db_conn = query.first()
+
         # 2. Check Cache if not force_refresh
-        cache_key = _cache_key(tenant_id, connection_id, selected_table, date_from, date_to)
+        cache_key = _cache_key(
+            tenant_id, connection_id, selected_table, date_from, date_to, cache_version,
+        )
         if not force_refresh:
             cached_data = cache_get(cache_key)
-            if cached_data:
+            if (
+                isinstance(cached_data, dict)
+                and cached_data.get("insights_version") == INSIGHTS_CACHE_VERSION
+                and cached_data.get("connection_cache_version") == cache_version
+            ):
                 cached_data["cached"] = True
                 cached_data["cache_source"] = "redis_l1"
                 return cached_data
@@ -383,7 +424,11 @@ class DatabasePipelineService:
                             res = json.loads(res)
                         except Exception:
                             pass
-                    if isinstance(res, dict) and res.get("insights_version") == INSIGHTS_CACHE_VERSION:
+                    if (
+                        isinstance(res, dict)
+                        and res.get("insights_version") == INSIGHTS_CACHE_VERSION
+                        and res.get("connection_cache_version") == cache_version
+                    ):
                         res["cached"] = True
                         res["cache_source"] = "db_l2"
                         cache_set(cache_key, res, ttl_seconds=86400)
@@ -2305,6 +2350,7 @@ class DatabasePipelineService:
 
         response_payload = {
             "insights_version": INSIGHTS_CACHE_VERSION,
+            "connection_cache_version": cache_version,
             "success": True,
             "status": "success",
             "connection_id": connection_id,
@@ -2357,9 +2403,29 @@ class DatabasePipelineService:
             clean_payload = json.loads(json.dumps(response_payload, default=str))
             cache_set(cache_key, clean_payload, ttl_seconds=86400)
             if not selected_table and not date_from and not date_to:
-                db_conn.insights_cache = clean_payload
-                db_conn.insights_cached_at = datetime.datetime.now(datetime.timezone.utc)
-                db.commit()
+                updated = (
+                    db.query(models.DatabaseConnection)
+                    .filter(
+                        models.DatabaseConnection.id == connection_id,
+                        models.DatabaseConnection.tenant_id == tenant_id,
+                        models.DatabaseConnection.insights_cache_version == cache_version,
+                    )
+                    .update(
+                        {
+                            models.DatabaseConnection.insights_cache: clean_payload,
+                            models.DatabaseConnection.insights_cached_at: datetime.datetime.now(datetime.timezone.utc),
+                        },
+                        synchronize_session=False,
+                    )
+                )
+                if updated == 1:
+                    db.commit()
+                else:
+                    db.rollback()
+                    logger.info(
+                        "Skipped stale database insights L2 write for connection %s",
+                        connection_id,
+                    )
         except Exception as e:
             logger.exception("Database insights cache write failed")
 
@@ -2386,22 +2452,28 @@ class DatabasePipelineService:
 
         date_from, date_to, _ = _normalize_date_range(date_from, date_to)
 
-        cache_key = _cache_key(tenant_id, connection_id, selected_table, date_from, date_to)
         query = db.query(models.DatabaseConnection).filter(
             models.DatabaseConnection.id == connection_id
         )
         query = query.filter(models.DatabaseConnection.tenant_id == tenant_id)
-        if not query.first():
+        db_conn = query.first()
+        if not db_conn:
             raise ValueError("Database connection not found or unauthorized")
+        cache_version = int(getattr(db_conn, "insights_cache_version", 0) or 0)
+        cache_key = _cache_key(
+            tenant_id, connection_id, selected_table, date_from, date_to, cache_version,
+        )
         if not force_refresh:
             cached_data = cache_get(cache_key)
-            if cached_data:
+            if (
+                isinstance(cached_data, dict)
+                and cached_data.get("insights_version") == INSIGHTS_CACHE_VERSION
+                and cached_data.get("connection_cache_version") == cache_version
+            ):
                 cached_data["cached"] = True
                 cached_data["cache_source"] = "redis_l1"
                 yield {"type": "result", "data": cached_data, "cached": True}
                 return
-
-            db_conn = query.first()
 
             if db_conn and db_conn.insights_cache and db_conn.insights_cached_at:
                 cached_at = db_conn.insights_cached_at
@@ -2417,7 +2489,11 @@ class DatabasePipelineService:
                             res = json.loads(res)
                         except Exception:
                             pass
-                    if isinstance(res, dict) and res.get("insights_version") == INSIGHTS_CACHE_VERSION:
+                    if (
+                        isinstance(res, dict)
+                        and res.get("insights_version") == INSIGHTS_CACHE_VERSION
+                        and res.get("connection_cache_version") == cache_version
+                    ):
                         res["cached"] = True
                         res["cache_source"] = "db_l2"
                         cache_set(cache_key, res, ttl_seconds=86400)

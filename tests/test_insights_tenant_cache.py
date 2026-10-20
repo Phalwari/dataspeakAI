@@ -56,7 +56,13 @@ def test_tenant_a_cached_result_is_not_read_by_tenant_b(monkeypatch, stream):
     tenant_b_key = pipeline_module._cache_key(12, 7, None, None, None)
     assert tenant_a_key != tenant_b_key
 
-    cached = {tenant_a_key: {"marker": "tenant A result"}}
+    cached = {
+        tenant_a_key: {
+            "insights_version": pipeline_module.INSIGHTS_CACHE_VERSION,
+            "connection_cache_version": 0,
+            "marker": "tenant A result",
+        }
+    }
     lookups = []
 
     def fake_cache_get(key):

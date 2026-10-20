@@ -57,3 +57,13 @@ The export HTML meta policy (`backend/routers/insights.py:487`) is `default-src 
 ## Verification boundary
 
 The Insights checks run offline with mocked external services and temporary local SQLite databases. The pooled SQLite query-failure regression runs a real SQLAlchemy engine; its fallback service is mocked. Live MySQL/MariaDB/PostgreSQL/MongoDB, browser rendering and CSP enforcement, signed HTTP authentication, concurrent-user capacity, and a live LLM call are **not verified by execution**.
+
+## INS-E1: Cache backend and deployment boundary
+
+Connection-level cache generations make old L1 keys unreachable after an owned refresh and clear the database L2 payload atomically with the version increment. `services/redis_service.py` currently stores L1 entries in a process-local in-memory dictionary; despite the module name, it does not use a shared Redis client. Cache hits and versioned misses can therefore be verified within one process only. Multi-worker cache sharing, cross-process eviction, and distributed refresh behavior remain **not verified by execution** and require a real shared cache backend before production scale claims.
+
+`POST /api/insights/refresh` advances the pipeline cache generation only when an explicit owned `database_id` is supplied. A tenant-wide call without `database_id` continues to refresh the legacy generated-insights engine and does not enumerate or invalidate every connection cache.
+
+The E1 regression tests were authored after the implementation was present in the working tree, so there is no pre-implementation failing run for the new test file. The first wider-suite run did catch an older cache fixture that lacked generation metadata; updating that fixture preserved the production fail-closed validation.
+
+Cache payloads created before E1 do not contain `connection_cache_version`. L1 and L2 reads deliberately reject those legacy payloads, causing a one-time cache miss and recomputation instead of trusting data from an unknown generation.

@@ -44,6 +44,7 @@ MIGRATION_COLUMNS = [
     ("database_connections", "tables_metadata", "JSON", "JSONB"),
     ("database_connections", "insights_cache", "JSON", "JSONB"),
     ("database_connections", "insights_cached_at", "DATETIME", "TIMESTAMP"),
+    ("database_connections", "insights_cache_version", "INTEGER NOT NULL DEFAULT 0", "INTEGER NOT NULL DEFAULT 0"),
     ("database_connections", "description", "VARCHAR", "VARCHAR(500)"),
     # Tenant subscription plan column
     ("tenants", "plan", "VARCHAR DEFAULT 'Starter'", "VARCHAR(50) DEFAULT 'Starter'"),

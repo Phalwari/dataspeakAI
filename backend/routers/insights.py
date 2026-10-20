@@ -212,6 +212,14 @@ def refresh_ai_insights(
         ).first()
         if not db_conn:
             raise HTTPException(status_code=404, detail="Database connection not found.")
+        db_pipeline_service.invalidate_connection_cache(
+            db=db,
+            tenant_id=current_user.tenant_id,
+            connection_id=database_id,
+        )
+
+    # A tenant-wide refresh continues to refresh legacy generated insights only.
+    # Connection cache generations require an explicit owned database_id.
 
     refreshed = insights_engine.refresh_tenant_insights(
         tenant_id=current_user.tenant_id,
