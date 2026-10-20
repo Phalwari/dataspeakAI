@@ -3,16 +3,20 @@
 import json
 import sqlite3
 import datetime
+from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
-from sqlalchemy import create_engine, event
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import URL
 
 import models
+from database import get_db
+from dependencies import get_current_user
 from services import db_pipeline_service as pipeline
 from services import db_pool, db_utils
-from routers.insights import _validated_dates
+from routers.insights import _validated_dates, router as insights_router
 
 
 @pytest.fixture
@@ -177,3 +181,99 @@ def test_router_maps_invalid_calendar_input_to_400():
     with pytest.raises(HTTPException) as error:
         _validated_dates("2026-02-30", None)
     assert error.value.status_code == 400
+
+
+def test_sply_leap_day_uses_previous_february_28(orders_case):
+    _, _, engine, _ = orders_case
+    with engine.begin() as connection:
+        connection.execute(
+            text("INSERT INTO orders VALUES (:id, :customer_ref, :amount, :created_on, :state)"),
+            [
+                {"id": 10, "customer_ref": "sample-a", "amount": 40.0,
+                 "created_on": "2023-02-28", "state": "paid"},
+                {"id": 11, "customer_ref": "sample-b", "amount": 50.0,
+                 "created_on": "2024-02-29", "state": "paid"},
+            ],
+        )
+    statements = []
+    event.listen(
+        engine, "before_cursor_execute",
+        lambda _connection, _cursor, statement, parameters, _context, _many:
+            statements.append((statement, parameters)),
+    )
+
+    result = _run(orders_case, date_from="2024-02-29", date_to="2024-02-29")
+    metrics = {item["id"]: item for item in result["key_metrics"]}
+
+    assert metrics["total_revenue"]["trend_text"] == "SPLY (+25.0%)"
+    assert any(
+        "2024-02-29" in parameters and "2024-03-01" in parameters
+        and "2023-02-28" in parameters and "2023-03-01" in parameters
+        for statement, parameters in statements if "curr_val" in statement and "prev_val" in statement
+    )
+
+
+def test_sply_year_boundary_uses_matching_previous_window(orders_case):
+    _, _, engine, _ = orders_case
+    with engine.begin() as connection:
+        connection.execute(
+            text("INSERT INTO orders VALUES (:id, :customer_ref, :amount, :created_on, :state)"),
+            [
+                {"id": 20, "customer_ref": "sample-a", "amount": 20.0,
+                 "created_on": "2024-01-01", "state": "paid"},
+                {"id": 21, "customer_ref": "sample-b", "amount": 20.0,
+                 "created_on": "2024-01-02", "state": "paid"},
+                {"id": 22, "customer_ref": "sample-c", "amount": 20.0,
+                 "created_on": "2025-01-02", "state": "paid"},
+            ],
+        )
+    statements = []
+    event.listen(
+        engine, "before_cursor_execute",
+        lambda _connection, _cursor, statement, parameters, _context, _many:
+            statements.append((statement, parameters)),
+    )
+
+    result = _run(orders_case, date_from="2025-01-01", date_to="2025-01-02")
+    metrics = {item["id"]: item for item in result["key_metrics"]}
+
+    assert metrics["total_revenue"]["trend_text"] == "SPLY (+50.0%)"
+    assert any(
+        "2025-01-01" in parameters and "2025-01-03" in parameters
+        and "2024-01-01" in parameters and "2024-01-03" in parameters
+        for statement, parameters in statements if "curr_val" in statement and "prev_val" in statement
+    )
+
+
+def test_filtered_request_rejects_existing_db_l2_payload(orders_case):
+    db, connection, _, _ = orders_case
+    connection.insights_cache = {
+        "success": True,
+        "insights_version": pipeline.INSIGHTS_CACHE_VERSION,
+        "applied_date_from": "2026-01-03",
+        "applied_date_to": "2026-01-03",
+        "key_metrics": [{"id": "stale"}],
+    }
+    connection.insights_cached_at = datetime.datetime.now(datetime.timezone.utc)
+    db.flush()
+
+    result = _run(orders_case, date_from="2026-01-01", date_to="2026-01-02")
+    metrics = {item["id"]: item for item in result["key_metrics"]}
+
+    assert "stale" not in metrics
+    assert metrics["total_revenue"]["raw_value"] == 30.0
+    assert result["applied_date_from"] == "2026-01-01"
+    assert result.get("cache_source") != "db_l2"
+
+
+def test_invalid_date_returns_http_400_without_querying_database():
+    app = FastAPI()
+    app.include_router(insights_router)
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(tenant_id=1)
+    app.dependency_overrides[get_db] = lambda: object()
+
+    with TestClient(app) as client:
+        response = client.get("/api/insights/generate/1", params={"date_from": "2025-13-01"})
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Invalid date filter"}
