@@ -59,21 +59,33 @@ def classify_status(value: Any) -> str:
 
 
 def _llm_safe_points(kpis: List[Dict[str, Any]], charts: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Keep only numeric aggregates; category labels can contain customer names."""
+    """Keep only numeric aggregates and fixed chart categories in LLM input."""
     safe_kpis = []
     for item in kpis:
         value = item.get("raw_value")
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            safe_kpis.append({"metric": item.get("id", "metric"), "value": value})
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and (
+            not isinstance(value, float) or math.isfinite(value)
+        ):
+            safe_kpis.append(value)
     safe_charts = []
     for chart in charts:
         values = []
         for point in chart.get("data", []):
             value = point.get("value", point.get("val")) if isinstance(point, dict) else None
-            if isinstance(value, (int, float)) and not isinstance(value, bool):
+            if isinstance(value, (int, float)) and not isinstance(value, bool) and (
+                not isinstance(value, float) or math.isfinite(value)
+            ):
                 values.append(value)
         if values:
-            safe_charts.append({"metric": chart.get("id", "chart"), "values": values[:3]})
+            chart_type = chart.get("type")
+            chart_category = {
+                "area": "time_series",
+                "line": "time_series",
+                "bar": "category_aggregate",
+                "donut": "category_aggregate",
+                "pie": "category_aggregate",
+            }.get(chart_type, "aggregate") if isinstance(chart_type, str) else "aggregate"
+            safe_charts.append({"category": chart_category, "values": values[:3]})
     return {"metrics": safe_kpis, "chart_aggregates": safe_charts}
 
 
