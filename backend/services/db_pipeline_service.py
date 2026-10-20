@@ -31,7 +31,7 @@ from services.metric_recipes import (
 )
 from services.dashboard_composer import compose_dashboard_layout, DashboardLayoutPlan
 from services.redis_service import cache_get, cache_set, make_cache_key
-from services.sql_dialect import month_bucket
+from services.sql_dialect import concat, month_bucket
 
 logger = logging.getLogger(__name__)
 
@@ -1393,7 +1393,10 @@ class DatabasePipelineService:
                     cu_cols = table_profiles.get(customer_table, {}).get("columns", {})
                     name_expr = None
                     if "first_name" in cu_cols and "last_name" in cu_cols:
-                        name_expr = f"TRIM({q_cu}.first_name || ' ' || {q_cu}.last_name)"
+                        name_expr = "TRIM(" + concat(
+                            [f"{q_cu}.first_name", "' '", f"{q_cu}.last_name"],
+                            db_conn.db_type,
+                        ) + ")"
                     elif "name" in cu_cols:
                         name_expr = f"{q_cu}.name"
                     elif any("contactname" in c.lower() for c in cu_cols):
