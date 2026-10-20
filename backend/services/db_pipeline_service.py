@@ -728,13 +728,14 @@ class DatabasePipelineService:
 
         is_federated_mode = not selected_table or selected_table == "" or selected_table == "All Tables"
         is_mongodb = str(db_conn.db_type).lower() == "mongodb"
+        analysis_mode = "mongodb" if is_mongodb else (
+            "federated" if is_federated_mode and fact_table else "single"
+        )
 
         def round_aggregate(function: str, expression: str) -> str:
             return round_money(f"{function}({expression})", db_conn.db_type)
 
-        if is_mongodb:
-            logger.debug("MongoDB pipeline selected before relational federation")
-        if not is_mongodb and is_federated_mode and fact_table:
+        if analysis_mode == "federated":
             # -------------------------------------------------------------
             # MULTI-TABLE RELATIONAL FEDERATION MODE (ENTERPRISE BI)
             # -------------------------------------------------------------
@@ -1577,7 +1578,7 @@ class DatabasePipelineService:
                     "options": []
                 })
 
-        elif is_mongodb:
+        elif analysis_mode == "mongodb":
             # -------------------------------------------------------------
             # MONGODB NATIVE AGGREGATION & ANALYTICS PIPELINE
             # -------------------------------------------------------------
