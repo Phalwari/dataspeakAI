@@ -31,7 +31,7 @@ from services.metric_recipes import (
 )
 from services.dashboard_composer import compose_dashboard_layout, DashboardLayoutPlan
 from services.redis_service import cache_get, cache_set, make_cache_key
-from services.sql_dialect import concat, month_bucket
+from services.sql_dialect import cast_text, concat, month_bucket
 
 logger = logging.getLogger(__name__)
 
@@ -1405,7 +1405,7 @@ class DatabasePipelineService:
 
                     if name_expr and money_expr:
                         cust_spend_query = f"""
-                            SELECT CAST({q_fact}.{q_cid} AS TEXT) as name, ROUND(SUM({money_expr}), 2) as value
+                            SELECT {cast_text(f'{q_fact}.{q_cid}', db_conn.db_type)} as name, ROUND(SUM({money_expr}), 2) as value
                             FROM {q_fact}
                             JOIN {q_cu} ON {q_fact}.{q_cid} = {q_cu}.{q_cid}
                             WHERE {q_fact}.{q_cid} IS NOT NULL
@@ -1419,7 +1419,7 @@ class DatabasePipelineService:
                         q_jf = _clean_sql_identifier(join_col[0], db_conn.db_type)
                         q_jl = _clean_sql_identifier(join_col[1], db_conn.db_type)
                         cust_spend_query = f"""
-                            SELECT CAST({q_fact}.{q_cid} AS TEXT) as name, ROUND(SUM({line_money_expr}), 2) as value
+                            SELECT {cast_text(f'{q_fact}.{q_cid}', db_conn.db_type)} as name, ROUND(SUM({line_money_expr}), 2) as value
                             FROM {q_fact}
                             JOIN {q_line} ON {q_fact}.{q_jf} = {q_line}.{q_jl}
                             WHERE {q_fact}.{q_cid} IS NOT NULL
@@ -1429,7 +1429,7 @@ class DatabasePipelineService:
                         """
                     elif money_expr:
                         cust_spend_query = f"""
-                            SELECT CAST({q_cid} AS TEXT) as name, ROUND(SUM({money_expr}), 2) as value
+                            SELECT {cast_text(q_cid, db_conn.db_type)} as name, ROUND(SUM({money_expr}), 2) as value
                             FROM {q_fact}
                             WHERE {q_cid} IS NOT NULL
                             GROUP BY {q_cid}
@@ -1438,7 +1438,7 @@ class DatabasePipelineService:
                         """
                     else:
                         cust_spend_query = f"""
-                            SELECT CAST({q_cid} AS TEXT) as name, COUNT(*) as value
+                            SELECT {cast_text(q_cid, db_conn.db_type)} as name, COUNT(*) as value
                             FROM {q_fact}
                             WHERE {q_cid} IS NOT NULL
                             GROUP BY {q_cid}
