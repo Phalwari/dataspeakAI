@@ -31,6 +31,7 @@ from services.metric_recipes import (
 )
 from services.dashboard_composer import compose_dashboard_layout, DashboardLayoutPlan
 from services.redis_service import cache_get, cache_set, make_cache_key
+from services.sql_dialect import month_bucket
 
 logger = logging.getLogger(__name__)
 
@@ -724,11 +725,6 @@ class DatabasePipelineService:
         is_federated_mode = not selected_table or selected_table == "" or selected_table == "All Tables"
         is_mongodb = str(db_conn.db_type).lower() == "mongodb"
 
-        # Check for SQLite date formatting
-        date_trunc_fmt = "strftime('%Y-%m', {col})" if db_conn.db_type.lower() == "sqlite" else (
-            "to_char({col}, 'YYYY-MM')" if db_conn.db_type.lower() == "postgresql" else "DATE_FORMAT({col}, '%Y-%m')"
-        )
-
         if is_mongodb:
             logger.debug("MongoDB pipeline selected before relational federation")
         if not is_mongodb and is_federated_mode and fact_table:
@@ -1241,7 +1237,7 @@ class DatabasePipelineService:
                 if join_col and line_money_expr and not has_genuine_fact_revenue:
                     q_jf = _clean_sql_identifier(join_col[0], db_conn.db_type)
                     q_jl = _clean_sql_identifier(join_col[1], db_conn.db_type)
-                    month_expr = date_trunc_fmt.format(col=f"{q_fact}.{q_date}")
+                    month_expr = month_bucket(f"{q_fact}.{q_date}", db_conn.db_type)
                     monthly_query = f"""
                         SELECT {month_expr} as period, ROUND(SUM({line_money_expr}), 2) as value 
                         FROM {q_fact} 
@@ -1251,7 +1247,7 @@ class DatabasePipelineService:
                         ORDER BY period ASC
                     """
                 elif money_expr:
-                    month_expr = date_trunc_fmt.format(col=q_date)
+                    month_expr = month_bucket(q_date, db_conn.db_type)
                     monthly_query = f"""
                         SELECT {month_expr} as period, ROUND(SUM({money_expr}), 2) as value 
                         FROM {q_fact} 
@@ -1260,7 +1256,7 @@ class DatabasePipelineService:
                         ORDER BY period ASC
                     """
                 else:
-                    month_expr = date_trunc_fmt.format(col=q_date)
+                    month_expr = month_bucket(q_date, db_conn.db_type)
                     monthly_query = f"""
                         SELECT {month_expr} as period, COUNT(*) as value 
                         FROM {q_fact} 
@@ -2049,7 +2045,7 @@ class DatabasePipelineService:
                 m_expr = f"ROUND(SUM({_clean_sql_identifier(m_col, db_conn.db_type)}), 2)" if m_col else "COUNT(*)"
                 
                 t_query = f"""
-                    SELECT {date_trunc_fmt.format(col=q_t)} as period, {m_expr} as value 
+                    SELECT {month_bucket(q_t, db_conn.db_type)} as period, {m_expr} as value
                     FROM {q_tbl} 
                     WHERE {q_t} IS NOT NULL 
                     GROUP BY period 
