@@ -35,12 +35,79 @@ from services.redis_service import cache_get, cache_set, make_cache_key
 logger = logging.getLogger(__name__)
 
 
+def _normalize_date_range(
+    date_from: Optional[str], date_to: Optional[str],
+) -> Tuple[Optional[str], Optional[str], Dict[str, str]]:
+    """Validate calendar dates and return an exclusive SQL upper bound."""
+    parsed: Dict[str, datetime.date] = {}
+    for name, value in (("date_from", date_from), ("date_to", date_to)):
+        if value is None or value == "":
+            continue
+        if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+            raise ValueError("Invalid date filter; expected YYYY-MM-DD")
+        try:
+            parsed[name] = datetime.date.fromisoformat(value)
+        except ValueError:
+            raise ValueError("Invalid date filter; expected YYYY-MM-DD") from None
+    if parsed.get("date_from") and parsed.get("date_to") and parsed["date_from"] > parsed["date_to"]:
+        raise ValueError("Invalid date filter; start must not exceed end")
+    bindings: Dict[str, str] = {}
+    if "date_from" in parsed:
+        bindings["date_from"] = parsed["date_from"].isoformat()
+    if "date_to" in parsed:
+        try:
+            bindings["date_to_excl"] = (parsed["date_to"] + datetime.timedelta(days=1)).isoformat()
+        except OverflowError:
+            raise ValueError("Invalid date filter; end date is out of range") from None
+    return (
+        parsed["date_from"].isoformat() if "date_from" in parsed else None,
+        parsed["date_to"].isoformat() if "date_to" in parsed else None,
+        bindings,
+    )
+
+
+def _pick_date_column(columns: List[str]) -> Optional[str]:
+    """Use a transaction date when named; reject ambiguous date roles."""
+    priorities = (
+        "transaction_date", "order_date", "invoice_date", "sale_date",
+        "payment_date", "created_at", "created_on", "date",
+    )
+    by_name = {column.casefold(): column for column in columns}
+    for candidate in priorities:
+        if candidate in by_name:
+            return by_name[candidate]
+    return columns[0] if len(columns) == 1 else None
+
+
+def _with_date_predicate(query: str, table: str, column: str, bindings: Dict[str, str]) -> Optional[str]:
+    """Scope a generated flat SELECT to its fact table, or reject that shape."""
+    if not re.search(r"\b(?:FROM|JOIN)\s+" + re.escape(table) + r"(?![\w])", query, re.IGNORECASE):
+        return None
+    clauses = []
+    if "date_from" in bindings:
+        clauses.append(f"{table}.{column} >= :date_from")
+    if "date_to_excl" in bindings:
+        clauses.append(f"{table}.{column} < :date_to_excl")
+    if not clauses:
+        return query
+    boundary = re.search(r"\b(GROUP\s+BY|ORDER\s+BY|HAVING|LIMIT)\b", query, re.IGNORECASE)
+    insert_at = boundary.start() if boundary else len(query)
+    head, tail = query[:insert_at].rstrip(), query[insert_at:]
+    where_match = re.search(r"\bWHERE\b", head, re.IGNORECASE)
+    predicate = " AND ".join(clauses)
+    if where_match:
+        prefix = head[:where_match.end()]
+        condition = head[where_match.end():].strip()
+        return f"{prefix} ({condition}) AND {predicate} {tail}"
+    return f"{head} WHERE {predicate} {tail}"
+
+
 def _cache_key(
     tenant_id: Optional[int], connection_id: Any, selected_table: Optional[str],
     date_from: Optional[str], date_to: Optional[str],
 ) -> str:
     return make_cache_key(
-        "db_insights", str(tenant_id), str(connection_id),
+        "db_insights_d2", str(tenant_id), str(connection_id),
         selected_table or "all", date_from or "none", date_to or "none",
     )
 
@@ -210,7 +277,7 @@ def is_date_column(col_name: str, col_type: str = "") -> bool:
     if any(k in t_str for k in ["date", "time", "timestamp"]):
         return True
     return any(k in c_lower for k in [
-        "date", "time", "created_at", "updated_at", "joined_at", 
+        "date", "time", "created_at", "created_on", "updated_at", "updated_on", "joined_at",
         "timestamp", "order_date", "invoicedate", "birthdate", "hiredate"
     ])
 
@@ -271,6 +338,8 @@ class DatabasePipelineService:
         """
         if tenant_id is None:
             raise ValueError("Tenant ID is required for database insights")
+
+        date_from, date_to, date_bindings = _normalize_date_range(date_from, date_to)
 
         # 1. Fetch connection and verify ownership
         query = db.query(models.DatabaseConnection).filter(
@@ -355,44 +424,28 @@ class DatabasePipelineService:
                 }
 
         active_date_filter: Optional[Tuple[str, str]] = None
-        date_bindings: Dict[str, Any] = {}
-        for param_name, raw_value in (("date_from", date_from), ("date_to", date_to)):
-            if raw_value:
-                try:
-                    parsed_date = datetime.date.fromisoformat(str(raw_value))
-                    if param_name == "date_to":
-                        parsed_date += datetime.timedelta(days=1)
-                    date_bindings[param_name] = parsed_date.isoformat()
-                except ValueError:
-                    raise ValueError("Invalid date filter; expected YYYY-MM-DD") from None
 
-        def execute_sql(query_str: str, metric_ids: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        def execute_sql(
+            query_str: str, metric_ids: Optional[List[str]] = None,
+            *, apply_date_filter: bool = True, extra_params: Optional[Dict[str, Any]] = None,
+        ) -> List[Dict[str, Any]]:
             tracked_metric_ids = metric_ids or []
             if not is_sql:
                 return []
-            query_params: Dict[str, Any] = {}
-            if active_date_filter and (date_from or date_to):
-                fact_ref, date_ref = active_date_filter
-                if f"FROM {fact_ref}" in query_str or f"JOIN {fact_ref}" in query_str:
-                    clauses = []
-                    if date_from:
-                        clauses.append(f"{fact_ref}.{date_ref} >= :date_from")
-                        query_params["date_from"] = date_bindings["date_from"]
-                    if date_to:
-                        clauses.append(f"{fact_ref}.{date_ref} < :date_to")
-                        query_params["date_to"] = date_bindings["date_to"]
-                    if clauses:
-                        predicate = " AND ".join(clauses)
-                        boundary = re.search(r"\b(GROUP\s+BY|ORDER\s+BY|HAVING|LIMIT)\b", query_str, re.IGNORECASE)
-                        insert_at = boundary.start() if boundary else len(query_str)
-                        head, tail = query_str[:insert_at].rstrip(), query_str[insert_at:]
-                        where_match = re.search(r"\bWHERE\b", head, re.IGNORECASE)
-                        if where_match:
-                            prefix = head[:where_match.end()]
-                            condition = head[where_match.end():].strip()
-                            query_str = f"{prefix} ({condition}) AND {predicate} {tail}"
-                        else:
-                            query_str = f"{head} WHERE {predicate} {tail}"
+            query_params: Dict[str, Any] = dict(extra_params or {})
+            if apply_date_filter and date_bindings:
+                if not active_date_filter:
+                    mark_missing_role(tracked_metric_ids)
+                    return []
+                scoped = _with_date_predicate(query_str, *active_date_filter, date_bindings)
+                if scoped is None:
+                    for metric_id in tracked_metric_ids:
+                        metric_query_states[metric_id] = {
+                            "status": "unavailable", "reason": "unsupported_with_filter",
+                        }
+                    return []
+                query_str = scoped
+                query_params.update(date_bindings)
             # Try native DataSpeakAI pooled engine first
             try:
                 from services.db_utils import get_connection_url
@@ -485,6 +538,8 @@ class DatabasePipelineService:
                 else:
                     item["value"] = None
                     item["raw_value"] = None
+                    item["trend_text"] = None
+                    item["trend_pct"] = None
                 return
             if state and state["status"] == "unavailable":
                 item["status"] = "unavailable"
@@ -494,6 +549,8 @@ class DatabasePipelineService:
                 else:
                     item["value"] = None
                     item["raw_value"] = None
+                    item["trend_text"] = None
+                    item["trend_pct"] = None
                 return
 
             if is_chart:
@@ -680,11 +737,11 @@ class DatabasePipelineService:
             # -------------------------------------------------------------
             q_fact = _clean_sql_identifier(fact_table, db_conn.db_type)
             fact_prof = table_profiles.get(fact_table, {})
-            fact_date_col = (fact_prof.get("date_cols") or [None])[0]
+            fact_date_col = _pick_date_column(fact_prof.get("date_cols") or [])
             if fact_date_col:
                 active_date_filter = (q_fact, _clean_sql_identifier(fact_date_col, db_conn.db_type))
             elif date_from or date_to:
-                query_errors.append("Date filters were requested, but the fact table has no date column.")
+                query_errors.append("Date filters were requested, but the fact table has no unambiguous date column.")
             
             # 1. Total Genuine Gross/Net Revenue (Prioritized over unit rates)
             # Check line items table for transactional sales details (e.g. Order Details, InvoiceLine)
@@ -975,43 +1032,72 @@ class DatabasePipelineService:
             trend_pct = None
             trend_dir = "neutral"
             trend_text = None
-            date_col = fact_prof.get("date_cols", [None])[0] if fact_prof.get("date_cols") else None
+            date_col = fact_date_col
             q_date = _clean_sql_identifier(date_col, db_conn.db_type) if date_col else ""
-            if date_col:
-                d_bounds = execute_sql(f"SELECT MIN({q_date}) as min_d, MAX({q_date}) as max_d FROM {q_fact} WHERE {q_date} IS NOT NULL")
-                if d_bounds and d_bounds[0].get("max_d") and d_bounds[0].get("min_d"):
-                    max_d = str(d_bounds[0]["max_d"])[:10]
-                    min_d = str(d_bounds[0]["min_d"])[:10]
-                    try:
-                        max_year = int(max_d[:4])
-                        min_year = int(min_d[:4])
-                        if max_year > min_year:
-                            prev_year = max_year - 1
-                            curr_start = f"{max_year}-01-01"
-                            curr_end = max_d
-                            sply_start = f"{prev_year}-01-01"
-                            month_day = max_d[5:10]
-                            if month_day == "02-29":
-                                month_day = "02-28"
-                            sply_end = f"{prev_year}-{month_day}"
-                            
-                            sply_query = f"""
-                                SELECT 
-                                    ROUND(SUM(CASE WHEN {q_date} >= '{curr_start}' AND {q_date} <= '{curr_end}' THEN {money_expr} ELSE 0 END), 2) as curr_val,
-                                    ROUND(SUM(CASE WHEN {q_date} >= '{sply_start}' AND {q_date} <= '{sply_end}' THEN {money_expr} ELSE 0 END), 2) as prev_val
-                                FROM {q_fact}
-                            """
-                            sply_res = execute_sql(sply_query)
-                            if sply_res:
-                                curr_v = float(sply_res[0].get("curr_val") or 0)
-                                prev_v = float(sply_res[0].get("prev_val") or 0)
-                                if prev_v > 0:
-                                    raw_growth = round(((curr_v - prev_v) / prev_v) * 100, 1)
-                                    trend_pct = abs(raw_growth)
-                                    trend_dir = "up" if raw_growth >= 0 else "down"
-                                    trend_text = f"SPLY ({raw_growth:+.1f}%)"
-                    except Exception as e:
-                        logger.exception("Same-period-last-year calculation failed")
+            trend_reason = None
+            if date_col and has_genuine_fact_revenue and money_expr:
+                try:
+                    if date_bindings:
+                        if not (date_from and date_to):
+                            trend_reason = "unsupported_with_filter"
+                        else:
+                            current_start = datetime.date.fromisoformat(date_from)
+                            current_end = datetime.date.fromisoformat(date_bindings["date_to_excl"])
+                    else:
+                        d_bounds = execute_sql(
+                            f"SELECT MIN({q_date}) as min_d, MAX({q_date}) as max_d "
+                            f"FROM {q_fact} WHERE {q_date} IS NOT NULL",
+                        )
+                        if d_bounds and d_bounds[0].get("max_d") and d_bounds[0].get("min_d"):
+                            latest = datetime.date.fromisoformat(str(d_bounds[0]["max_d"])[:10])
+                            earliest = datetime.date.fromisoformat(str(d_bounds[0]["min_d"])[:10])
+                            if latest.year > earliest.year:
+                                current_start = datetime.date(latest.year, 1, 1)
+                                current_end = latest + datetime.timedelta(days=1)
+                            else:
+                                trend_reason = "no_rows"
+                        else:
+                            trend_reason = "no_rows"
+                    if trend_reason is None:
+                        def previous_year(day: datetime.date) -> datetime.date:
+                            try:
+                                return day.replace(year=day.year - 1)
+                            except ValueError:
+                                return day.replace(year=day.year - 1, day=28)
+
+                        previous_start = previous_year(current_start)
+                        previous_end = previous_year(current_end)
+                        sply_query = f"""
+                            SELECT
+                                ROUND(SUM(CASE WHEN {q_date} >= :current_start
+                                    AND {q_date} < :current_end THEN {money_expr} END), 2) as curr_val,
+                                ROUND(SUM(CASE WHEN {q_date} >= :previous_start
+                                    AND {q_date} < :previous_end THEN {money_expr} END), 2) as prev_val
+                            FROM {q_fact}
+                        """
+                        sply_res = execute_sql(
+                            sply_query, apply_date_filter=False,
+                            extra_params={
+                                "current_start": current_start.isoformat(),
+                                "current_end": current_end.isoformat(),
+                                "previous_start": previous_start.isoformat(),
+                                "previous_end": previous_end.isoformat(),
+                            },
+                        )
+                        current_value = sply_res[0].get("curr_val") if sply_res else None
+                        previous_value = sply_res[0].get("prev_val") if sply_res else None
+                        if current_value is not None and previous_value is not None and float(previous_value) > 0:
+                            raw_growth = round(((float(current_value) - float(previous_value)) / float(previous_value)) * 100, 1)
+                            trend_pct = abs(raw_growth)
+                            trend_dir = "up" if raw_growth >= 0 else "down"
+                            trend_text = f"SPLY ({raw_growth:+.1f}%)"
+                        else:
+                            trend_reason = "no_rows"
+                except Exception:
+                    logger.exception("Same-period-last-year calculation failed")
+                    trend_reason = "query_failed"
+            elif date_bindings:
+                trend_reason = "unsupported_with_filter"
 
             # Formulate Phase 2C Deterministic Recipes (Clean Executive KPIs, Zero Fabricated Constants)
             computed_kpis = [
@@ -1026,7 +1112,8 @@ class DatabasePipelineService:
                     "recipe_type": "atomic",
                     "trend_direction": trend_dir,
                     "trend_pct": trend_pct,
-                    "trend_text": trend_text or "revenue trajectory"
+                    "trend_text": trend_text,
+                    "trend_reason": trend_reason,
                 },
                 {
                     "id": "net_revenue_delivered",
@@ -1146,6 +1233,8 @@ class DatabasePipelineService:
                 metric_query_states["units_sold"] = {"status": "unavailable", "reason": "missing_role"}
             if not catalog_identifier_available:
                 metric_query_states["catalog_size"] = {"status": "unavailable", "reason": "missing_role"}
+            if date_bindings and metric_query_states.get("revenue_by_market", {}).get("status") == "unavailable":
+                metric_query_states["top_market"] = metric_query_states["revenue_by_market"]
 
             # Chart 1: Time Series Revenue Velocity
             if date_col:
@@ -1859,11 +1948,11 @@ class DatabasePipelineService:
             tbl = selected_table if (selected_table and selected_table in schema) else available_tables[0]
             q_tbl = _clean_sql_identifier(tbl, db_conn.db_type)
             prof = table_profiles.get(tbl, {})
-            table_date_col = (prof.get("date_cols") or [None])[0]
+            table_date_col = _pick_date_column(prof.get("date_cols") or [])
             if table_date_col:
                 active_date_filter = (q_tbl, _clean_sql_identifier(table_date_col, db_conn.db_type))
             elif date_from or date_to:
-                query_errors.append("Date filters were requested, but the selected table has no date column.")
+                query_errors.append("Date filters were requested, but the selected table has no unambiguous date column.")
 
             # Table row count
             count_res = execute_sql(f"SELECT COUNT(*) as cnt FROM {q_tbl}", [f"{tbl}_total_rows"])
@@ -1953,8 +2042,8 @@ class DatabasePipelineService:
                     })
 
             # Time Series Chart for Single Table
-            if prof["date_cols"]:
-                t_col = prof["date_cols"][0]
+            if table_date_col:
+                t_col = table_date_col
                 q_t = _clean_sql_identifier(t_col, db_conn.db_type)
                 m_col = prof["measure_cols"][0] if prof["measure_cols"] else None
                 m_expr = f"ROUND(SUM({_clean_sql_identifier(m_col, db_conn.db_type)}), 2)" if m_col else "COUNT(*)"
@@ -2217,6 +2306,8 @@ class DatabasePipelineService:
             ],
             "anomalies": detected_anomalies,
             "data_quality": {"warnings": list(dict.fromkeys(query_errors))},
+            "applied_date_from": date_from,
+            "applied_date_to": date_to,
             "layout_plan": final_layout.model_dump(),
             "pipeline_layers": [
                 {"layer": 1, "name": "Schema Discovery & Multi-Table Statistical Profiling", "status": "completed"},
@@ -2261,6 +2352,8 @@ class DatabasePipelineService:
         """
         if tenant_id is None:
             raise ValueError("Tenant ID is required for database insights")
+
+        date_from, date_to, _ = _normalize_date_range(date_from, date_to)
 
         cache_key = _cache_key(tenant_id, connection_id, selected_table, date_from, date_to)
         query = db.query(models.DatabaseConnection).filter(

@@ -15,7 +15,7 @@ import models
 import schemas
 from database import get_db
 from dependencies import get_current_user
-from services.db_pipeline_service import db_pipeline_service
+from services.db_pipeline_service import db_pipeline_service, _normalize_date_range
 from services.insights_engine import insights_engine
 
 router = APIRouter(prefix="/api/insights", tags=["Database Insights"])
@@ -34,6 +34,14 @@ def _owned_connection(db: Session, connection_id: int, tenant_id: int) -> models
     if not connection:
         raise HTTPException(status_code=404, detail="Database connection not found")
     return connection
+
+
+def _validated_dates(date_from: Optional[str], date_to: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    try:
+        normalized_from, normalized_to, _ = _normalize_date_range(date_from, date_to)
+        return normalized_from, normalized_to
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date filter") from None
 
 
 # ── Phase 3: Dynamic AI Insights & Recommendation Engine ──────────────────
@@ -307,6 +315,7 @@ def generate_database_insights(
     if not current_user.tenant_id:
         raise HTTPException(status_code=403, detail="User must belong to a tenant.")
 
+    date_from, date_to = _validated_dates(date_from, date_to)
     try:
         result = db_pipeline_service.run_db_pipeline(
             db=db,
@@ -342,6 +351,7 @@ def run_database_pipeline_post(
     refresh = payload.get("refresh", False)
     date_from = payload.get("date_from")
     date_to = payload.get("date_to")
+    date_from, date_to = _validated_dates(date_from, date_to)
 
     try:
         result = db_pipeline_service.run_db_pipeline(
@@ -379,6 +389,7 @@ def stream_database_pipeline(
 
     # Resolve tenant ownership before the generator can read the Redis or DB cache.
     _owned_connection(db, connection_id, current_user.tenant_id)
+    date_from, date_to = _validated_dates(date_from, date_to)
 
     def event_generator():
         gen = db_pipeline_service.run_db_pipeline_stream(
