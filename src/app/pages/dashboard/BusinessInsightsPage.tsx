@@ -1211,7 +1211,11 @@ export function BusinessInsightsPage() {
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
                 <Sparkles size={16} color="#6C63FF" />
                 <span style={{ fontSize: '12.5px', fontWeight: 700, color: '#6C63FF', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-                  Dual-Engine AI Executive Playbook ({aiExecutive.business_domain || 'Enterprise Business'})
+                  {aiExecutive.source === 'deterministic_fallback'
+                    ? 'Auto-generated summary (AI unavailable)'
+                    : aiExecutive.source === 'llm'
+                      ? `Dual-Engine AI Executive Playbook (${aiExecutive.business_domain || 'Enterprise Business'})`
+                      : 'Executive summary'}
                 </span>
               </div>
               <p style={{ fontSize: '14px', color: darkMode ? '#F8FAFC' : '#1E293B', margin: 0, lineHeight: 1.6, fontWeight: 500 }}>

@@ -440,6 +440,20 @@ def export_insights(
     def esc(value: Any) -> str:
         return html.escape("" if value is None else str(value), quote=True)
 
+    summary_data = insights_data.get("executive_summary") or insights_data.get("business_summary") or {}
+    if not isinstance(summary_data, dict):
+        summary_data = {}
+    summary_text = summary_data.get("executive_summary")
+    summary_source = summary_data.get("source")
+    summary_heading = (
+        "Auto-generated summary (AI unavailable)" if summary_source == "deterministic_fallback"
+        else "AI Executive Summary" if summary_source == "llm" else "Executive Summary"
+    )
+    summary_html = (
+        f'<div class="section-title">{esc(summary_heading)}</div><div class="card">{esc(summary_text)}</div>'
+        if summary_text else ""
+    )
+
     business_name = connection.name or connection.database or connection.db_type.capitalize()
     observations = insights_data.get("observations", [])
     anomalies = insights_data.get("anomalies", [])
@@ -575,6 +589,7 @@ def export_insights(
             <h1>DataSpeakAI Intelligence Report</h1>
             <p>Database: <strong>{esc(business_name)}</strong> | Type: {esc(connection.db_type.upper())} | Status: {esc(connection.status.upper())}</p>
         </div>
+        {summary_html}
         <div class="section-title">Key Executive Performance Metrics</div>
         <div class="grid">{metrics_html}</div>
         <div class="section-title">Strategic Observations & Insights</div>
