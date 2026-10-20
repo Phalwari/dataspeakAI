@@ -1,9 +1,13 @@
 """Offline dialect SQL-generation and temporary SQLite execution checks."""
 
 import sqlite3
+import json
 
 import pytest
 
+import models
+from services import db_pipeline_service as pipeline
+from services import db_utils
 from services.sql_dialect import (
     UnsupportedDialectError, cast_text, concat, month_bucket, quote_ident,
     round_money,
@@ -68,3 +72,42 @@ def test_sqlite_fragments_execute_on_temporary_database(tmp_path):
         )
         result = conn.execute(query).fetchone()
     assert result == ("2026-01", "Sample Buyer", "1", 12.35)
+
+
+def test_mariadb_schema_discovery_uses_mysql_family_without_network(isolated_db, monkeypatch):
+    tenant = models.Tenant(name="Offline dialect fixture")
+    isolated_db.add(tenant)
+    isolated_db.flush()
+    connection = models.DatabaseConnection(
+        tenant_id=tenant.id, name="Offline dialect fixture", db_type="mariadb",
+        database="offline-fixture", tables_metadata={},
+    )
+    isolated_db.add(connection)
+    isolated_db.flush()
+    schema_calls = []
+    monkeypatch.setattr(db_utils, "get_connection_url", lambda _connection: None)
+    monkeypatch.setattr(
+        pipeline.db_connection_service, "get_mysql_schema",
+        lambda **_kwargs: schema_calls.append(True) or {
+            "measurements": {"columns": {"id": "INTEGER"}, "row_count": 0},
+        },
+    )
+    monkeypatch.setattr(
+        pipeline.db_connection_service, "execute_query",
+        lambda **_kwargs: [{"cnt": 0}],
+    )
+    monkeypatch.setattr(pipeline, "cache_get", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "cache_set", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "services.llm_generation_service.generate",
+        lambda *_args, **_kwargs: json.dumps({
+            "business_domain": "Test data", "executive_summary": "Synthetic summary",
+            "strategic_insights": [], "tactical_recommendations": [],
+        }),
+    )
+    result = pipeline.DatabasePipelineService().run_db_pipeline(
+        db=isolated_db, connection_id=connection.id, tenant_id=tenant.id,
+        selected_table="measurements",
+    )
+    assert schema_calls
+    assert result["success"] is True

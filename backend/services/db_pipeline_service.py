@@ -617,7 +617,7 @@ class DatabasePipelineService:
                             host=db_conn.host, port=int(getattr(db_conn, "port", 5432) or 5432), username=db_conn.username,
                             password=decrypted_password or "", database=db_conn.database
                         )
-                    elif db_conn.db_type.lower() == "mysql":
+                    elif db_conn.db_type.lower() in {"mysql", "mariadb"}:
                         schema = db_connection_service.get_mysql_schema(
                             host=db_conn.host or "localhost", port=int(getattr(db_conn, "port", 3306) or 3306), username=db_conn.username or "",
                             password=decrypted_password or "", database=db_conn.database or ""
