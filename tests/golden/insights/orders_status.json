@@ -1,0 +1,94 @@
+{
+  "charts": [
+    {
+      "id": "monthly_revenue_velocity",
+      "reason": null,
+      "status": "available",
+      "type": "area"
+    },
+    {
+      "id": "order_status_distribution",
+      "reason": null,
+      "status": "available",
+      "type": "donut"
+    },
+    {
+      "id": "revenue_by_market",
+      "reason": null,
+      "status": "available",
+      "type": "bar"
+    },
+    {
+      "id": "revenue_by_segment",
+      "reason": null,
+      "status": "available",
+      "type": "donut"
+    },
+    {
+      "id": "top_customers_spend",
+      "reason": null,
+      "status": "available",
+      "type": "bar"
+    }
+  ],
+  "db_type": "sqlite",
+  "metrics": [
+    {
+      "format": "integer",
+      "id": "active_customers",
+      "reason": null,
+      "status": "available"
+    },
+    {
+      "format": "currency",
+      "id": "average_order_value",
+      "reason": null,
+      "status": "available"
+    },
+    {
+      "format": "integer",
+      "id": "catalog_size",
+      "reason": "missing_role",
+      "status": "unavailable"
+    },
+    {
+      "format": "currency",
+      "id": "customer_lifetime_value",
+      "reason": null,
+      "status": "available"
+    },
+    {
+      "format": "currency",
+      "id": "net_revenue_delivered",
+      "reason": null,
+      "status": "available"
+    },
+    {
+      "format": "text",
+      "id": "top_market",
+      "reason": null,
+      "status": "available"
+    },
+    {
+      "format": "integer",
+      "id": "total_orders",
+      "reason": null,
+      "status": "available"
+    },
+    {
+      "format": "currency",
+      "id": "total_revenue",
+      "reason": null,
+      "status": "available"
+    },
+    {
+      "format": "integer",
+      "id": "units_sold",
+      "reason": "missing_role",
+      "status": "unavailable"
+    }
+  ],
+  "schema": 1,
+  "success": true,
+  "summary_source": "llm"
+}

@@ -44,8 +44,9 @@ class FakeCollection:
 def run_mongo_case(
     isolated_db, monkeypatch, collection, *, with_date=True,
     date_from="2026-01-01", date_to="2026-01-02", fail_lookup=False,
+    columns_override=None,
 ):
-    columns = {"amount": "number", "state": "string"}
+    columns = dict(columns_override or {"amount": "number", "state": "string"})
     if with_date:
         columns["created_on"] = "date"
     tenant = models.Tenant(name="Offline Mongo fixture")

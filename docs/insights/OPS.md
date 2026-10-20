@@ -19,3 +19,13 @@ The executor stops waiting after its budget, but Python cannot kill a running wo
 The router reuses the existing `audit_logs` application table. Generate (GET), pipeline (POST), refresh, export, and stream write actions under `insights.*`. Each record carries tenant/user IDs, connection ID, result status (`success`, `fallback`, or `error`), elapsed milliseconds, and only the selected table and normalized date filters. The stream writes `in_progress` before sending data and updates the same record after completion. A malformed table filter is omitted from audit details. Audit write failure returns a generic 503 for non-stream actions; a stream can already have sent data before its final audit update fails.
 
 No new schema migration is needed because this table is already in the application model and initial schema. The audit path is tested against an isolated SQLite application DB. Existing deployed schemas, retention policy, administrative access control to audit rows, interrupted-stream behavior across worker crashes, and production database persistence are **not verified by execution**.
+
+## Generic regression snapshots
+
+`tests/golden/insights/` contains projected structure/status snapshots for orders with statuses, misleading column names, quantity without price, HR/inventory, and fake Mongo nested metadata. The snapshots omit metric values, chart points, source rows, connection details, and generated text. `tests/test_insights_regression_snapshots.py` rebuilds each fixture in temporary SQLite or a fake Mongo client and compares its projection to the committed snapshot. The script below compares a baseline snapshot with a projected snapshot or a full pipeline JSON response, printing only structural and status differences:
+
+```text
+python scripts/insights_diff.py BASELINE_JSON CURRENT_JSON
+```
+
+A zero exit code means the projected shape matches, and a nonzero code reports differences. The committed snapshots were captured after E1–E3; a historical pre-E execution baseline was not available. They are a regression baseline for future changes, not proof of before/after parity. Chinook was not used as a golden target. Real Mongo nested extraction and non-SQLite database execution are **not verified by execution**.

@@ -1,0 +1,64 @@
+{
+  "charts": [
+    {
+      "id": "measurements_discount_rate_breakdown",
+      "reason": null,
+      "status": "available",
+      "type": "bar"
+    },
+    {
+      "id": "measurements_trend",
+      "reason": null,
+      "status": "available",
+      "type": "area"
+    },
+    {
+      "id": "measurements_void_breakdown",
+      "reason": null,
+      "status": "available",
+      "type": "bar"
+    }
+  ],
+  "db_type": "sqlite",
+  "metrics": [
+    {
+      "format": "number",
+      "id": "measurements_discount_rate_avg",
+      "reason": null,
+      "status": "available"
+    },
+    {
+      "format": "number",
+      "id": "measurements_discount_rate_sum",
+      "reason": null,
+      "status": "available"
+    },
+    {
+      "format": "number",
+      "id": "measurements_total_orders_avg",
+      "reason": null,
+      "status": "available"
+    },
+    {
+      "format": "number",
+      "id": "measurements_total_orders_sum",
+      "reason": null,
+      "status": "available"
+    },
+    {
+      "format": "integer",
+      "id": "measurements_total_rows",
+      "reason": null,
+      "status": "available"
+    },
+    {
+      "format": "integer",
+      "id": "measurements_void_distinct",
+      "reason": null,
+      "status": "available"
+    }
+  ],
+  "schema": 1,
+  "success": true,
+  "summary_source": "llm"
+}

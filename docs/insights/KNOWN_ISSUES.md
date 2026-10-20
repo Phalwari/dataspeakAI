@@ -79,3 +79,7 @@ The new tests use temporary SQLite and mocked HTTP/generation. They verify bound
 ## INS-E3: Audit persistence boundary
 
 Insight actions reuse the existing application `AuditLog` model; no new migration was added. Only connection ID, a safe table identifier, validated date filters, status, and duration are stored in details. Offline SQLite tests cover success, fallback, error, refresh, export, and a fully consumed stream. A stream record may remain `in_progress` after process termination or a hard disconnect. Audit retention, production table presence, and multi-worker durability are **not verified by execution**. No tenant-facing audit listing endpoint was added.
+
+## INS-E4: Regression snapshot scope
+
+Five synthetic fixture snapshots cover Insight metric/chart structure and availability states. Numeric outputs, chart point values, generated prose, and source rows are intentionally excluded from the snapshots; the existing fixture assertions continue to check selected deterministic values. The snapshots were captured after the E1–E3 code changes. There is no executed pre-E baseline diff, so historical before/after parity is **not verified by execution**. Fake Mongo nested metadata is represented, but real nested document behavior is still unverified. Chinook was not used as a golden target.
