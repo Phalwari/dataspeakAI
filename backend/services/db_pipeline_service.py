@@ -257,14 +257,14 @@ class DatabasePipelineService:
         """
         Runs the full 6-Layer Deterministic Database Pipeline synchronously.
         """
+        if tenant_id is None:
+            raise ValueError("Tenant ID is required for database insights")
+
         # 1. Fetch connection and verify ownership
         query = db.query(models.DatabaseConnection).filter(
             models.DatabaseConnection.id == connection_id
         )
-        if tenant_id is not None and hasattr(models.DatabaseConnection, "tenant_id"):
-            query = query.filter(models.DatabaseConnection.tenant_id == tenant_id)
-        elif user_id is not None and hasattr(models.DatabaseConnection, "user_id"):
-            query = query.filter(models.DatabaseConnection.user_id == user_id)
+        query = query.filter(models.DatabaseConnection.tenant_id == tenant_id)
         
         db_conn = query.first()
 
@@ -2195,14 +2195,14 @@ class DatabasePipelineService:
         Runs the 6-Layer Deterministic Database Pipeline as an SSE event generator.
         Yields progress steps and finally the result payload.
         """
+        if tenant_id is None:
+            raise ValueError("Tenant ID is required for database insights")
+
         cache_key = _cache_key(tenant_id, connection_id, selected_table, date_from, date_to)
         query = db.query(models.DatabaseConnection).filter(
             models.DatabaseConnection.id == connection_id
         )
-        if tenant_id is not None and hasattr(models.DatabaseConnection, "tenant_id"):
-            query = query.filter(models.DatabaseConnection.tenant_id == tenant_id)
-        elif user_id is not None and hasattr(models.DatabaseConnection, "user_id"):
-            query = query.filter(models.DatabaseConnection.user_id == user_id)
+        query = query.filter(models.DatabaseConnection.tenant_id == tenant_id)
         if not query.first():
             raise ValueError("Database connection not found or unauthorized")
         if not force_refresh:
