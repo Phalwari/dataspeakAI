@@ -6,7 +6,7 @@ The Insights pipeline previously treated date presets as a recent chart-point sl
 
 ## Logic Chain
 
-Calendar inputs now normalize before cache access, SQL date values are bound, and unsupported query shapes become unavailable. The frontend asks the API for a calendar window and displays the returned range. SQL expression generation is dialect explicit. Mongo queries share the same half-open bounds and no longer sample displayed aggregates. Generic fixtures exposed and fixed count/ratio currency misclassification and quantity-only omission.
+Calendar inputs now normalize before cache access, SQL date values are bound, unsupported query shapes become unavailable, and old DB cache payloads are rejected. The frontend asks the API for a calendar window and displays the returned range. SQL expression generation is dialect explicit. Mongo queries share the same half-open bounds and no longer sample displayed aggregates. Generic fixtures exposed and fixed count/ratio currency misclassification and quantity-only omission.
 
 ## Caveats
 
@@ -18,7 +18,7 @@ Phase D's offline acceptance checks pass for generic temporary SQLite and Mongo 
 
 ## Verification Method
 
-- `python -m pytest tests/test_insights_failure_semantics.py tests/test_insights_export.py tests/test_insights_date_filters.py tests/test_insights_sql_dialect.py tests/test_insights_mongo_filters.py tests/test_insights_generic_fixtures.py -q --disable-warnings` → `41 passed, 1 xfailed, 22 warnings in 10.75s`.
+- `python -m pytest tests/test_insights_failure_semantics.py tests/test_insights_export.py tests/test_insights_date_filters.py tests/test_insights_sql_dialect.py tests/test_insights_mongo_filters.py tests/test_insights_generic_fixtures.py -q --disable-warnings` → `42 passed, 1 xfailed, 22 warnings in 8.54s`.
 - `python -m py_compile backend/services/db_pipeline_service.py backend/services/sql_dialect.py backend/routers/insights.py` → exit 0.
 - `npm run build` → Vite built successfully; large-chunk warning remains.
 - No external DB, server, browser, or load test was run.

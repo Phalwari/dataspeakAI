@@ -19,7 +19,7 @@ To maintain seamless multi-developer and AI agent collaboration:
 
 ### Fixed
 
-- **Insights Phase D (INS-D2-01/02, INS-D3-01..07, INS-D4-01..03, INS-GEN-01):** Applied strict, bound calendar windows to generated SQL Insights queries and server-backed date presets; added response range metadata and matching prior-year comparisons. Centralized SQLite/PostgreSQL/MySQL/MariaDB SQL fragments, rejected unknown dialects, prioritized Mongo analytics, and aligned Mongo counts/charts to exact exclusive date bounds. Corrected misleading money and quantity role classification. Added temporary SQLite and offline Mongo tests; live connectors, browser rendering, and concurrent-user capacity remain unverified.
+- **Insights Phase D (INS-D2-01..03, INS-D3-01..07, INS-D4-01..03, INS-GEN-01):** Applied strict, bound calendar windows to generated SQL Insights queries and server-backed date presets; added response range metadata, matching prior-year comparisons, and versioned Redis/DB cache payloads. Centralized SQLite/PostgreSQL/MySQL/MariaDB SQL fragments, rejected unknown dialects, prioritized Mongo analytics, and aligned Mongo counts/charts to exact exclusive date bounds. Corrected misleading money and quantity role classification. Added temporary SQLite and offline Mongo tests; live connectors, browser rendering, and concurrent-user capacity remain unverified.
   - Session record: `docs/sessions/2026-10-20_insights_phase_d.md`.
 
 ### Changed
