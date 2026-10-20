@@ -198,7 +198,7 @@ SAFE_WORDS_ENDING_ID = {
     "paid", "valid", "grid", "solid", "arid", "avid", "rapid", 
     "liquid", "humid", "frigid", "torrid", "splendid", "horrid", 
     "sordid", "placid", "acid", "lucid", "timid", "morbid", "rabid", 
-    "candid", "vivid", "hybrid", "pyramid", "eyelid", "mid", "android"
+    "candid", "vivid", "hybrid", "pyramid", "eyelid", "mid", "android", "void"
 }
 
 
@@ -267,6 +267,10 @@ def is_monetary_column(col_name: str) -> bool:
     if is_id_column(col_name):
         return False
     c_lower = col_name.lower()
+    if c_lower.endswith(("_rate", "_pct", "_percent", "_percentage")):
+        return False
+    if re.search(r"(?:^|_)(?:orders?|items?|units?|quantity|qty|count|records?|rows?)$", c_lower):
+        return False
     return any(k in c_lower for k in [
         "total", "amount", "revenue", "sales", "price", "unitprice", 
         "unit_price", "cost", "fee", "salary", "balance", "discount", 
@@ -784,14 +788,16 @@ class DatabasePipelineService:
 
             money_cols = sort_monetary_columns_by_priority(fact_prof.get("monetary_cols", []))
             has_genuine_fact_revenue = bool(money_cols and not all("freight" in c.lower() or "shipping" in c.lower() for c in money_cols))
-            qty_col: Optional[str] = None
+            fact_measures = fact_prof.get("measure_cols", [])
+            qty_col = next(
+                (c for c in fact_measures if any(k in c.lower() for k in ["qty", "quantity", "units"])),
+                None,
+            )
             q_line: str = _clean_sql_identifier(line_item_table, db_conn.db_type) if line_item_table else ""
 
             if has_genuine_fact_revenue:
                 money_col = money_cols[0]
                 q_money = _clean_sql_identifier(money_col, db_conn.db_type)
-                fact_measures = fact_prof.get("measure_cols", [])
-                qty_col = next((c for c in fact_measures if any(k in c.lower() for k in ["qty", "quantity", "units", "count"])), None)
                 if is_unit_price_column(money_col) and qty_col:
                     q_qty = _clean_sql_identifier(qty_col, db_conn.db_type)
                     money_expr = f"({q_money} * {q_qty})"
