@@ -10,6 +10,8 @@ from typing import Optional, Dict, Any, List
 import json
 import html
 import logging
+import re
+import time
 
 import models
 import schemas
@@ -20,6 +22,41 @@ from services.insights_engine import insights_engine
 
 router = APIRouter(prefix="/api/insights", tags=["Database Insights"])
 logger = logging.getLogger(__name__)
+
+
+def _record_insight_audit(
+    db: Session, *, tenant_id: int, user_id: Optional[int], connection_id: Optional[int],
+    action: str, result_status: str, started: float,
+    table: Optional[str] = None, date_from: Optional[str] = None,
+    date_to: Optional[str] = None, entry: Optional[models.AuditLog] = None,
+) -> Optional[models.AuditLog]:
+    """Persist a bounded audit envelope without source rows or provider details."""
+    if not isinstance(db, Session):
+        return None  # Direct offline render tests use a non-database stub.
+    safe_table = table if isinstance(table, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", table) else None
+    details = {
+        "connection_id": connection_id,
+        "filters": {"table": safe_table, "date_from": date_from, "date_to": date_to},
+        "status": result_status,
+        "duration_ms": max(0, int((time.monotonic() - started) * 1000)),
+    }
+    try:
+        audit = entry or models.AuditLog(
+            tenant_id=tenant_id, user_id=user_id, action=f"insights.{action}",
+        )
+        audit.details = details
+        db.add(audit)
+        db.commit()
+        return audit
+    except Exception:
+        db.rollback()
+        logger.error("Insights audit write failed")
+        raise HTTPException(status_code=503, detail="Insights audit logging unavailable") from None
+
+
+def _audit_result_status(result: Dict[str, Any]) -> str:
+    summary = result.get("executive_summary") or {}
+    return "fallback" if isinstance(summary, dict) and summary.get("source") == "deterministic_fallback" else "success"
 
 
 def _owned_connection(db: Session, connection_id: int, tenant_id: int) -> models.DatabaseConnection:
@@ -204,27 +241,29 @@ def refresh_ai_insights(
     if not current_user.tenant_id:
         raise HTTPException(status_code=403, detail="User must belong to a tenant.")
 
-    # Verify database ownership if scoped to prevent cross-tenant enumeration or leaks
-    if database_id is not None:
-        db_conn = db.query(models.DatabaseConnection).filter(
-            models.DatabaseConnection.id == database_id,
-            models.DatabaseConnection.tenant_id == current_user.tenant_id
-        ).first()
-        if not db_conn:
-            raise HTTPException(status_code=404, detail="Database connection not found.")
-        db_pipeline_service.invalidate_connection_cache(
-            db=db,
-            tenant_id=current_user.tenant_id,
-            connection_id=database_id,
+    started = time.monotonic()
+
+    try:
+        # Verify ownership before touching a connection cache.
+        if database_id is not None:
+            _owned_connection(db, database_id, current_user.tenant_id)
+            db_pipeline_service.invalidate_connection_cache(
+                db=db, tenant_id=current_user.tenant_id, connection_id=database_id,
+            )
+
+        # Tenant-wide refresh still applies only to the legacy insights engine.
+        refreshed = insights_engine.refresh_tenant_insights(
+            tenant_id=current_user.tenant_id, database_id=database_id, db=db,
         )
-
-    # A tenant-wide refresh continues to refresh legacy generated insights only.
-    # Connection cache generations require an explicit owned database_id.
-
-    refreshed = insights_engine.refresh_tenant_insights(
-        tenant_id=current_user.tenant_id,
-        database_id=database_id,
-        db=db,
+    except Exception:
+        _record_insight_audit(
+            db, tenant_id=current_user.tenant_id, user_id=getattr(current_user, "id", None),
+            connection_id=database_id, action="refresh", result_status="error", started=started,
+        )
+        raise
+    _record_insight_audit(
+        db, tenant_id=current_user.tenant_id, user_id=getattr(current_user, "id", None),
+        connection_id=database_id, action="refresh", result_status="success", started=started,
     )
 
     return schemas.AIInsightsRefreshResponse(
@@ -324,6 +363,7 @@ def generate_database_insights(
         raise HTTPException(status_code=403, detail="User must belong to a tenant.")
 
     date_from, date_to = _validated_dates(date_from, date_to)
+    started = time.monotonic()
     try:
         result = db_pipeline_service.run_db_pipeline(
             db=db,
@@ -335,13 +375,28 @@ def generate_database_insights(
             date_to=date_to,
             force_refresh=refresh,
         )
-        return result
     except ValueError:
+        _record_insight_audit(
+            db, tenant_id=current_user.tenant_id, user_id=current_user.id,
+            connection_id=connection_id, action="generate", result_status="error",
+            started=started, table=table, date_from=date_from, date_to=date_to,
+        )
         logger.exception("Database insights request could not resolve an owned connection")
         raise HTTPException(status_code=404, detail="Database connection not found")
     except Exception:
+        _record_insight_audit(
+            db, tenant_id=current_user.tenant_id, user_id=current_user.id,
+            connection_id=connection_id, action="generate", result_status="error",
+            started=started, table=table, date_from=date_from, date_to=date_to,
+        )
         logger.exception("Database insights generation failed")
         raise HTTPException(status_code=500, detail="Failed to generate database insights")
+    _record_insight_audit(
+        db, tenant_id=current_user.tenant_id, user_id=current_user.id,
+        connection_id=connection_id, action="generate", result_status=_audit_result_status(result),
+        started=started, table=table, date_from=date_from, date_to=date_to,
+    )
+    return result
 
 
 @router.post("/pipeline/{connection_id}")
@@ -360,6 +415,7 @@ def run_database_pipeline_post(
     date_from = payload.get("date_from")
     date_to = payload.get("date_to")
     date_from, date_to = _validated_dates(date_from, date_to)
+    started = time.monotonic()
 
     try:
         result = db_pipeline_service.run_db_pipeline(
@@ -372,13 +428,28 @@ def run_database_pipeline_post(
             date_to=date_to,
             force_refresh=refresh,
         )
-        return result
     except ValueError:
+        _record_insight_audit(
+            db, tenant_id=current_user.tenant_id, user_id=current_user.id,
+            connection_id=connection_id, action="pipeline", result_status="error",
+            started=started, table=table, date_from=date_from, date_to=date_to,
+        )
         logger.exception("Database pipeline request could not resolve an owned connection")
         raise HTTPException(status_code=404, detail="Database connection not found")
     except Exception:
+        _record_insight_audit(
+            db, tenant_id=current_user.tenant_id, user_id=current_user.id,
+            connection_id=connection_id, action="pipeline", result_status="error",
+            started=started, table=table, date_from=date_from, date_to=date_to,
+        )
         logger.exception("Database pipeline execution failed")
         raise HTTPException(status_code=500, detail="Database pipeline execution failed")
+    _record_insight_audit(
+        db, tenant_id=current_user.tenant_id, user_id=current_user.id,
+        connection_id=connection_id, action="pipeline", result_status=_audit_result_status(result),
+        started=started, table=table, date_from=date_from, date_to=date_to,
+    )
+    return result
 
 
 @router.get("/pipeline/{connection_id}/stream")
@@ -398,20 +469,37 @@ def stream_database_pipeline(
     # Resolve tenant ownership before the generator can read the Redis or DB cache.
     _owned_connection(db, connection_id, current_user.tenant_id)
     date_from, date_to = _validated_dates(date_from, date_to)
+    started = time.monotonic()
+    audit_entry = _record_insight_audit(
+        db, tenant_id=current_user.tenant_id, user_id=current_user.id,
+        connection_id=connection_id, action="stream", result_status="in_progress",
+        started=started, table=table, date_from=date_from, date_to=date_to,
+    )
 
     def event_generator():
-        gen = db_pipeline_service.run_db_pipeline_stream(
-            db=db,
-            connection_id=connection_id,
-            tenant_id=current_user.tenant_id,
-            user_id=current_user.id,
-            selected_table=table,
-            date_from=date_from,
-            date_to=date_to,
-            force_refresh=refresh,
-        )
-        for event in gen:
-            yield f"data: {json.dumps(event)}\n\n"
+        result_status = "error"
+        try:
+            gen = db_pipeline_service.run_db_pipeline_stream(
+                db=db, connection_id=connection_id, tenant_id=current_user.tenant_id,
+                user_id=current_user.id, selected_table=table,
+                date_from=date_from, date_to=date_to, force_refresh=refresh,
+            )
+            for event in gen:
+                if event.get("type") == "result":
+                    result_status = _audit_result_status(event.get("data") or {})
+                elif event.get("type") == "error":
+                    result_status = "error"
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception:
+            logger.error("Insights stream failed")
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Insights stream failed'})}\n\n"
+        finally:
+            _record_insight_audit(
+                db, tenant_id=current_user.tenant_id, user_id=current_user.id,
+                connection_id=connection_id, action="stream", result_status=result_status,
+                started=started, table=table, date_from=date_from, date_to=date_to,
+                entry=audit_entry,
+            )
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -424,6 +512,7 @@ def export_insights(
 ):
     """Export cached or freshly generated business insights as an HTML report."""
     connection = _owned_connection(db, connection_id, current_user.tenant_id)
+    started = time.monotonic()
 
     try:
         insights_data = db_pipeline_service.run_db_pipeline(
@@ -434,6 +523,10 @@ def export_insights(
             force_refresh=False
         )
     except Exception:
+        _record_insight_audit(
+            db, tenant_id=current_user.tenant_id, user_id=current_user.id,
+            connection_id=connection_id, action="export", result_status="error", started=started,
+        )
         logger.exception("Insights export generation failed")
         raise HTTPException(status_code=500, detail="Failed to generate insights for export")
 
@@ -601,4 +694,9 @@ def export_insights(
     </div>
 </body>
 </html>"""
+    _record_insight_audit(
+        db, tenant_id=current_user.tenant_id, user_id=current_user.id,
+        connection_id=connection_id, action="export", result_status=_audit_result_status(insights_data),
+        started=started,
+    )
     return HTMLResponse(content=html_content)
