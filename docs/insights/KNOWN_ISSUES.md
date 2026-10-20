@@ -67,3 +67,11 @@ Connection-level cache generations make old L1 keys unreachable after an owned r
 The E1 regression tests were authored after the implementation was present in the working tree, so there is no pre-implementation failing run for the new test file. The first wider-suite run did catch an older cache fixture that lacked generation metadata; updating that fixture preserved the production fail-closed validation.
 
 Cache payloads created before E1 do not contain `connection_cache_version`. L1 and L2 reads deliberately reject those legacy payloads, causing a one-time cache miss and recomputation instead of trusting data from an unknown generation.
+
+## INS-E2: LLM resilience and attribution boundary
+
+The Insights pipeline now stops waiting for synthesis after `LLM_PIPELINE_BUDGET_SECONDS` (default 30). Its synchronous generation facade uses one overall `LLM_HTTP_TIMEOUT_SECONDS` deadline (default 20) across provider and key attempts, with at most one retry after a retryable timeout, transport failure, or server error. Each HTTP request receives no more than the remaining deadline. Quota responses rotate through available keys/providers without an outer retry. `LLM_RETRY_BACKOFF_SECONDS` defaults to 1. Invalid numeric settings fall back to defaults with a warning that contains only the setting name.
+
+An LLM failure yields a deterministic summary from available computed aggregates or an insufficient-data message. The summary records `source=deterministic_fallback` and a safe `llm_error` category; a valid LLM response records `source=llm`. Old L1/L2 Insights payloads without this attribution are rejected by the Insights payload version bump and recomputed. A timed-out worker thread may continue until its in-flight HTTP operation returns; `shutdown(wait=False)` limits request latency but does not terminate that thread. Under sustained provider stalls this can consume temporary thread and memory capacity.
+
+The new tests use temporary SQLite and mocked HTTP/generation. They verify bounded waiting, retry count, quota rotation, classified errors, and prompt/error marker absence in captured logs. Real Gemini/Groq/Ollama latency, live quota and failover behavior, production environment settings, browser rendering, and load are **not verified by execution**. This is not a 100-user capacity claim.
