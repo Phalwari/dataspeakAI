@@ -45,6 +45,8 @@ To maintain seamless multi-developer and AI agent collaboration:
 
 ### Changed
 
+- **Business Insights run progress** (`src/app/pages/dashboard/BusinessInsightsPage.tsx`): Replaced the legacy six-layer loading card with a Phase A–F analysis workflow that explains secure scope, catalog discovery, role classification, safe metric planning, quality-aware execution, and the final chart/summary stage. The screen keeps the existing purple and teal visual language while making the run scope, date range, progress and safeguards understandable to business users.
+
 - **Database Connections & Data Preview Support (`backend/services/connection_factory.py`, `backend/services/sql_engine.py`, `backend/routers/databases.py`, `src/app/pages/dashboard/DatabasesPage.tsx`, `tests/test_databases_connection_and_preview.py`, `tests/test_databases_api_e2e.py`)**:
   - **MySQL ANSI_QUOTES & Execution Timeout**: Handled `SET SESSION max_execution_time` gracefully to eliminate MySQL error 1193 on versions lacking the variable; injected `SET SESSION sql_mode = CONCAT(@@sql_mode, ',ANSI_QUOTES')` so table preview queries (`SELECT * FROM "{table_name}"`) execute seamlessly across all MySQL versions.
   - **MongoDB Driver & Introspection Support**: Added PyMongo `ping` routing in `DatabaseConnectionFactory.test_connection`, bypassing SQLAlchemy engine crashes on MongoDB strings; added `_get_mongo_client_and_db()` in `databases.py` supporting collection listing, document preview with `ObjectId` serialization, and collection statistics.

@@ -38,14 +38,15 @@ const PRESETS: [string, string, number | null][] = [
   ['7d', 'Last 7 days', 7]
 ];
 
-// 6 Enterprise Database Layers
-const DB_PIPELINE_LAYERS = [
-  { step: 1, icon: Database, label: 'Layer 1: Multi-Table Relational Schema & Catalog Discovery' },
-  { step: 2, icon: Cpu, label: 'Layer 2: Deterministic Metric Recipes Formulation (Phase 2C)' },
-  { step: 3, icon: Compass, label: 'Layer 3: Rule-Based Chart & Dimensional Filter Planning (Phase 2D/2E)' },
-  { step: 4, icon: Activity, label: 'Layer 4: High-Speed SQL Aggregation & Query Execution' },
-  { step: 5, icon: Sparkles, label: 'Layer 5: Dual-Engine Strategic AI Executive Playbook' },
-  { step: 6, icon: ShieldCheck, label: 'Layer 6: Statistical Outlier & Anomaly Detection Engine' }
+// The progress view explains the safeguards behind the insight report in
+// business-friendly language.
+const INSIGHT_RUN_STAGES = [
+  { phase: 'A', icon: ShieldCheck, title: 'Secure analysis context', description: 'Scope the request to the selected connection and tenant cache.', detail: 'Access & cache safety' },
+  { phase: 'B', icon: Database, title: 'Discover the data catalog', description: 'Review supported tables, columns and declared relationships.', detail: 'Schema discovery' },
+  { phase: 'C', icon: Cpu, title: 'Classify data roles', description: 'Identify dates, identifiers, measures and excluded sensitive fields.', detail: 'Evidence-based roles' },
+  { phase: 'D', icon: Compass, title: 'Plan safe metrics', description: 'Prepare date-aware, dialect-aware read-only calculations.', detail: 'Filters & query plan' },
+  { phase: 'E', icon: Activity, title: 'Execute and validate', description: 'Run bounded aggregates and separate zero, unavailable and error states.', detail: 'Data quality checks' },
+  { phase: 'F', icon: Sparkles, title: 'Prepare decision-ready insights', description: 'Assemble charts, quality notes and an AI or deterministic summary.', detail: 'Report & fallback' }
 ];
 
 // Smooth count hook for KPI numbers
@@ -250,13 +251,13 @@ export function BusinessInsightsPage() {
       .catch(() => {});
   }, [selectedConnection, connections, headers]);
 
-  // 6-Layer Enterprise Database Pipeline Animation (Only on explicit Run or Refresh)
+  // Insight-run progress animation (only on explicit Run or Refresh).
   const triggerAnalysisAnimation = useCallback((onFinish?: () => void) => {
     setAutoGenerateStep('analyzing');
     setAgAnalysisStep(0);
     const interval = setInterval(() => {
       setAgAnalysisStep((prev) => {
-        if (prev >= 5) {
+        if (prev >= INSIGHT_RUN_STAGES.length - 1) {
           clearInterval(interval);
           setTimeout(() => {
             if (onFinish) onFinish();
@@ -595,6 +596,16 @@ export function BusinessInsightsPage() {
       Object.values(row).some((val) => String(val).toLowerCase().includes(term))
     );
   }, [drilldown, drillSearch]);
+
+  const completedAnalysisStages = Math.min(agAnalysisStep, INSIGHT_RUN_STAGES.length);
+  const activeAnalysisStage = INSIGHT_RUN_STAGES[
+    Math.min(agAnalysisStep, INSIGHT_RUN_STAGES.length - 1)
+  ];
+  const analysisProgress = Math.round(
+    (completedAnalysisStages / INSIGHT_RUN_STAGES.length) * 100
+  );
+  const analysisScopeLabel = activeTable ? `${activeTable} table` : 'All catalog tables';
+  const analysisDateLabel = PRESETS.find(([id]) => id === preset)?.[1] || 'All dates';
 
   return (
     <div style={{ flex: 1, minHeight: '100vh', background: 'var(--bg)', color: 'var(--text-primary)', padding: '20px 28px 80px', transition: 'background-color 0.3s ease, color 0.3s ease' }}>
@@ -958,51 +969,94 @@ export function BusinessInsightsPage() {
         </motion.div>
       )}
 
-      {/* VIEW 2: 6-LAYER ENTERPRISE PIPELINE ANIMATION (Only shown on initial run or explicit Refresh) */}
+      {/* VIEW 2: TRUSTED INSIGHT RUN PROGRESS (Only shown on initial run or explicit Refresh) */}
       {autoGenerateStep === 'analyzing' && (
-        <div style={{ minHeight: '500px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ width: '100%', maxWidth: '540px', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: '16px', padding: '28px', boxShadow: 'var(--shadow-card)' }}>
-            <div style={{ textAlign: 'center', marginBottom: '22px' }}>
-              <div style={{ width: '48px', height: '48px', background: 'linear-gradient(135deg,#6c47ff,#00c2cb)', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px', boxShadow: '0 6px 20px rgba(108,71,255,0.35)' }}>
-                <Database size={24} color="#fff" />
+        <div style={{ minHeight: '500px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px 0' }}>
+          <motion.section
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.28 }}
+            aria-live="polite"
+            aria-label="Insight analysis progress"
+            style={{ width: '100%', maxWidth: '780px', overflow: 'hidden', background: 'var(--card)', border: '1px solid rgba(108, 71, 255, 0.2)', borderRadius: '20px', boxShadow: '0 18px 44px rgba(15, 23, 42, 0.10)' }}
+          >
+            <div style={{ padding: '26px 28px 22px', background: 'linear-gradient(135deg, rgba(108, 71, 255, 0.10), rgba(0, 194, 203, 0.08))', borderBottom: '1px solid rgba(108, 71, 255, 0.14)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: '14px', alignItems: 'flex-start' }}>
+                  <div style={{ width: '48px', height: '48px', background: 'linear-gradient(135deg,#6c47ff,#00c2cb)', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 22px rgba(108,71,255,0.30)', flexShrink: 0 }}>
+                    <Layers size={24} color="#fff" />
+                  </div>
+                  <div>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 8px', borderRadius: '999px', background: 'rgba(108, 71, 255, 0.12)', color: '#6246EA', fontSize: '10px', fontWeight: 800, letterSpacing: '0.08em' }}>
+                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10B981', boxShadow: '0 0 0 4px rgba(16,185,129,0.12)' }} />
+                      PHASE A–F INSIGHT RUN
+                    </div>
+                    <h3 style={{ fontSize: '20px', lineHeight: 1.25, fontWeight: 800, color: 'var(--text-primary)', margin: '9px 0 5px', letterSpacing: '-0.02em' }}>
+                      Building a trusted view of your data
+                    </h3>
+                    <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)', margin: 0 }}>
+                      {activeConnName} · {analysisScopeLabel} · {analysisDateLabel}
+                    </p>
+                  </div>
+                </div>
+                <div style={{ padding: '8px 10px', borderRadius: '10px', background: 'rgba(255,255,255,0.68)', border: '1px solid rgba(108, 71, 255, 0.16)', color: '#6246EA', fontSize: '11px', fontWeight: 800, whiteSpace: 'nowrap' }}>
+                  Phase {activeAnalysisStage.phase} in progress
+                </div>
               </div>
-              <h3 style={{ fontSize: '19px', fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 4px' }}>
-                Enterprise Database Pipeline
-              </h3>
-              <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)', margin: 0 }}>
-                Executing 6-layer deterministic analytics on {activeConnName}...
-              </p>
+
+              <div style={{ marginTop: '20px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '8px', color: 'var(--text-secondary)', fontSize: '11px', fontWeight: 700 }}>
+                  <span>{completedAnalysisStages} of {INSIGHT_RUN_STAGES.length} safeguards prepared</span>
+                  <span>{analysisProgress}%</span>
+                </div>
+                <div style={{ height: '8px', overflow: 'hidden', borderRadius: '999px', background: 'rgba(108, 71, 255, 0.12)' }}>
+                  <motion.div animate={{ width: `${analysisProgress}%` }} transition={{ duration: 0.35, ease: 'easeOut' }} style={{ height: '100%', borderRadius: 'inherit', background: 'linear-gradient(90deg, #6C47FF, #00C2CB)' }} />
+                </div>
+              </div>
             </div>
 
-            {DB_PIPELINE_LAYERS.map((s, idx) => {
+            <div style={{ padding: '18px 20px 14px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
+              {INSIGHT_RUN_STAGES.map((s, idx) => {
               const isDone = agAnalysisStep > idx;
               const isActive = agAnalysisStep === idx;
               const Icon = s.icon;
               return (
                 <div
-                  key={idx}
+                  key={s.phase}
                   style={{
                     display: 'flex',
-                    alignItems: 'center',
+                    alignItems: 'flex-start',
                     gap: '12px',
-                    padding: '11px 14px',
-                    borderRadius: '10px',
-                    background: isActive ? 'rgba(108,71,255,0.09)' : isDone ? 'rgba(16,185,129,0.08)' : 'var(--card-elevated, var(--card))',
-                    border: `1px solid ${isActive ? 'rgba(108,71,255,0.3)' : isDone ? 'rgba(16,185,129,0.2)' : 'var(--border)'}`,
-                    marginBottom: '8px',
+                    minHeight: '92px',
+                    padding: '13px',
+                    borderRadius: '12px',
+                    background: isActive ? 'rgba(108,71,255,0.09)' : isDone ? 'rgba(16,185,129,0.075)' : 'var(--card-elevated, var(--card))',
+                    border: `1px solid ${isActive ? 'rgba(108,71,255,0.34)' : isDone ? 'rgba(16,185,129,0.24)' : 'var(--border)'}`,
                     transition: 'all 0.3s ease'
                   }}
                 >
-                  <div style={{ width: '30px', height: '30px', borderRadius: '8px', background: isActive ? 'rgba(108,71,255,0.18)' : isDone ? 'rgba(16,185,129,0.15)' : 'var(--hover-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <div style={{ width: '32px', height: '32px', borderRadius: '9px', background: isActive ? 'rgba(108,71,255,0.18)' : isDone ? 'rgba(16,185,129,0.15)' : 'var(--hover-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     {isDone ? <Check size={16} color="#10B981" /> : isActive ? <Loader2 size={16} className="animate-spin" color="var(--primary)" /> : <Icon size={16} color="var(--text-secondary)" />}
                   </div>
-                  <span style={{ fontSize: '12.5px', fontWeight: 600, color: isActive ? 'var(--primary)' : isDone ? '#10B981' : 'var(--text-secondary)' }}>
-                    {s.label}
-                  </span>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '7px', flexWrap: 'wrap' }}>
+                      <span style={{ color: isActive ? '#6246EA' : isDone ? '#059669' : 'var(--text-secondary)', fontSize: '10px', fontWeight: 800, letterSpacing: '0.06em' }}>PHASE {s.phase}</span>
+                      <span style={{ color: isActive ? '#6246EA' : isDone ? '#059669' : 'var(--text-secondary)', fontSize: '10px', fontWeight: 700 }}>{isDone ? 'Complete' : isActive ? 'Working' : 'Queued'}</span>
+                    </div>
+                    <div style={{ color: isActive ? 'var(--primary)' : isDone ? '#047857' : 'var(--text-primary)', fontSize: '12.5px', fontWeight: 750, marginTop: '3px' }}>{s.title}</div>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '10.5px', lineHeight: 1.45, margin: '4px 0 0' }}>{s.description}</p>
+                  </div>
                 </div>
               );
             })}
           </div>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', padding: '0 20px 20px' }}>
+              {['Read-only analysis', 'Tenant-scoped context', 'Quality-aware results'].map((item) => (
+                <span key={item} style={{ padding: '5px 8px', borderRadius: '999px', background: 'var(--hover-bg)', color: 'var(--text-secondary)', fontSize: '10.5px', fontWeight: 700 }}>{item}</span>
+              ))}
+              <span style={{ marginLeft: 'auto', alignSelf: 'center', color: 'var(--text-secondary)', fontSize: '10.5px' }}>{activeAnalysisStage.detail}</span>
+            </div>
+          </motion.section>
         </div>
       )}
 
