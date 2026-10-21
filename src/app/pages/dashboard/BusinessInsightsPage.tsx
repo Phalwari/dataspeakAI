@@ -970,7 +970,7 @@ export function BusinessInsightsPage() {
       )}
 
       {/* VIEW 2: TRUSTED INSIGHT RUN PROGRESS (Only shown on initial run or explicit Refresh) */}
-      {autoGenerateStep === 'analyzing' && (
+      {autoGenerateStep === 'analyzing' && !pipelineData && (
         <div style={{ minHeight: '500px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px 0' }}>
           <motion.section
             initial={{ opacity: 0, y: 12 }}
@@ -1061,7 +1061,7 @@ export function BusinessInsightsPage() {
       )}
 
       {/* VIEW 3: FULL ENTERPRISE DASHBOARD WITH DRILLDOWN & SPARKLINES */}
-      {pipelineData && autoGenerateStep !== 'analyzing' && (
+      {pipelineData && (
         <motion.div
           id="bi-dashboard-export-target"
           className="bi-hub"
