@@ -68,10 +68,11 @@ def test_mongo_read_plan_enforces_collection_publication_and_valid_aggregate():
         validate_plan({**query,"collection":"system.users"})
 
 
-def test_mongo_dates_bind_only_catalog_date_fields():
+@pytest.mark.parametrize('bson_type',['date','datetime'])
+def test_mongo_dates_bind_only_catalog_date_fields(bson_type):
     from datetime import datetime
     original=[{'$match':{'created_at':{'$gte':'2026-10-01'},'label':'2026-10-01'}}]
-    bound=bind_date_filters(original,{'created_at':['date'],'label':['string']})
+    bound=bind_date_filters(original,{'created_at':[bson_type],'label':['string']})
     assert isinstance(bound[0]['$match']['created_at']['$gte'],datetime)
     assert bound[0]['$match']['label']=='2026-10-01'
     assert original[0]['$match']['created_at']['$gte']=='2026-10-01'

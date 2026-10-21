@@ -1,5 +1,7 @@
 # Live demo acceptance review — 21 October 2026
 
+**Historical baseline:** DQA-01..10 were subsequently addressed and verified in the [22 October remediation report](../demo_qa_remediation_2026-10-22/REPORT.md). The findings and 30/10 results below describe the original pre-fix run.
+
 **Verdict: the chatbot and DB AI Insights are not ready for professional sign-off.** Core relational calculations work on these fixtures, but document retrieval/grounding, MongoDB chat, filtered metric consistency, and presentation contain reproducible defects. Findings are recorded, not repaired by this task.
 
 ## Environment and completed setup

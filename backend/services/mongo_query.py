@@ -145,7 +145,7 @@ def bind_date_filters(pipeline, columns):
         result={}
         for key,value in spec.items():
             types=columns.get(key,[])
-            if 'date' in types:
+            if {'date', 'datetime'} & set(types):
                 result[key]=convert(value)
             elif key in {'$and','$or'}:
                 result[key]=[match_fields(item) for item in value]

@@ -25,8 +25,8 @@ LOW_CONFIDENCE_THRESHOLD = 0.60
 NEGATION_TOKENS = {
     "not", "never", "no", "none", "neither", "nor", "without",
     "hardly", "scarcely", "barely", "failed", "fails", "cannot", "can't",
-    "won't", "didn't", "doesn't", "isn't", "aren't", "wasn't", "weren't"
-    , "unspecified", "undocumented", "unavailable", "unknown"
+    "won't", "didn't", "doesn't", "isn't", "aren't", "wasn't", "weren't",
+    "unspecified", "undocumented", "unavailable", "unknown"
 }
 
 

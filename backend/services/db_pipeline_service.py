@@ -2161,6 +2161,8 @@ class DatabasePipelineService:
                             trend_sub = "verified documents"
                         except Exception:
                             try:
+                                if dimension_match:
+                                    raise RuntimeError("Scoped document count unavailable")
                                 total_records = coll.count_documents({})
                                 trend_sub = "verified documents"
                             except Exception:
@@ -2291,7 +2293,8 @@ class DatabasePipelineService:
                                     continue
                             d_vals = (
                                 coll.distinct(d_col, {t_col: {"$ne": None, **date_match}, **dimension_match})
-                                if date_match else coll.distinct(d_col)
+                                if date_match else coll.distinct(d_col, dimension_match)
+                                if dimension_match else coll.distinct(d_col)
                             )
                             d_cnt = len(d_vals)
                             computed_kpis.append({
@@ -2420,7 +2423,7 @@ class DatabasePipelineService:
                             query_errors.append(f"{chart_id}: MongoDB chart aggregation failed.")
 
                     # 4C. Special Secondary Collection Charts (e.g. geographic boundaries or entity complexity)
-                    if tbl != primary_tbl:
+                    if tbl != primary_tbl and not date_filter_requested and not dimension_match:
                         try:
                             # Check if collection has coordinates/geometry
                             sample_geom = coll.find_one({"geometry.coordinates": {"$exists": True}})

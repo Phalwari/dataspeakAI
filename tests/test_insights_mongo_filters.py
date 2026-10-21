@@ -45,6 +45,7 @@ def run_mongo_case(
     isolated_db, monkeypatch, collection, *, with_date=True,
     date_from="2026-01-01", date_to="2026-01-02", fail_lookup=False,
     columns_override=None,
+    filter_column=None, filter_value=None,
 ):
     columns = dict(columns_override or {"amount": "number", "state": "string"})
     if with_date:
@@ -99,7 +100,27 @@ def run_mongo_case(
     return pipeline.DatabasePipelineService().run_db_pipeline(
         db=isolated_db, connection_id=connection.id, tenant_id=tenant.id,
         date_from=date_from, date_to=date_to,
+        filter_column=filter_column, filter_value=filter_value,
     )
+
+
+def test_dimension_only_filter_reaches_counts_and_distinct(isolated_db, monkeypatch):
+    collection = FakeCollection()
+    run_mongo_case(isolated_db, monkeypatch, collection, with_date=False,
+                   date_from=None, date_to=None, filter_column="orders.state", filter_value="cancelled")
+    assert collection.count_queries == [{"state": "cancelled"}]
+    # Metric distincts are scoped; the later selector-options query intentionally
+    # lists other selectable states and is not a metric population.
+    assert collection.distinct_queries[0] == ("state", {"state": "cancelled"})
+    assert collection.estimated_calls == 0
+
+
+def test_dimension_count_failure_never_falls_back_to_all_documents(isolated_db, monkeypatch):
+    collection = FakeCollection(fail_count=True)
+    result = run_mongo_case(isolated_db, monkeypatch, collection, with_date=False,
+                            date_from=None, date_to=None, filter_column="orders.state", filter_value="cancelled")
+    assert collection.count_queries == [{"state": "cancelled"}]
+    assert next(m for m in result["key_metrics"] if m["id"] == "orders_total_rows")["status"] == "error"
 
 
 def test_orders_collection_uses_mongo_branch_and_exclusive_calendar_bounds(isolated_db, monkeypatch):

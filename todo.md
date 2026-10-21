@@ -2,18 +2,8 @@
 
 ## Live demo QA follow-up — 2026-10-21
 
-Owner-requested setup and live acceptance review completed; **product sign-off withheld**. Evidence, exact repro requests, affected files, expected values, and verification criteria are in `docs/reports/demo_qa_2026-10-21/REPORT.md` and `evidence.json`. Existing phase plans are unchanged. Each item depends only on the archived demo fixture/setup task; do not mark fixes complete without rerunning the corresponding live check.
+All ten demo QA findings were implemented and verified on 2026-10-22. Their complete task lines are archived below. Evidence and remaining production boundaries: `docs/reports/demo_qa_remediation_2026-10-22/REPORT.md`. Existing phase plans remain unchanged; this does not certify provider availability, load capacity, or Planner V2 cutover.
 
-- [ ] **DQA-01 (P1)** — Render market share separately from growth; never derive a historical baseline from `Top Market.trend_pct`. Verify the coffee dashboard no longer invents previous 8,788.094 / +41.1% growth.
-- [ ] **DQA-02 (P1)** — Propagate dimension scope across joined metrics or mark them unavailable. East coffee must report 6 customers / 240 units, not global 24 / 600.
-- [ ] **DQA-03 (P1)** — Repair widget evidence retrieval/context assembly. With demo documents 3–5 published, answer coffee 30 days / $100 and Orbit 1 business hour.
-- [ ] **DQA-04 (P1)** — Ground factual answers against their actual parent/child evidence and exclude suggested questions from claims. Verify three correct policy answers are supported and not labeled Evidence Contradicted.
-- [ ] **DQA-05 (P1)** — Add bounded Mongo chatbot execution or an explicit unsupported-capability response. Never route a Mongo URI to SQLAlchemy SQL; verify invoices 160 / $16,300 and paid $14,736.
-- [ ] **DQA-06 (P2)** — Produce semantically labeled summaries/fallbacks from available relational metrics; coffee $30,200 / 240 rows must not yield insufficient data.
-- [ ] **DQA-07 (P2)** — Honor chart `yKey`/`val` in rankings; East must show $12,400 instead of 0.00.
-- [ ] **DQA-08 (P2)** — Reject nonexistent table scope rather than returning success for customers. Verify `missing_table` returns a clear 400/404/422 without unrelated metric results.
-- [ ] **DQA-09 (P2)** — Preserve question intent in provider/unknown-answer fallback; distinguish cooldown and unavailable evidence, and explicitly abstain for unspecified loyalty conversion/guaranteed forecasts.
-- [ ] **DQA-10 (P2)** — Provide an explicit gross-billed versus paid-revenue recipe for the Mongo billing scenario, retaining unavailable states for unsupported MRR/churn.
 
 This document is the **single authoritative backlog and task tracking standard** for all human developers and AI coding agents (Antigravity, Cursor, Copilot, Claude Code) working on the **DataSpeakAI** codebase.
 
@@ -41,6 +31,18 @@ Every AI agent working on this repository **MUST** adhere to this 4-step workflo
    - Mark the checkbox with `[x]`.
    - Add completion metadata: `[Completed: YYYY-MM-DD | Agent/Role | Short Summary]`.
    - **Move the completed task item** from the active phase section into the [## 📦 Archived / Completed Tasks
+
+- [x] **DQA-01 (P1)** — Render market share separately from growth; never derive a historical baseline from `Top Market.trend_pct`. Verify the coffee dashboard no longer invents previous 8,788.094 / +41.1% growth. [Completed: 2026-10-22 | Codex / Implementation & QA | Verified against demo data and regression suites; see docs/reports/demo_qa_remediation_2026-10-22/REPORT.md.]
+- [x] **DQA-02 (P1)** — Propagate dimension scope across joined metrics or mark them unavailable. East coffee must report 6 customers / 240 units, not global 24 / 600. [Completed: 2026-10-22 | Codex / Implementation & QA | Verified against demo data and regression suites; see docs/reports/demo_qa_remediation_2026-10-22/REPORT.md.]
+- [x] **DQA-03 (P1)** — Repair widget evidence retrieval/context assembly. With demo documents 3–5 published, answer coffee 30 days / $100 and Orbit 1 business hour. [Completed: 2026-10-22 | Codex / Implementation & QA | Verified against demo data and regression suites; see docs/reports/demo_qa_remediation_2026-10-22/REPORT.md.]
+- [x] **DQA-04 (P1)** — Ground factual answers against their actual parent/child evidence and exclude suggested questions from claims. Verify three correct policy answers are supported and not labeled Evidence Contradicted. [Completed: 2026-10-22 | Codex / Implementation & QA | Verified against demo data and regression suites; see docs/reports/demo_qa_remediation_2026-10-22/REPORT.md.]
+- [x] **DQA-05 (P1)** — Add bounded Mongo chatbot execution or an explicit unsupported-capability response. Never route a Mongo URI to SQLAlchemy SQL; verify invoices 160 / $16,300 and paid $14,736. [Completed: 2026-10-22 | Codex / Implementation & QA | Verified against demo data and regression suites; see docs/reports/demo_qa_remediation_2026-10-22/REPORT.md.]
+- [x] **DQA-06 (P2)** — Produce semantically labeled summaries/fallbacks from available relational metrics; coffee $30,200 / 240 rows must not yield insufficient data. [Completed: 2026-10-22 | Codex / Implementation & QA | Verified against demo data and regression suites; see docs/reports/demo_qa_remediation_2026-10-22/REPORT.md.]
+- [x] **DQA-07 (P2)** — Honor chart `yKey`/`val` in rankings; East must show $12,400 instead of 0.00. [Completed: 2026-10-22 | Codex / Implementation & QA | Verified against demo data and regression suites; see docs/reports/demo_qa_remediation_2026-10-22/REPORT.md.]
+- [x] **DQA-08 (P2)** — Reject nonexistent table scope rather than returning success for customers. Verify `missing_table` returns a clear 400/404/422 without unrelated metric results. [Completed: 2026-10-22 | Codex / Implementation & QA | Verified against demo data and regression suites; see docs/reports/demo_qa_remediation_2026-10-22/REPORT.md.]
+- [x] **DQA-09 (P2)** — Preserve question intent in provider/unknown-answer fallback; distinguish cooldown and unavailable evidence, and explicitly abstain for unspecified loyalty conversion/guaranteed forecasts. [Completed: 2026-10-22 | Codex / Implementation & QA | Verified against demo data and regression suites; see docs/reports/demo_qa_remediation_2026-10-22/REPORT.md.]
+- [x] **DQA-10 (P2)** — Provide an explicit gross-billed versus paid-revenue recipe for the Mongo billing scenario, retaining unavailable states for unsupported MRR/churn. [Completed: 2026-10-22 | Codex / Implementation & QA | Verified against demo data and regression suites; see docs/reports/demo_qa_remediation_2026-10-22/REPORT.md.]
+
 
 - [x] **DQA-SETUP-20261021 — Replace owner-selected tenant sources with three live demo engines and documents; evaluate chatbot and DB Insights** [Completed: 2026-10-21 | Codex / QA | PostgreSQL/MySQL/MongoDB seeded and connected; three policies indexed; 40 checks: 30 passed, 10 failed; report and DQA-01..10 follow-ups recorded. This completes the review, not defect remediation or production sign-off.]
   - Verification: live signed HTTP, independent fixture totals, two SSE completions, standalone widget origin checks, browser inspection, frontend build, Python compilation, and git diff check. Report: `docs/reports/demo_qa_2026-10-21/REPORT.md`.

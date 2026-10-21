@@ -17,6 +17,10 @@ To maintain seamless multi-developer and AI agent collaboration:
 
 ## [Unreleased]
 
+### Fixed — Demo QA remediation (2026-10-22)
+
+- Resolved DQA-01..10: removed fabricated KPI history; fixed chart value-key rankings, scoped customer/unit/Mongo distinct metrics and L2 cache reuse, missing-table rejection with audit retention, Decimal monetary summaries, and safe summary labels. Added bounded catalog-validated Mongo chat read plans with BSON date binding and an explicit paid-billing metric. Corrected passage identity in hybrid retrieval, unified widget parent evidence, aligned claim verification to actual paragraphs/sentences, excluded nonclaims, and made provider fallback honest while preserving streaming failover. See `docs/reports/demo_qa_remediation_2026-10-22/REPORT.md` and captured live evidence. Verification: 231 affected backend tests passed; a later overlapping 38-test Mongo edge suite passed; 47 frontend tests and the production build passed. Provider quotas remain an external availability limitation; no Planner V2 default cutover or production load certification is claimed.
+
 ### Added — Live demo QA (2026-10-21)
 
 - Provisioned isolated loopback PostgreSQL coffee retail, MySQL solar wholesale, and MongoDB subscription billing demo sources for the owner-selected tenant; replaced its prior saved connections/datasets and pre-demo conversations, and indexed three demo policy documents. Added reusable provisioning, live HTTP probing, and evidence evaluation utilities in `tests/manual/`, fixtures in `tests/fixtures/demo_business/`, and the acceptance report/evidence in `docs/reports/demo_qa_2026-10-21/`. Forty targeted checks yielded 30 passes and 10 failures; recorded open retrieval/grounding, Mongo chat, filtered-population, summary, ranking, and selected-table defects. No production defect fixes or Planner V2 cutover are claimed.
