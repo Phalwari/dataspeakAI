@@ -99,6 +99,9 @@ MIGRATION_COLUMNS = [
     # Phase 7: Task 7.2.2 Hierarchical Document Chunks
     ("document_chunks", "parent_chunk_id", "INTEGER", "INTEGER"),
     ("document_chunks", "hierarchy_level", "INTEGER DEFAULT 1", "INTEGER DEFAULT 1"),
+    # User Profile Columns (Avatar & Phone)
+    ("users", "avatar_url", "VARCHAR(500)", "VARCHAR(500)"),
+    ("users", "phone", "VARCHAR(50)", "VARCHAR(50)"),
 ]
 
 

@@ -55,6 +55,8 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
     tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True)
+    avatar_url = Column(String(500), nullable=True)
+    phone = Column(String(50), nullable=True)
     created_at = Column(DateTime, default=utc_now)
 
     tenant = relationship("Tenant", back_populates="users")

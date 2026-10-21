@@ -51,6 +51,7 @@ export function DashboardLayout() {
   const navigate = useNavigate();
   const [userName, setUserName] = useState("Loading...");
   const [userRole, setUserRole] = useState("Member");
+  const [userAvatar, setUserAvatar] = useState("");
   const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
   const [organizationName, setOrganizationName] = useState("Loading...");
 
@@ -77,6 +78,7 @@ export function DashboardLayout() {
         const userData = await userRes.json();
         setUserName(userData.full_name || userData.email);
         setUserRole(userData.role || "Member");
+        setUserAvatar(userData.avatar_url || "");
         setIsPlatformAdmin(Boolean(userData.is_platform_admin));
 
         // Fetch Tenant
@@ -92,6 +94,9 @@ export function DashboardLayout() {
       }
     };
     fetchProfile();
+
+    window.addEventListener("profileUpdated", fetchProfile);
+    return () => window.removeEventListener("profileUpdated", fetchProfile);
   }, []);
 
   const handleLogout = () => {
@@ -213,7 +218,7 @@ export function DashboardLayout() {
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" className="gap-2">
                     <Avatar className="w-8 h-8">
-                      <AvatarImage src="" />
+                      <AvatarImage src={userAvatar ? (userAvatar.startsWith("http") ? userAvatar : `${API_BASE_URL}${userAvatar}`) : ""} />
                       <AvatarFallback>{userName.charAt(0).toUpperCase()}</AvatarFallback>
                     </Avatar>
                     <span className="text-sm">{userName}</span>
