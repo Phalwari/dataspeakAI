@@ -106,87 +106,114 @@ export function DashboardLayout() {
   };
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex h-screen bg-slate-50/50">
       {/* Sidebar */}
-      <aside className="w-64 bg-white border-r border-gray-200 flex flex-col h-full shadow-xs">
+      <aside className="w-60 bg-white border-r border-slate-200/80 flex flex-col h-full shadow-xs shrink-0 select-none">
         {/* Sidebar Brand Header */}
-        <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center shadow-xs">
-              <MessageSquareCode className="w-4 h-4 text-white" />
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center shadow-xs shadow-blue-500/20 shrink-0">
+              <MessageSquareCode className="w-3.5 h-3.5 text-white" />
             </div>
-            <div>
-              <span className="font-bold text-base tracking-tight text-gray-900 block leading-tight">DataSpeakAI</span>
-              <span className="text-[10px] font-semibold text-blue-600 tracking-wider uppercase block">Conversational BI</span>
+            <div className="min-w-0">
+              <span className="font-bold text-[15px] tracking-tight text-slate-900 block leading-tight truncate">
+                DataSpeak<span className="text-blue-600">AI</span>
+              </span>
+              <span className="text-[9.5px] font-semibold text-blue-600 tracking-wider uppercase block">
+                Conversational BI
+              </span>
             </div>
           </div>
         </div>
 
         {/* Navigation Items */}
-        <nav className="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
+        <nav className="flex-1 px-2.5 py-2 space-y-0.5 overflow-y-auto custom-sidebar-scroll">
           {navigation.map((item) => (
             <NavLink
               key={item.name}
               to={item.href}
               end={item.href === "/dashboard"}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all ${
+                `group flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 ${
                   isActive
-                    ? "bg-blue-50 text-blue-600 font-semibold shadow-xs"
-                    : "text-gray-600 hover:text-gray-900 hover:bg-gray-100/70"
+                    ? "bg-blue-600 text-white shadow-xs shadow-blue-500/25 font-semibold"
+                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-100/80"
                 }`
               }
             >
-              <item.icon className="w-4 h-4 shrink-0" />
-              <span className="truncate">{item.name}</span>
+              {({ isActive }) => (
+                <>
+                  <item.icon
+                    className={`w-4 h-4 shrink-0 transition-colors ${
+                      isActive ? "text-white" : "text-slate-500 group-hover:text-slate-800"
+                    }`}
+                  />
+                  <span className="truncate">{item.name}</span>
+                </>
+              )}
             </NavLink>
           ))}
 
           {/* Conditional Platform Admin Navigation */}
           {isPlatformAdmin && (
-            <div className="pt-2.5 mt-2.5 border-t border-gray-200">
-              <div className="px-3 mb-1 text-[10px] font-bold tracking-wider text-purple-700 uppercase">
+            <div className="pt-2 mt-2 border-t border-slate-200/80">
+              <div className="px-2.5 mb-1 text-[9.5px] font-bold tracking-wider text-purple-700 uppercase">
                 Platform Operations
               </div>
               <NavLink
                 to="/admin"
                 className={({ isActive }) =>
-                  `flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-all ${
+                  `group flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-all duration-150 ${
                     isActive
-                      ? "bg-purple-100/70 text-purple-800 font-semibold"
+                      ? "bg-purple-600 text-white font-semibold shadow-xs"
                       : "text-purple-700 hover:bg-purple-50"
                   }`
                 }
               >
-                <div className="flex items-center gap-3">
-                  <ShieldAlert className="w-4 h-4 text-purple-600 shrink-0" />
-                  <span>Platform Admin</span>
-                </div>
-                <Badge variant="secondary" className="bg-purple-100 text-purple-800 text-[10px] px-1.5 py-0 border-purple-200 font-semibold">
-                  Root
-                </Badge>
+                {({ isActive }) => (
+                  <>
+                    <div className="flex items-center gap-2.5">
+                      <ShieldAlert
+                        className={`w-4 h-4 shrink-0 transition-colors ${
+                          isActive ? "text-white" : "text-purple-600"
+                        }`}
+                      />
+                      <span>Platform Admin</span>
+                    </div>
+                    <Badge
+                      variant="secondary"
+                      className={`text-[9.5px] px-1.5 py-0 font-semibold ${
+                        isActive
+                          ? "bg-purple-700 text-white border-transparent"
+                          : "bg-purple-100 text-purple-800 border-purple-200"
+                      }`}
+                    >
+                      Root
+                    </Badge>
+                  </>
+                )}
               </NavLink>
             </div>
           )}
         </nav>
 
         {/* Sidebar Footer — Compact User Profile */}
-        <div className="p-3 border-t border-gray-200 bg-gray-50/60">
-          <div className="flex items-center justify-between gap-2 p-1.5 rounded-lg hover:bg-gray-100/80 transition-colors">
+        <div className="p-2.5 border-t border-slate-100 bg-slate-50/50">
+          <div className="flex items-center justify-between gap-2 p-1 rounded-lg hover:bg-slate-100/80 transition-colors">
             <div
               onClick={() => navigate("/dashboard/settings")}
-              className="flex items-center gap-2.5 min-w-0 flex-1 cursor-pointer"
+              className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer"
               title="Open Account Settings"
             >
-              <Avatar className="w-8 h-8 shrink-0 ring-1 ring-gray-200">
+              <Avatar className="w-7 h-7 shrink-0 ring-1 ring-slate-200">
                 <AvatarImage src={userAvatar ? (userAvatar.startsWith("http") ? userAvatar : `${API_BASE_URL}${userAvatar}`) : ""} />
-                <AvatarFallback className="text-xs font-semibold bg-blue-600 text-white">
+                <AvatarFallback className="text-[11px] font-semibold bg-blue-600 text-white">
                   {userName.charAt(0).toUpperCase()}
                 </AvatarFallback>
               </Avatar>
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium text-gray-900 truncate">{userName}</p>
-                <p className="text-[11px] text-gray-500 truncate">{organizationName}</p>
+                <p className="text-xs font-semibold text-slate-800 truncate leading-tight">{userName}</p>
+                <p className="text-[10px] text-slate-400 truncate leading-tight mt-0.5">{organizationName}</p>
               </div>
             </div>
             <Button
@@ -194,7 +221,7 @@ export function DashboardLayout() {
               size="icon"
               onClick={handleLogout}
               title="Sign Out"
-              className="h-7 w-7 text-gray-400 hover:text-red-600 hover:bg-red-50 shrink-0"
+              className="h-6 w-6 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md shrink-0 p-1"
             >
               <LogOut className="w-3.5 h-3.5" />
             </Button>
