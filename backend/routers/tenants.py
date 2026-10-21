@@ -1,5 +1,6 @@
 import os
 import uuid
+from html import escape
 from datetime import datetime, timedelta, timezone
 from typing import List
 
@@ -127,6 +128,7 @@ def invite_member(
 
     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
     invite_link = f"{frontend_url}/signup?invite_token={token}"
+    safe_invite_link = escape(invite_link, quote=True)
     email_sent = send_email(
         to=invite.email,
         subject="You are invited to DataSpeakAI",
@@ -136,7 +138,7 @@ def invite_member(
         ),
         html_body=(
             "<p>You have been invited to join DataSpeakAI.</p>"
-            f'<p><a href="{invite_link}">Create your account</a></p>'
+            f'<p><a href="{safe_invite_link}">Create your account</a></p>'
         ),
     )
     return {"invite_link": invite_link, "email": invite.email, "email_sent": email_sent}

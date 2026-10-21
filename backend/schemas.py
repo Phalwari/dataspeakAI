@@ -124,6 +124,7 @@ class TenantMemberUpdate(BaseModel):
 class InviteResponse(BaseModel):
     invite_link: str
     email: EmailStr
+    email_sent: bool = False
 
 class UserLogin(BaseModel):
     email: EmailStr

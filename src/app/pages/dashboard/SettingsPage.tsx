@@ -44,6 +44,7 @@ export function SettingsPage() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("Viewer");
   const [inviteLink, setInviteLink] = useState("");
+  const [inviteEmailSent, setInviteEmailSent] = useState<boolean | null>(null);
   const [isInviting, setIsInviting] = useState(false);
   
   const [currentPassword, setCurrentPassword] = useState("");
@@ -336,6 +337,7 @@ export function SettingsPage() {
     if (!inviteEmail) return;
     setIsInviting(true);
     setInviteLink("");
+    setInviteEmailSent(null);
     const token = localStorage.getItem("token");
     if (!token) return;
 
@@ -356,6 +358,7 @@ export function SettingsPage() {
       if (response.ok) {
         const data = await response.json();
         setInviteLink(data.invite_link);
+        setInviteEmailSent(Boolean(data.email_sent));
         setInviteEmail("");
       }
     } catch (error) {
@@ -815,7 +818,11 @@ export function SettingsPage() {
                 
                 {inviteLink && (
                   <div className="mt-4 p-4 bg-blue-50 text-blue-800 border border-blue-200 rounded-md">
-                    <p className="font-medium mb-2">Invitation generated successfully! Share this link with your team member:</p>
+                    <p className="font-medium mb-2">
+                      {inviteEmailSent
+                        ? "Invitation email sent successfully. You can also share this link:"
+                        : "Invitation generated, but email delivery is not configured. Share this link:"}
+                    </p>
                     <code className="block p-2 bg-white rounded border border-blue-100 break-all text-sm">
                       {inviteLink}
                     </code>
