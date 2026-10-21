@@ -45,6 +45,8 @@ To maintain seamless multi-developer and AI agent collaboration:
 
 ### Changed
 
+- **Database connection cards** (`src/app/pages/dashboard/DatabasesPage.tsx`): Removed the inactive settings control so each card only shows actions that are available to users.
+
 - **Business Insights run progress** (`src/app/pages/dashboard/BusinessInsightsPage.tsx`): Replaced the legacy six-layer loading card with a Phase A–F analysis workflow that explains secure scope, catalog discovery, role classification, safe metric planning, quality-aware execution, and the final chart/summary stage. The screen keeps the existing purple and teal visual language while making the run scope, date range, progress and safeguards understandable to business users.
 
 - **Database Connections & Data Preview Support (`backend/services/connection_factory.py`, `backend/services/sql_engine.py`, `backend/routers/databases.py`, `src/app/pages/dashboard/DatabasesPage.tsx`, `tests/test_databases_connection_and_preview.py`, `tests/test_databases_api_e2e.py`)**:
