@@ -1,5 +1,20 @@
 # DataSpeakAI — Master Engineering Roadmap & Task Tracker (`todo.md`)
 
+## Live demo QA follow-up — 2026-10-21
+
+Owner-requested setup and live acceptance review completed; **product sign-off withheld**. Evidence, exact repro requests, affected files, expected values, and verification criteria are in `docs/reports/demo_qa_2026-10-21/REPORT.md` and `evidence.json`. Existing phase plans are unchanged. Each item depends only on the archived demo fixture/setup task; do not mark fixes complete without rerunning the corresponding live check.
+
+- [ ] **DQA-01 (P1)** — Render market share separately from growth; never derive a historical baseline from `Top Market.trend_pct`. Verify the coffee dashboard no longer invents previous 8,788.094 / +41.1% growth.
+- [ ] **DQA-02 (P1)** — Propagate dimension scope across joined metrics or mark them unavailable. East coffee must report 6 customers / 240 units, not global 24 / 600.
+- [ ] **DQA-03 (P1)** — Repair widget evidence retrieval/context assembly. With demo documents 3–5 published, answer coffee 30 days / $100 and Orbit 1 business hour.
+- [ ] **DQA-04 (P1)** — Ground factual answers against their actual parent/child evidence and exclude suggested questions from claims. Verify three correct policy answers are supported and not labeled Evidence Contradicted.
+- [ ] **DQA-05 (P1)** — Add bounded Mongo chatbot execution or an explicit unsupported-capability response. Never route a Mongo URI to SQLAlchemy SQL; verify invoices 160 / $16,300 and paid $14,736.
+- [ ] **DQA-06 (P2)** — Produce semantically labeled summaries/fallbacks from available relational metrics; coffee $30,200 / 240 rows must not yield insufficient data.
+- [ ] **DQA-07 (P2)** — Honor chart `yKey`/`val` in rankings; East must show $12,400 instead of 0.00.
+- [ ] **DQA-08 (P2)** — Reject nonexistent table scope rather than returning success for customers. Verify `missing_table` returns a clear 400/404/422 without unrelated metric results.
+- [ ] **DQA-09 (P2)** — Preserve question intent in provider/unknown-answer fallback; distinguish cooldown and unavailable evidence, and explicitly abstain for unspecified loyalty conversion/guaranteed forecasts.
+- [ ] **DQA-10 (P2)** — Provide an explicit gross-billed versus paid-revenue recipe for the Mongo billing scenario, retaining unavailable states for unsupported MRR/churn.
+
 This document is the **single authoritative backlog and task tracking standard** for all human developers and AI coding agents (Antigravity, Cursor, Copilot, Claude Code) working on the **DataSpeakAI** codebase.
 
 All agents must strictly follow the **Agent Execution & Maintenance Protocol** below when claiming, executing, and closing tasks.
@@ -25,7 +40,11 @@ Every AI agent working on this repository **MUST** adhere to this 4-step workflo
    - When a task is completed, **do NOT leave it in the active phase list**.
    - Mark the checkbox with `[x]`.
    - Add completion metadata: `[Completed: YYYY-MM-DD | Agent/Role | Short Summary]`.
-   - **Move the completed task item** from the active phase section into the [## 📦 Archived / Completed Tasks](#-archived--completed-tasks) section at the bottom of this file.
+   - **Move the completed task item** from the active phase section into the [## 📦 Archived / Completed Tasks
+
+- [x] **DQA-SETUP-20261021 — Replace owner-selected tenant sources with three live demo engines and documents; evaluate chatbot and DB Insights** [Completed: 2026-10-21 | Codex / QA | PostgreSQL/MySQL/MongoDB seeded and connected; three policies indexed; 40 checks: 30 passed, 10 failed; report and DQA-01..10 follow-ups recorded. This completes the review, not defect remediation or production sign-off.]
+  - Verification: live signed HTTP, independent fixture totals, two SSE completions, standalone widget origin checks, browser inspection, frontend build, Python compilation, and git diff check. Report: `docs/reports/demo_qa_2026-10-21/REPORT.md`.
+](#-archived--completed-tasks) section at the bottom of this file.
 
 4. **Changelog & Documentation Update**:
    - Update [`CHANGELOG.md`](file:///d:/dataspeak/CHANGELOG.md) under `## [Unreleased]` with a clear, descriptive bullet point under the proper category (`Added`, `Changed`, `Fixed`, `Security`).

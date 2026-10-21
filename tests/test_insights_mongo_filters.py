@@ -29,7 +29,7 @@ class FakeCollection:
         self.estimated_calls += 1
         return 99
 
-    def aggregate(self, stages):
+    def aggregate(self, stages, **kwargs):
         self.aggregate_pipelines.append(stages)
         return []
 

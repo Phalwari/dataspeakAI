@@ -17,6 +17,10 @@ To maintain seamless multi-developer and AI agent collaboration:
 
 ## [Unreleased]
 
+### Added — Live demo QA (2026-10-21)
+
+- Provisioned isolated loopback PostgreSQL coffee retail, MySQL solar wholesale, and MongoDB subscription billing demo sources for the owner-selected tenant; replaced its prior saved connections/datasets and pre-demo conversations, and indexed three demo policy documents. Added reusable provisioning, live HTTP probing, and evidence evaluation utilities in `tests/manual/`, fixtures in `tests/fixtures/demo_business/`, and the acceptance report/evidence in `docs/reports/demo_qa_2026-10-21/`. Forty targeted checks yielded 30 passes and 10 failures; recorded open retrieval/grounding, Mongo chat, filtered-population, summary, ranking, and selected-table defects. No production defect fixes or Planner V2 cutover are claimed.
+
 ### Added
 
 - **Opt-in Insights Planner V2 (Phase F0–F7; F8 parity partial)** (`backend/services/insights/`, `backend/services/db_pipeline_service.py`, `backend/services/sql_dialect.py`, `tests/test_insights_planner_v2.py`, `tests/test_insights_generic_fixtures.py`): Added normalized SQL/Mongo catalogs, bounded metadata-only profiling, evidence-scored roles, pure metric plans, catalog-allowlisted SQL compilation, FK and conservative inferred joins, status-aware Mongo aggregation, query budgets, and versioned profile caching. Headline metrics distinguish Gross Revenue (all statuses) and Net Revenue (delivered only). `INSIGHTS_PLANNER` stays opt-in with `legacy` default pending full ten-family parity review and owner cutover approval. Temporary SQLite/fake Mongo tests only; PostgreSQL, MySQL/MariaDB and live MongoDB execution are not verified by execution. See `docs/insights/PLANNER_V2.md`, `docs/insights/KNOWN_ISSUES.md`, and the [Phase F session log](docs/sessions/2026-10-21_insights_phase_f.md).

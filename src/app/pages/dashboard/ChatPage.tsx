@@ -1034,7 +1034,7 @@ export function ChatPage() {
                                   : msg.metadata_json.grounding.status === "no_claims"
                                   ? "No Factual Claims"
                                   : msg.metadata_json.grounding.status === "unsupported"
-                                  ? "Evidence Contradicted"
+                                  ? "Evidence Not Supported"
                                   : (msg.metadata_json.grounding.confidence ?? 0) >= 0.65
                                   ? "Verified Grounding"
                                   : "Unverified Grounding"}

@@ -441,6 +441,13 @@ def validate_widget_sql(sql_query: str, allowed_tables: Optional[List[str]] = No
     4. Enforces strict exact table allowlist matching (SEC-01, no tbl.split('.')[-1] bypass).
     5. Detects CTE trickery, UNION to disallowed tables, comma joins, and stacked injection attempts.
     """
+    if sql_query.lstrip().startswith("{"):
+        try:
+            from services.mongo_query import validate_plan
+            validate_plan(sql_query, allowed_tables=allowed_tables)
+            return True, ""
+        except (ValueError, TypeError):
+            return False, "Invalid or unpublished MongoDB read plan"
     is_valid, reason = validate_read_only_sql(sql_query)
     if not is_valid:
         return False, reason
@@ -499,6 +506,10 @@ def generate_sql_from_nl(
     and automatic in-flight retry loop) to generate a verified, read-only SQL query.
     Enforces allowed_tables restriction if provided (NR-1.1-B-T07).
     """
+    if str(db_conn.db_type).lower() == "mongodb":
+        from services.mongo_query import generate_mongo_query
+        return generate_mongo_query(db_conn, user_question, allowed_tables=allowed_tables,
+                                    conversation_history=conversation_history, tenant_id=tenant_id)
     try:
         from services.sql_agent import sql_agent
         return sql_agent.run(
@@ -632,6 +643,9 @@ def execute_safe_sql(
     else:
         actual_query = sql_query
 
+    if str(db_conn.db_type).lower() == "mongodb":
+        from services.mongo_query import execute_mongo_query
+        return execute_mongo_query(db_conn, actual_query, max_rows, timeout_ceiling)
     is_valid, reason = validate_read_only_sql(actual_query)
     if not is_valid:
         raise ValueError(f"SQL Guardrail Violation: {reason}")

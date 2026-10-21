@@ -555,27 +555,7 @@ export function BusinessInsightsPage() {
       }
     }
 
-    // Complement with top KPIs to maintain balanced rows
-    if (rows.length < 4 && kpis && kpis.length > 0) {
-      kpis.forEach((k: any) => {
-        if (rows.length < 4 && !rows.find((r: any) => r.metric.toLowerCase().includes(k.label.toLowerCase()))) {
-          if (k.status === 'unavailable' || k.status === 'error' || k.value == null) return;
-          const numVal = k.raw_value;
-          const trendPct = k.trend_pct;
-          if (typeof numVal !== 'number' || !Number.isFinite(numVal) ||
-              typeof trendPct !== 'number' || !Number.isFinite(trendPct) || trendPct === -100) return;
-          const prevVal = numVal / (1 + trendPct / 100);
-          rows.push({
-            metric: k.label,
-            current: numVal,
-            previous: prevVal,
-            change_pct: trendPct,
-            table: k.table || 'Federated'
-          });
-        }
-      });
-    }
-
+    // A KPI percentage can be a share or ratio, not a historical comparison.
     return rows.length > 0 ? rows : (pipelineData?.trends || []);
   }, [pipelineData, timeSeriesChart, kpis]);
 
@@ -587,13 +567,16 @@ export function BusinessInsightsPage() {
   const activeTopPerformer = topPerformerCharts[activeTopPerformerCategory] || topPerformerCharts[0];
   const topPerformerRows = useMemo(() => {
     if (!activeTopPerformer || !Array.isArray(activeTopPerformer.data)) return [];
-    return activeTopPerformer.data.slice(0, 7);
+    const key = activeTopPerformer.yKey || 'value';
+    return activeTopPerformer.data
+      .filter((row: any) => typeof (row[key] ?? row.value ?? row.val ?? row.count) === 'number')
+      .slice(0, 7);
   }, [activeTopPerformer]);
 
   const maxPerformerVal = useMemo(() => {
     if (!topPerformerRows.length) return 1;
-    return Math.max(1, ...topPerformerRows.map((r: any) => Number(r.value || r.count || 0)));
-  }, [topPerformerRows]);
+    return Math.max(1, ...topPerformerRows.map((r: any) => Number(r[activeTopPerformer?.yKey || 'value'] ?? r.value ?? r.val ?? r.count)));
+  }, [topPerformerRows, activeTopPerformer]);
 
   // Filtered rows inside drilldown drawer
   const filteredDrillRows = useMemo(() => {
@@ -1482,7 +1465,7 @@ export function BusinessInsightsPage() {
               {topPerformerRows.length > 0 ? (
                 <div>
                   {topPerformerRows.map((p: any, idx: number) => {
-                    const pVal = Number(p.value || p.count || 0);
+                    const pVal = Number(p[activeTopPerformer?.yKey || 'value'] ?? p.value ?? p.val ?? p.count);
                     const pName = p.name || p.x || p.category || `Item ${idx + 1}`;
                     const pct = Math.min(100, Math.max(5, (pVal / maxPerformerVal) * 100));
 

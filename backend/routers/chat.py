@@ -275,12 +275,23 @@ def build_grounded_rag_context(
 
         parent_chunk = None
         if parent_chunk_id and parent_chunk_id not in seen_parent_ids:
-            parent_chunk = db.query(models.DocumentChunk).filter(models.DocumentChunk.id == parent_chunk_id).first()
+            document_id = meta.get("document_id")
+            if document_id is None and meta.get("chunk_id"):
+                child = db.query(models.DocumentChunk).filter(models.DocumentChunk.id == meta["chunk_id"]).first()
+                document_id = child.document_id if child else None
+            parent_chunk = db.query(models.DocumentChunk).filter(
+                models.DocumentChunk.id == parent_chunk_id,
+                models.DocumentChunk.document_id == document_id,
+            ).first()
             if parent_chunk:
                 seen_parent_ids.add(parent_chunk_id)
 
         sec_heading = f' heading="{parent_chunk.section_heading}"' if (parent_chunk and parent_chunk.section_heading) else ""
         parent_str = f"\n<parent_section>(Parent Context) {sanitize_evidence_text(parent_chunk.content.strip())}</parent_section>" if (parent_chunk and parent_chunk.content) else ""
+        # Verify against exactly the context supplied to synthesis, including parents.
+        r["evidence_content"] = ((parent_chunk.content.strip() + "\n") if parent_chunk and parent_chunk.content else "") + content
+        if parent_chunk:
+            r["evidence_parent_id"] = parent_chunk.id
         clean_content = sanitize_evidence_text(content)
 
         context_sections.append(
@@ -1281,15 +1292,10 @@ def chat_endpoint(
                     print(f"LLM RAG synthesis error: {err}")
 
             if not assistant_answer:
-                summary_items = [f"- {c.snippet} [Source: {c.document_name}]" for c in citations[:3]]
                 assistant_answer = (
-                    f"### Key Findings\n"
-                    f"Found relevant information across **{len(citations)}** document chunk(s):\n\n"
-                    + "\n".join(summary_items)
-                    + "\n\n**Suggested Follow-ups:**\n"
-                    "1. Can you provide a more detailed breakdown?\n"
-                    "2. Which specific section covers this topic?\n"
-                    "3. Are there related documents available?"
+                    "I couldn't verify an answer to your question from the available document evidence. "
+                    "AI synthesis is temporarily unavailable; related passages alone do not establish the answer. "
+                    "Please review the cited documents or try again."
                 )
 
             # Grounding Verification (Task 7.2.3 / NR-2.2)

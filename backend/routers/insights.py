@@ -17,7 +17,7 @@ import models
 import schemas
 from database import get_db
 from dependencies import get_current_user
-from services.db_pipeline_service import db_pipeline_service, _normalize_date_range
+from services.db_pipeline_service import db_pipeline_service, _normalize_date_range, InvalidInsightScope
 from services.insights_engine import insights_engine
 
 router = APIRouter(prefix="/api/insights", tags=["Database Insights"])
@@ -379,12 +379,14 @@ def generate_database_insights(
             filter_value=filter_value,
             force_refresh=refresh,
         )
-    except ValueError:
+    except ValueError as error:
         _record_insight_audit(
             db, tenant_id=current_user.tenant_id, user_id=current_user.id,
             connection_id=connection_id, action="generate", result_status="error",
             started=started, table=table, date_from=date_from, date_to=date_to,
         )
+        if isinstance(error, InvalidInsightScope):
+            raise HTTPException(status_code=422, detail=str(error)) from None
         logger.exception("Database insights request could not resolve an owned connection")
         raise HTTPException(status_code=404, detail="Database connection not found")
     except Exception:
@@ -436,12 +438,14 @@ def run_database_pipeline_post(
             filter_value=filter_value,
             force_refresh=refresh,
         )
-    except ValueError:
+    except ValueError as error:
         _record_insight_audit(
             db, tenant_id=current_user.tenant_id, user_id=current_user.id,
             connection_id=connection_id, action="pipeline", result_status="error",
             started=started, table=table, date_from=date_from, date_to=date_to,
         )
+        if isinstance(error, InvalidInsightScope):
+            raise HTTPException(status_code=422, detail=str(error)) from None
         logger.exception("Database pipeline request could not resolve an owned connection")
         raise HTTPException(status_code=404, detail="Database connection not found")
     except Exception:

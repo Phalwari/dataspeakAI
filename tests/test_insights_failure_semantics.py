@@ -228,11 +228,7 @@ def test_real_pooled_sqlite_query_failure_sets_query_failed(isolated_db, tmp_pat
     assert metrics["orders_amount_sum"]["reason"] == "query_failed"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Current pipeline falls back to an available table instead of assigning missing_table status.",
-)
-def test_missing_selected_table_has_missing_table_reason(isolated_db, tmp_path, monkeypatch):
+def test_missing_selected_table_is_rejected(isolated_db, tmp_path, monkeypatch):
     sqlite_path = tmp_path / "selected_table_missing.sqlite"
     with sqlite3.connect(sqlite_path) as sqlite_db:
         sqlite_db.execute("CREATE TABLE orders (order_id INTEGER)")
@@ -241,17 +237,15 @@ def test_missing_selected_table_has_missing_table_reason(isolated_db, tmp_path, 
     connection = _add_connection(isolated_db, database=str(sqlite_path), schema=schema)
     engine = _prepare_pipeline(monkeypatch, sqlite_path)
     try:
-        result = _run_pipeline(
-            isolated_db,
-            connection,
-            selected_table="missing_table",
-            monkeypatch=monkeypatch,
-        )
+        with pytest.raises(pipeline_module.InvalidInsightScope, match="Selected table"):
+            _run_pipeline(
+                isolated_db,
+                connection,
+                selected_table="missing_table",
+                monkeypatch=monkeypatch,
+            )
     finally:
         engine.dispose()
-
-    missing = [item for item in result["key_metrics"] if item.get("reason") == "missing_table"]
-    assert missing
 
 
 def test_mongo_filtered_count_failure_never_uses_unfiltered_count(isolated_db, monkeypatch):

@@ -542,40 +542,8 @@ def process_widget_chat(
         )
 
         if rag_hits:
-            context_parts = []
-            for idx, r in enumerate(rag_hits, 1):
-                meta = r.get("metadata", {}) or {}
-                source_name = meta.get("source", f"Document_{idx}")
-                page_num = meta.get("page_number")
-                c_type = meta.get("content_type", "text")
-                ref_id = meta.get("reference_id")
-                content = r.get("content", "").strip()
-                clean_content = sanitize_evidence_text(content)
-                raw_score = round(float(r.get("score", 0.0)), 3)
-
-                citation_obj = schemas.SourceCitation(
-                    document_name=source_name,
-                    page_number=page_num,
-                    content_type=c_type,
-                    reference_id=ref_id,
-                    snippet=(clean_content[:200] + "...") if len(clean_content) > 200 else clean_content,
-                    score=raw_score,
-                    retrieval_similarity=raw_score,
-                    claim_support_score=None,
-                    document_id=meta.get("document_id"),
-                    chunk_id=meta.get("chunk_id") or r.get("id"),
-                    document_version=meta.get("version", 1),
-                    grounding_status=schemas.GroundingStatus.UNVERIFIED.value
-                )
-                citations.append(citation_obj)
-                page_tag = f' page="{page_num}"' if page_num else ''
-                context_parts.append(
-                    f'<document_evidence id="{idx}" source="{source_name}"{page_tag} type="{c_type}">\n'
-                    f'<passage>{clean_content}</passage>\n'
-                    f'</document_evidence>'
-                )
-
-            context_text = "\n\n".join(context_parts)
+            from routers.chat import build_grounded_rag_context
+            context_text, citations = build_grounded_rag_context(rag_hits, db)
 
     exec_duration_ms = round((time.time() - start_time) * 1000, 2)
 
@@ -716,7 +684,7 @@ def process_widget_chat(
                 sql_data=None,
                 query_type=route_type,
                 on_complete=on_stream_complete,
-                static_fallback=assistant_answer,
+                static_fallback=assistant_answer or "I couldn't verify an answer. AI generation is temporarily unavailable; please try again.",
             ),
             media_type="text/event-stream",
             headers={"Vary": "Origin", "Cache-Control": "no-cache"}
@@ -732,7 +700,7 @@ def process_widget_chat(
         if route_type == "sql" and sql_executed and exec_res:
             assistant_answer = f"Found {exec_res.get('row_count', 0)} matching records for your question."
         elif citations:
-            assistant_answer = f"Found relevant information across {len(citations)} document citation(s):\n\n" + "\n".join([f"- {c.snippet} [{c.document_name}]" for c in citations[:2]])
+            assistant_answer = "I couldn't verify an answer to your question. AI synthesis is temporarily unavailable; please review the cited documents or try again."
         else:
             assistant_answer = "I'm sorry, I couldn't find relevant information in our knowledge base. Please feel free to ask another question or contact support."
 

@@ -174,6 +174,8 @@ async def stream_chat_response(
             return
 
         full_answer = "".join(collected_tokens)
+        if not full_answer.strip():
+            raise RuntimeError("AI provider returned no answer")
         completed_normally = True
 
         # Notify completion callback (e.g. to persist assistant message & QueryLog)
@@ -251,8 +253,18 @@ async def stream_chat_response(
             })
             yield f"data: {err_payload}\n\n"
         else:
-            # If no tokens have been sent, re-raise so outer router can handle or return 500
-            raise ex
+            if static_fallback:
+                async for event in stream_chat_response(
+                    request=request, conversation_id=conversation_id,
+                    user_query=user_query, prompt="", tenant_id=tenant_id,
+                    gateway=gateway, citations=citations, sql_data=sql_data,
+                    query_type=query_type, on_complete=on_complete,
+                    message_id=message_id, static_fallback=static_fallback,
+                ):
+                    yield event
+            else:
+                # Preserve pre-first-token failover for callers without a fallback.
+                raise ex
 
     finally:
         # Guarantee widget concurrent stream slot release

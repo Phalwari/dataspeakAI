@@ -18,6 +18,7 @@ import re
 import datetime
 import logging
 import time
+from decimal import Decimal
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
@@ -41,7 +42,11 @@ from services.sql_dialect import (
 )
 
 logger = logging.getLogger(__name__)
-INSIGHTS_CACHE_VERSION = 4
+INSIGHTS_CACHE_VERSION = 5
+
+
+class InvalidInsightScope(ValueError):
+    """A requested table or dimension does not belong to the discovered catalog."""
 
 
 def _inspect_accessible_sql_schema(inspector: Any) -> Tuple[Dict[str, Dict[str, Any]], List[str]]:
@@ -201,12 +206,27 @@ def classify_status(value: Any) -> str:
 def _llm_safe_points(kpis: List[Dict[str, Any]], charts: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Keep only numeric aggregates and fixed chart categories in LLM input."""
     safe_kpis = []
+    semantic_metrics = []
+    safe_labels = {
+        "total_revenue": "Gross revenue, all statuses",
+        "net_revenue_delivered": "Revenue, delivered status only",
+        "total_orders": "Transaction count",
+        "average_order_value": "Average order value",
+        "active_customers": "Customer count",
+        "units_sold": "Unit quantity",
+        "catalog_size": "Catalog item count",
+    }
     for item in kpis:
         value = item.get("raw_value")
+        if isinstance(value, Decimal):
+            value = float(value) if value.is_finite() else None
         if isinstance(value, (int, float)) and not isinstance(value, bool) and (
             not isinstance(value, float) or math.isfinite(value)
         ):
             safe_kpis.append(value)
+            label = safe_labels.get(item.get("id"))
+            if label:
+                semantic_metrics.append({"metric": label, "value": value})
     safe_charts = []
     for chart in charts:
         values = []
@@ -226,7 +246,10 @@ def _llm_safe_points(kpis: List[Dict[str, Any]], charts: List[Dict[str, Any]]) -
                 "pie": "category_aggregate",
             }.get(chart_type, "aggregate") if isinstance(chart_type, str) else "aggregate"
             safe_charts.append({"category": chart_category, "values": values[:3]})
-    return {"metrics": safe_kpis, "chart_aggregates": safe_charts}
+    result = {"metrics": safe_kpis, "chart_aggregates": safe_charts}
+    if semantic_metrics:
+        result["metric_context"] = semantic_metrics
+    return result
 
 
 def safe_divide(num: Any, den: Any, default: Any = 0.0) -> Any:
@@ -465,7 +488,7 @@ class DatabasePipelineService:
         date_to_excl = date_bindings.get("date_to_excl")
 
         def fresh_l2_cache(catalog_version: str, plan_hash: str) -> Optional[Dict[str, Any]]:
-            if selected_table or date_from or date_to:
+            if selected_table or date_from or date_to or filter_column is not None:
                 return None
             cached_at = getattr(db_conn, "insights_cached_at", None)
             if not cached_at:
@@ -670,7 +693,7 @@ class DatabasePipelineService:
             "applied_date_to": date_to,
             "date_filter_status": (
                 "not_requested" if not (date_from or date_to)
-                else "applied" if active_date_filter or analysis_mode == "mongodb"
+                else "applied" if any(m.get("status") in {"available", "zero"} for m in key_metrics)
                 else "unavailable"
             ),
             "applied_filter_column": filter_column,
@@ -688,7 +711,7 @@ class DatabasePipelineService:
         }
         clean_payload = json.loads(json.dumps(response_payload, default=str))
         cache_set(cache_key, clean_payload, ttl_seconds=86400)
-        if not selected_table and not date_from and not date_to:
+        if not selected_table and not date_from and not date_to and filter_column is None:
             try:
                 updated = (
                     db.query(models.DatabaseConnection)
@@ -788,7 +811,7 @@ class DatabasePipelineService:
                     age = (now_utc - cached_at).total_seconds()
                 else:
                     age = (now_utc.replace(tzinfo=None) - cached_at).total_seconds()
-                if age < 86400 and not selected_table and not date_from and not date_to:
+                if age < 86400 and not selected_table and not date_from and not date_to and filter_column is None:
                     res = db_conn.insights_cache
                     if isinstance(res, str):
                         try:
@@ -875,9 +898,14 @@ class DatabasePipelineService:
                 query_params.update(date_bindings)
             if active_dimension_filter:
                 scoped = _with_dimension_predicate(query_str, *active_dimension_filter)
-                if scoped is not None:
-                    query_str = scoped
-                    query_params["dimension_value"] = filter_value
+                if scoped is None:
+                    for metric_id in tracked_metric_ids:
+                        metric_query_states[metric_id] = {
+                            "status": "unavailable", "reason": "unsupported_with_filter",
+                        }
+                    return []
+                query_str = scoped
+                query_params["dimension_value"] = filter_value
             # Try native DataSpeakAI pooled engine first
             try:
                 from services.db_utils import get_connection_url
@@ -996,6 +1024,9 @@ class DatabasePipelineService:
                 return
 
             raw_value = item.get("raw_value")
+            if isinstance(raw_value, Decimal):
+                raw_value = float(raw_value) if raw_value.is_finite() else None
+                item["raw_value"] = raw_value
             if item.get("value") == "N/A":
                 item["status"], item["reason"] = "unavailable", "missing_role"
                 item["value"] = None
@@ -1068,6 +1099,9 @@ class DatabasePipelineService:
                 "message": "No accessible tables found in this database connection."
             }
 
+        if selected_table and selected_table != "All Tables" and selected_table not in available_tables:
+            raise InvalidInsightScope("Selected table is not available in this database")
+
         mongo_dimension_filter: Optional[Tuple[str, str]] = None
         if filter_column is not None:
             raw_filter = str(filter_column).strip()
@@ -1077,10 +1111,7 @@ class DatabasePipelineService:
             table_meta = schema.get(filter_table) or {}
             columns_meta = table_meta.get("columns", {}) if isinstance(table_meta, dict) else {}
             if filter_table not in available_tables or filter_col not in columns_meta:
-                query_errors.append("Selected dimension filter is unavailable for this schema.")
-                metric_query_states["dimension_filter"] = {
-                    "status": "unavailable", "reason": "missing_role"
-                }
+                raise InvalidInsightScope("Selected dimension filter is unavailable for this schema")
             elif str(db_conn.db_type).lower() != "mongodb":
                 active_dimension_filter = (
                     _clean_sql_identifier(filter_table, db_conn.db_type),
@@ -1332,7 +1363,13 @@ class DatabasePipelineService:
             # Active Customers
             cust_count = 0
             customer_identifier_available = bool(customer_table)
-            if customer_table:
+            cust_id_col = next((c for c in fact_prof.get("columns", {}).keys() if any(k in c.lower() for k in ["customer", "client", "user_id", "buyer"])), None)
+            if (active_dimension_filter or date_bindings) and cust_id_col:
+                customer_identifier_available = True
+                q_cid = _clean_sql_identifier(cust_id_col, db_conn.db_type)
+                cust_res = execute_sql(f"SELECT COUNT(DISTINCT {q_cid}) as cnt FROM {q_fact}", ["active_customers", "customer_lifetime_value"])
+                cust_count = int(cust_res[0].get("cnt") or 0) if cust_res else 0
+            elif customer_table:
                 q_cust = _clean_sql_identifier(customer_table, db_conn.db_type)
                 cust_res = execute_sql(f"SELECT COUNT(*) as cnt FROM {q_cust}", ["active_customers", "customer_lifetime_value"])
                 cust_count = int(cust_res[0].get("cnt") or 0) if cust_res else 0
@@ -1358,7 +1395,26 @@ class DatabasePipelineService:
                 if line_qty_col:
                     units_measure_found = True
                     q_lqty = _clean_sql_identifier(line_qty_col, db_conn.db_type)
-                    qty_res = execute_sql(f"SELECT SUM({q_lqty}) as cnt FROM {q_line}", ["units_sold"])
+                    units_query = f"SELECT SUM({q_lqty}) as cnt FROM {q_line}"
+                    if active_dimension_filter or date_bindings:
+                        # Only propagate scope over a declared relationship; an ID
+                        # name match is not proof of a safe fact/line join.
+                        try:
+                            from sqlalchemy import inspect
+                            declared_fks = inspect(engine).get_foreign_keys(line_item_table)
+                            fk = next((fk for fk in declared_fks
+                                       if fk.get("referred_table") == fact_table
+                                       and fk.get("constrained_columns")
+                                       and len(fk["constrained_columns"]) == len(fk.get("referred_columns", []))
+                                       and all(c in line_cols for c in fk["constrained_columns"])
+                                       and all(c in fact_prof.get("columns", {}) for c in fk["referred_columns"])), None)
+                            if fk:
+                                predicates = [f"{q_line}.{_clean_sql_identifier(left, db_conn.db_type)} = {q_fact}.{_clean_sql_identifier(right, db_conn.db_type)}"
+                                              for left, right in zip(fk["constrained_columns"], fk["referred_columns"])]
+                                units_query = f"SELECT SUM({q_line}.{q_lqty}) as cnt FROM {q_line} JOIN {q_fact} ON " + " AND ".join(predicates)
+                        except Exception:
+                            logger.warning("Scoped unit metric has no verified relationship")
+                    qty_res = execute_sql(units_query, ["units_sold"])
                     units_raw_value = qty_res[0].get("cnt") if qty_res else None
                     units_sold = int(units_raw_value or 0)
                 else:
@@ -2069,6 +2125,14 @@ class DatabasePipelineService:
                     dimension_match = {}
                     if mongo_dimension_filter and mongo_dimension_filter[0] == tbl:
                         dimension_match[mongo_dimension_filter[1]] = filter_value
+                    elif mongo_dimension_filter:
+                        computed_kpis.append({
+                            "id": f"{tbl}_total_rows", "label": f"Total {tbl_title} Documents",
+                            "raw_value": None, "value": None, "table": tbl,
+                            "format": "integer", "status": "unavailable",
+                            "reason": "unsupported_with_filter",
+                        })
+                        continue
 
                     # 1. Total document count (never discard a requested date filter)
                     count_metric_id = f"{tbl}_total_rows"
@@ -2147,7 +2211,7 @@ class DatabasePipelineService:
                                     "cnt": {"$sum": 1}
                                 }
                             })
-                            agg_res = list(coll.aggregate(m_pipe))
+                            agg_res = list(coll.aggregate(m_pipe, maxTimeMS=10000))
                             if agg_res:
                                 s_v = float(agg_res[0].get("s_val") or 0)
                                 a_v = float(agg_res[0].get("a_val") or 0)
@@ -2167,6 +2231,27 @@ class DatabasePipelineService:
                                         "trend_pct": None,
                                         "trend_text": "cumulative sum"
                                     })
+
+                                    # A paid-status aggregate is distinct from gross billing.
+                                    status_field = next((c for c in prof.get("columns", {})
+                                                         if c.casefold() in {"status", "payment_status"}), None)
+                                    if fmt == "currency" and status_field and _is_revenue_like_fallback_column(m_col):
+                                        paid_match = {"$and": [match_criteria, {
+                                            status_field: {"$regex": "^paid$", "$options": "i"}
+                                        }]}
+                                        paid = list(coll.aggregate([
+                                            {"$match": paid_match},
+                                            {"$group": {"_id": None, "value": {"$sum": f"${m_col}"}}},
+                                        ], maxTimeMS=10000))
+                                        paid_value = float(paid[0]["value"]) if paid else 0.0
+                                        computed_kpis.append({
+                                            "id": f"{tbl}_{m_col.replace('.', '_')}_paid_sum",
+                                            "label": f"Paid {col_name_title}", "table": tbl,
+                                            "raw_value": paid_value, "value": f"${paid_value:,.2f}",
+                                            "format": "currency", "format_type": "currency",
+                                            "recipe_type": "atomic", "trend_direction": "neutral",
+                                            "trend_pct": None, "trend_text": "paid status only",
+                                        })
 
                                 computed_kpis.append({
                                     "id": f"{tbl}_{m_col.replace('.', '_')}_avg",
@@ -2709,7 +2794,7 @@ class DatabasePipelineService:
         def computed_fallback(category: str) -> Dict[str, Any]:
             metrics = {item.get("id"): item for item in computed_kpis}
             money_metric = metrics.get("total_revenue")
-            if money_metric and not _is_revenue_like_fallback_column(fallback_revenue_column):
+            if money_metric and fallback_revenue_column and not _is_revenue_like_fallback_column(fallback_revenue_column):
                 money_metric = None
             if money_metric is None:
                 def is_revenue_like_sum(item: Dict[str, Any]) -> bool:
@@ -2871,7 +2956,7 @@ class DatabasePipelineService:
         try:
             clean_payload = json.loads(json.dumps(response_payload, default=str))
             cache_set(cache_key, clean_payload, ttl_seconds=86400)
-            if not selected_table and not date_from and not date_to:
+            if not selected_table and not date_from and not date_to and filter_column is None:
                 updated = (
                     db.query(models.DatabaseConnection)
                     .filter(
@@ -2954,7 +3039,7 @@ class DatabasePipelineService:
                     age = (now_utc - cached_at).total_seconds()
                 else:
                     age = (now_utc.replace(tzinfo=None) - cached_at).total_seconds()
-                if age < 86400 and not selected_table and not date_from and not date_to:
+                if age < 86400 and not selected_table and not date_from and not date_to and filter_column is None:
                     res = db_conn.insights_cache
                     if isinstance(res, str):
                         try:
