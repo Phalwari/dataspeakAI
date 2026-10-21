@@ -89,9 +89,11 @@ def test_T1_hanging_generate_returns_fallback_within_budget(orders_case, monkeyp
 
 def test_T2_one_timeout_then_success_retries_once(orders_case, monkeypatch):
     calls = []
+    deadlines = []
 
     def fake_gateway(*_args, **_kwargs):
         calls.append(1)
+        deadlines.append(_kwargs.get("deadline"))
         if len(calls) == 1:
             raise httpx.TimeoutException("synthetic timeout")
         return _success_response()
@@ -101,6 +103,7 @@ def test_T2_one_timeout_then_success_retries_once(orders_case, monkeypatch):
     result = _run(orders_case)
     assert result["executive_summary"]["source"] == "llm"
     assert len(calls) == 2
+    assert all(deadline is not None for deadline in deadlines)
 
 
 def test_T3_quota_rotates_keys_without_outer_retry(monkeypatch):

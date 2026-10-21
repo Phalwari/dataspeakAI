@@ -2603,7 +2603,12 @@ class DatabasePipelineService:
             when the numeric aggregates do not support an insight or recommendation.
             """
             from services.llm_generation_service import LLMFailure, generate
-            res_text = generate(prompt, provider="auto", raise_on_failure=True).strip()
+            res_text = generate(
+                prompt,
+                provider="auto",
+                raise_on_failure=True,
+                deadline=deadline,
+            ).strip()
             if res_text.startswith("```json"):
                 res_text = res_text[7:-3].strip()
             elif res_text.startswith("```"):

@@ -865,12 +865,14 @@ def generate(
     api_key: Optional[str] = None,
     user: Optional[Any] = None,
     raise_on_failure: bool = False,
+    deadline: Optional[float] = None,
 ) -> str:
     """
     Main synchronous generation facade.
     Dispatches multimodal requests or text requests through LLMGateway.
     """
-    deadline = time.monotonic() + _configured_seconds("LLM_HTTP_TIMEOUT_SECONDS", 20.0)
+    if deadline is None:
+        deadline = time.monotonic() + _configured_seconds("LLM_HTTP_TIMEOUT_SECONDS", 20.0)
     backoff = _configured_seconds("LLM_RETRY_BACKOFF_SECONDS", 1.0, allow_zero=True)
     if image_b64_list:
         try:
