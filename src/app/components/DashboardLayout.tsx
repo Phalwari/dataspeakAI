@@ -19,7 +19,6 @@ import {
   MessageSquareCode,
   Sparkles,
   FileSpreadsheet,
-  BarChart3,
   ShieldAlert,
   LogOut,
 } from "lucide-react";
@@ -60,7 +59,6 @@ const navigationGroups: NavSection[] = [
     items: [
       { name: "Databases", href: "/dashboard/databases", icon: Database },
       { name: "Knowledge Base", href: "/dashboard/knowledge-base", icon: BookOpen },
-      { name: "Analytics & Visualization", href: "/dashboard/analytics", icon: BarChart3 },
       { name: "DB AI Insights", href: "/dashboard/insights", icon: Sparkles },
       { name: "CSV / File Analytics", href: "/dashboard/csv-analytics", icon: FileSpreadsheet },
       { name: "AI Insights", href: "/dashboard/ai-insights", icon: Lightbulb },
