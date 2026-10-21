@@ -25,6 +25,7 @@ import {
   Table as TableIcon,
   Users,
   Lock,
+  Menu,
 } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -136,6 +137,7 @@ export function ChatPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [sourcePreference, setSourcePreference] = useState<"auto" | "documents" | "database">("auto");
   const [searchFilter, setSearchFilter] = useState("");
+  const [isChatHistoryOpen, setIsChatHistoryOpen] = useState(false);
 
   const activeConv = conversations.find((c) => c.id === activeConvId);
   const isSharedReadOnly = Boolean(activeConv && activeConv.is_shared && !activeConv.is_owner);
@@ -588,9 +590,21 @@ export function ChatPage() {
   ];
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] bg-white overflow-hidden">
+    <div className="relative flex min-h-0 h-[calc(100vh-4rem)] bg-white overflow-hidden">
       {/* 1. Left Conversation Sidebar */}
-      <aside className="w-80 border-r border-gray-200 bg-gray-50 flex flex-col flex-shrink-0">
+      {isChatHistoryOpen && (
+        <button
+          type="button"
+          aria-label="Close chat history"
+          className="fixed inset-0 z-20 bg-slate-900/30 lg:hidden"
+          onClick={() => setIsChatHistoryOpen(false)}
+        />
+      )}
+      <aside
+        className={`absolute inset-y-0 left-0 z-30 flex w-[min(20rem,calc(100vw-1rem))] flex-col border-r border-gray-200 bg-gray-50 shadow-xl transition-transform duration-200 lg:static lg:z-auto lg:w-80 lg:translate-x-0 lg:shadow-none ${
+          isChatHistoryOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
         <div className="p-4 border-b border-gray-200 space-y-3">
           <Button
             onClick={handleNewChat}
@@ -627,7 +641,10 @@ export function ChatPage() {
                 <div
                   key={conv.id}
                   onClick={() => {
-                    if (!isEditing) handleSelectConversation(conv.id);
+                    if (!isEditing) {
+                      handleSelectConversation(conv.id);
+                      setIsChatHistoryOpen(false);
+                    }
                   }}
                   className={`group relative flex flex-col gap-1 p-3 rounded-lg cursor-pointer transition-all border text-left ${
                     isActive
@@ -716,16 +733,26 @@ export function ChatPage() {
       </aside>
 
       {/* 2. Main Chat Thread Panel */}
-      <main className="flex-1 flex flex-col bg-white overflow-hidden">
+      <main className="min-w-0 flex-1 flex flex-col bg-white overflow-hidden">
         {/* Chat Header */}
-        <header className="h-14 border-b border-gray-200 px-6 flex items-center justify-between bg-white flex-shrink-0">
-          <div className="flex items-center gap-3">
+        <header className="min-h-14 h-auto border-b border-gray-200 px-3 sm:px-6 py-2 flex flex-wrap items-center justify-between gap-2 bg-white flex-shrink-0">
+          <div className="min-w-0 flex flex-1 items-center gap-2 sm:gap-3">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label="Open chat history"
+              className="h-8 w-8 flex-shrink-0 lg:hidden"
+              onClick={() => setIsChatHistoryOpen(true)}
+            >
+              <Menu className="w-4 h-4" />
+            </Button>
             <div className="w-8 h-8 rounded-full bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600">
               <Bot className="w-4 h-4" />
             </div>
-            <div>
+            <div className="min-w-0">
               <h2 className="text-sm font-bold text-gray-900 flex items-center gap-2 flex-wrap">
-                <span>{activeConv?.title || "Unified Conversational Assistant"}</span>
+                <span className="truncate max-w-[min(46vw,28rem)]">{activeConv?.title || "Unified Conversational Assistant"}</span>
                 {isSharedReadOnly && (
                   <Badge variant="outline" className="text-[11px] bg-amber-50 text-amber-800 border-amber-200 gap-1 font-medium">
                     <Users className="w-3 h-3 text-amber-600" />
@@ -751,7 +778,8 @@ export function ChatPage() {
           </div>
 
           {/* Source Preference Selector */}
-          <div className="flex items-center gap-2">
+          <div className="w-full overflow-x-auto lg:w-auto lg:max-w-[52%]">
+            <div className="flex w-max items-center gap-2 sm:ml-auto">
             <span className="text-xs text-gray-500 font-medium hidden sm:inline">Source Engine:</span>
             <div className="inline-flex rounded-lg border border-gray-200 p-0.5 bg-gray-50 text-xs">
               <button
@@ -791,11 +819,12 @@ export function ChatPage() {
                 Database (SQL)
               </button>
             </div>
+            </div>
           </div>
         </header>
 
         {/* Message Thread Scroll Area */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-6 space-y-6">
           {messages.length === 0 ? (
             <div className="max-w-2xl mx-auto py-12 text-center space-y-6">
               <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center mx-auto text-white shadow-md">
@@ -842,7 +871,7 @@ export function ChatPage() {
               return (
                 <div
                   key={msg.id}
-                  className={`flex gap-3 max-w-3xl ${isUser ? "ml-auto flex-row-reverse" : "mr-auto"}`}
+                  className={`flex w-full max-w-3xl gap-2 sm:gap-3 ${isUser ? "ml-auto flex-row-reverse" : "mr-auto"}`}
                 >
                   {/* Avatar */}
                   <div
@@ -856,7 +885,7 @@ export function ChatPage() {
                   </div>
 
                   {/* Bubble Content */}
-                  <div className={`space-y-3 max-w-[85%] ${isUser ? "items-end" : "items-start"}`}>
+                  <div className={`min-w-0 space-y-3 max-w-[calc(100%-2.5rem)] sm:max-w-[85%] ${isUser ? "items-end" : "items-start"}`}>
                     <div
                       className={`p-4 rounded-2xl text-xs leading-relaxed ${
                         isUser
@@ -913,7 +942,7 @@ export function ChatPage() {
                       {isUser ? (
                         <div className="whitespace-pre-wrap">{msg.content}</div>
                       ) : (
-                        <div>
+                        <div className="min-w-0 break-words">
                           {msg.content ? (
                             <SafeMarkdown
                               content={msg.content}
@@ -1154,7 +1183,7 @@ export function ChatPage() {
         </div>
 
         {/* 3. Bottom Chat Input Box */}
-        <div className="p-4 border-t border-gray-200 bg-white flex-shrink-0">
+        <div className="p-3 sm:p-4 border-t border-gray-200 bg-white flex-shrink-0">
           {isSharedReadOnly ? (
             <div className="max-w-4xl mx-auto p-3 rounded-xl bg-amber-50/90 border border-amber-200 text-center flex items-center justify-center gap-2.5 text-xs text-amber-900 shadow-xs">
               <Lock className="w-4 h-4 text-amber-700 flex-shrink-0" />
@@ -1168,13 +1197,13 @@ export function ChatPage() {
                 e.preventDefault();
                 handleSendMessage();
               }}
-              className="relative flex items-center max-w-4xl mx-auto"
+              className="relative flex items-center w-full max-w-4xl mx-auto"
             >
               <Input
                 ref={inputRef}
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
-                placeholder="Ask anything about your documents or databases... (Press Enter to send)"
+                placeholder="Ask about your documents or databases..."
                 disabled={isLoading}
                 className="pr-12 py-3 h-12 rounded-xl text-xs bg-gray-50 border-gray-200 focus:bg-white shadow-xs"
               />
