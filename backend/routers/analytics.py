@@ -2104,23 +2104,16 @@ def get_admin_tenants(
 
 
 # ---------------------------------------------------------------------------
-# API Route Bindings for /api/analytics and /api (Dual Mounted)
+# Core API bindings retained after retiring Analytics & Visualization.
 # ---------------------------------------------------------------------------
 
-# Bindings on router (prefixed with /api/analytics)
-router.add_api_route("/overview", get_analytics_overview, methods=["GET"], response_model=schemas.AnalyticsOverviewResponse)
-router.add_api_route("/logs", get_query_logs, methods=["GET"], response_model=schemas.QueryLogsResponse)
-router.add_api_route("/logs/export", export_query_logs, methods=["GET"])
-router.add_api_route("/usage", get_tenant_usage, methods=["GET"], response_model=schemas.TenantUsageResponse)
-router.add_api_route("/admin/stats", get_admin_stats, methods=["GET"], response_model=schemas.AdminStatsResponse)
-router.add_api_route("/admin/tenants", get_admin_tenants, methods=["GET"], response_model=List[schemas.AdminTenantItem])
-
-# Bindings on core_router (prefixed with /api)
-# Note: /api/overview binds as alias to /api/analytics/overview, eliminating duplicate operation ID warning
+# These endpoints back Dashboard, Logs, Usage and Platform Admin; they are not
+# part of the retired visualization feature.
 core_router.add_api_route("/overview", get_analytics_overview, methods=["GET"], response_model=schemas.AnalyticsOverviewResponse)
 core_router.add_api_route("/logs", get_query_logs, methods=["GET"], response_model=schemas.QueryLogsResponse)
 core_router.add_api_route("/logs/export", export_query_logs, methods=["GET"])
 core_router.add_api_route("/usage", get_tenant_usage, methods=["GET"], response_model=schemas.TenantUsageResponse)
+core_router.add_api_route("/admin/system-health", get_system_health, methods=["GET"])
 core_router.add_api_route("/admin/stats", get_admin_stats, methods=["GET"], response_model=schemas.AdminStatsResponse)
 core_router.add_api_route("/admin/tenants", get_admin_tenants, methods=["GET"], response_model=List[schemas.AdminTenantItem])
 

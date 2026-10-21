@@ -45,6 +45,8 @@ To maintain seamless multi-developer and AI agent collaboration:
 
 ### Changed
 
+- **Analytics & Visualization retirement** (`src/app/routes.ts`, `src/app/components/DashboardLayout.tsx`, `backend/main.py`): Removed the Analytics & Visualization navigation entry and frontend route, and stopped mounting its feature API router. Shared Dashboard, Logs, Usage and Platform Admin endpoints remain mounted under their neutral `/api` paths.
+
 - **Database connection cards** (`src/app/pages/dashboard/DatabasesPage.tsx`): Removed the inactive settings control so each card only shows actions that are available to users.
 
 - **Business Insights run progress** (`src/app/pages/dashboard/BusinessInsightsPage.tsx`): Replaced the legacy six-layer loading card with a Phase A–F analysis workflow that explains secure scope, catalog discovery, role classification, safe metric planning, quality-aware execution, and the final chart/summary stage. The screen keeps the existing purple and teal visual language while making the run scope, date range, progress and safeguards understandable to business users.

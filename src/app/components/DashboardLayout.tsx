@@ -17,7 +17,6 @@ import {
   MessageSquareCode,
   Sparkles,
   FileSpreadsheet,
-  BarChart3,
   ShieldAlert,
 } from "lucide-react";
 import { Button } from "./ui/button";
@@ -38,7 +37,6 @@ const navigation = [
   { name: "AI Assistant (Chat)", href: "/dashboard/chat", icon: MessageSquare },
   { name: "Databases", href: "/dashboard/databases", icon: Database },
   { name: "Knowledge Base", href: "/dashboard/knowledge-base", icon: BookOpen },
-  { name: "Analytics & Visualization", href: "/dashboard/analytics", icon: BarChart3 },
   { name: "DB AI Insights", href: "/dashboard/insights", icon: Sparkles },
   { name: "CSV / File Analytics", href: "/dashboard/csv-analytics", icon: FileSpreadsheet },
   { name: "AI Insights", href: "/dashboard/ai-insights", icon: Lightbulb },

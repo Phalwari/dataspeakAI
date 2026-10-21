@@ -60,7 +60,7 @@ export function DashboardOverview() {
     setError(null);
     try {
       const token = localStorage.getItem("token");
-      const res = await fetch(`${API_BASE_URL}/api/analytics/overview`, {
+      const res = await fetch(`${API_BASE_URL}/api/overview`, {
         headers: {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
