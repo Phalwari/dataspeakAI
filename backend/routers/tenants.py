@@ -10,6 +10,7 @@ import models
 import schemas
 from database import get_db
 from dependencies import get_current_user, require_tenant_admin
+from services.email_service import send_email
 
 router = APIRouter(prefix="/api/tenant", tags=["tenant"])
 
@@ -126,7 +127,19 @@ def invite_member(
 
     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
     invite_link = f"{frontend_url}/signup?invite_token={token}"
-    return {"invite_link": invite_link, "email": invite.email}
+    email_sent = send_email(
+        to=invite.email,
+        subject="You are invited to DataSpeakAI",
+        text_body=(
+            "You have been invited to join DataSpeakAI. "
+            f"Open this link to create your account: {invite_link}"
+        ),
+        html_body=(
+            "<p>You have been invited to join DataSpeakAI.</p>"
+            f'<p><a href="{invite_link}">Create your account</a></p>'
+        ),
+    )
+    return {"invite_link": invite_link, "email": invite.email, "email_sent": email_sent}
 
 
 @router.patch("/members/{user_id}", response_model=schemas.UserResponse)
