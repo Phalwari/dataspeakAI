@@ -449,6 +449,8 @@ def compile_mongo_metric(
     *,
     date_from: str | None = None,
     date_to_excl: str | None = None,
+    filter_path: str | None = None,
+    filter_value: Any = None,
     sample_limit: int = 10_000,
     max_time_ms: int = 5_000,
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]] | None, str, str | None]:
@@ -483,6 +485,8 @@ def compile_mongo_metric(
         unwind_path = array_paths[0].split("[]", 1)[0]
         pipeline.append({"$unwind": f"${unwind_path}"})
     predicates = [date_filter] if date_filter else []
+    if filter_path:
+        predicates.append({filter_path.replace("[]", ""): filter_value})
     if metric.status_path and metric.status_values:
         status_path = metric.status_path.replace("[]", "")
         normalized_status = {
@@ -549,6 +553,8 @@ def execute_mongo_metric(
     *,
     date_from: str | None = None,
     date_to_excl: str | None = None,
+    filter_path: str | None = None,
+    filter_value: Any = None,
     sample_limit: int = 10_000,
     deadline: float | None = None,
 ) -> MongoMetricResult:
@@ -560,6 +566,7 @@ def execute_mongo_metric(
     )
     query, pipeline, status, reason = compile_mongo_metric(
         metric, date_from=date_from, date_to_excl=date_to_excl,
+        filter_path=filter_path, filter_value=filter_value,
         sample_limit=sample_limit, max_time_ms=remaining_ms,
     )
     if status != "available":

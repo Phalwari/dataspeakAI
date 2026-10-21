@@ -352,6 +352,8 @@ def generate_database_insights(
     refresh: bool = Query(False, description="Bypass cache and force re-generation"),
     date_from: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
     date_to: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    filter_column: Optional[str] = Query(None, description="Validated dimension filter column"),
+    filter_value: Optional[str] = Query(None, description="Exact dimension filter value"),
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -373,6 +375,8 @@ def generate_database_insights(
             selected_table=table,
             date_from=date_from,
             date_to=date_to,
+            filter_column=filter_column,
+            filter_value=filter_value,
             force_refresh=refresh,
         )
     except ValueError:
@@ -414,6 +418,8 @@ def run_database_pipeline_post(
     refresh = payload.get("refresh", False)
     date_from = payload.get("date_from")
     date_to = payload.get("date_to")
+    filter_column = payload.get("filter_column")
+    filter_value = payload.get("filter_value")
     date_from, date_to = _validated_dates(date_from, date_to)
     started = time.monotonic()
 
@@ -426,6 +432,8 @@ def run_database_pipeline_post(
             selected_table=table,
             date_from=date_from,
             date_to=date_to,
+            filter_column=filter_column,
+            filter_value=filter_value,
             force_refresh=refresh,
         )
     except ValueError:
@@ -459,6 +467,8 @@ def stream_database_pipeline(
     refresh: bool = Query(False),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
+    filter_column: Optional[str] = Query(None),
+    filter_value: Optional[str] = Query(None),
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -483,6 +493,7 @@ def stream_database_pipeline(
                 db=db, connection_id=connection_id, tenant_id=current_user.tenant_id,
                 user_id=current_user.id, selected_table=table,
                 date_from=date_from, date_to=date_to, force_refresh=refresh,
+                filter_column=filter_column, filter_value=filter_value,
             )
             for event in gen:
                 if event.get("type") == "result":

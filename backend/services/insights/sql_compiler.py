@@ -91,6 +91,8 @@ def compile_metric(
     *,
     date_from: str | None = None,
     date_to_excl: str | None = None,
+    filter_column: str | None = None,
+    filter_value: str | None = None,
 ) -> CompiledMetric:
     """Compile only known metric kinds, catalog identifiers, and bound date values."""
     if metric.status != "available":
@@ -120,6 +122,17 @@ def compile_metric(
         if date_to_excl:
             predicates.append(f"{date_sql} < :date_to_excl")
             params["date_to_excl"] = date_to_excl
+
+    if filter_column is not None:
+        filter_parts = filter_column.split(".", 1)
+        filter_table_name = filter_parts[0] if len(filter_parts) == 2 else metric.table
+        filter_name = filter_parts[1] if len(filter_parts) == 2 else filter_column
+        involved_tables = {metric.table, *(step.join_table for step in metric.joins)}
+        if filter_table_name in involved_tables:
+            filter_table = _table(catalog, filter_table_name)
+            filter_sql = _qualified(filter_table, filter_name, catalog)
+            predicates.append(f"{filter_sql} = :dimension_value")
+            params["dimension_value"] = filter_value
 
     where_sql = f" WHERE {' AND '.join(predicates)}" if predicates else ""
     if metric.kind == "trend" and not (date_from or date_to_excl):

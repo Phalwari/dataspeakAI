@@ -285,6 +285,7 @@ export function BusinessInsightsPage() {
   const runDatabaseAnalysis = async (
     connId = selectedConnection, tableChoice = activeTable,
     forceRefresh = false, requestedPreset = preset,
+    dimensionFilter: { column: string; value: string } | null = selectedDimensionFilter,
   ) => {
     if (!connId) return;
     setLoading(true);
@@ -314,6 +315,10 @@ export function BusinessInsightsPage() {
         q.set('date_from', dateRange.from);
         q.set('date_to', dateRange.to);
       }
+      if (dimensionFilter?.column && dimensionFilter.value) {
+        q.set('filter_column', dimensionFilter.column);
+        q.set('filter_value', dimensionFilter.value);
+      }
 
       const res = await fetch(`${API_URL}/insights/generate/${connId}${q.toString() ? `?${q}` : ''}`, { headers });
       if (!res.ok) throw new Error(`Could not generate insights (HTTP ${res.status})`);
@@ -338,7 +343,10 @@ export function BusinessInsightsPage() {
 
   // A table switch recomputes the server-side analysis for that scope.
   const handleSelectTableScope = (tbl: string) => {
-    if (tbl !== activeTable && !loading) void runDatabaseAnalysis(selectedConnection, tbl);
+    if (tbl !== activeTable && !loading) {
+      setSelectedDimensionFilter(null);
+      void runDatabaseAnalysis(selectedConnection, tbl, false, preset, null);
+    }
   };
 
   const handleApplyPreset = (id: string) => {
@@ -1211,10 +1219,18 @@ export function BusinessInsightsPage() {
                             value={isActive ? selectedDimensionFilter.value : ''}
                             onChange={(e) => {
                               const val = e.target.value;
-                              if (val) {
-                                setSelectedDimensionFilter({ column: f.column, label: f.label, value: val });
-                              } else {
-                                setSelectedDimensionFilter(null);
+                              const nextFilter = val
+                                ? { column: f.column, label: f.label, value: val }
+                                : null;
+                              setSelectedDimensionFilter(nextFilter);
+                              if (!loading) {
+                                void runDatabaseAnalysis(
+                                  selectedConnection,
+                                  activeTable,
+                                  false,
+                                  preset,
+                                  nextFilter ? { column: nextFilter.column, value: nextFilter.value } : null,
+                                );
                               }
                             }}
                             style={{
@@ -1241,7 +1257,12 @@ export function BusinessInsightsPage() {
                   {selectedDimensionFilter && (
                     <button
                       className="chip"
-                      onClick={() => setSelectedDimensionFilter(null)}
+                      onClick={() => {
+                        setSelectedDimensionFilter(null);
+                        if (!loading) {
+                          void runDatabaseAnalysis(selectedConnection, activeTable, false, preset, null);
+                        }
+                      }}
                       style={{ color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)', padding: '4px 10px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                     >
                       <X size={12} /> Clear ({selectedDimensionFilter.value})

@@ -142,15 +142,33 @@ def _with_date_predicate(query: str, table: str, column: str, bindings: Dict[str
     return f"{head} WHERE {predicate} {tail}"
 
 
+def _with_dimension_predicate(query: str, table: str, column: str) -> Optional[str]:
+    """Add a bound dimension predicate only when the generated query uses that table."""
+    if not re.search(r"\b(?:FROM|JOIN)\s+" + re.escape(table) + r"(?![\w])", query, re.IGNORECASE):
+        return None
+    boundary = re.search(r"\b(GROUP\s+BY|ORDER\s+BY|HAVING|LIMIT)\b", query, re.IGNORECASE)
+    insert_at = boundary.start() if boundary else len(query)
+    head, tail = query[:insert_at].rstrip(), query[insert_at:]
+    where_match = re.search(r"\bWHERE\b", head, re.IGNORECASE)
+    predicate = f"{table}.{column} = :dimension_value"
+    if where_match:
+        prefix = head[:where_match.end()]
+        condition = head[where_match.end():].strip()
+        return f"{prefix} ({condition}) AND {predicate} {tail}"
+    return f"{head} WHERE {predicate} {tail}"
+
+
 def _cache_key(
     tenant_id: Optional[int], connection_id: Any, selected_table: Optional[str],
     date_from: Optional[str], date_to: Optional[str], cache_version: int = 0,
+    filter_column: Optional[str] = None, filter_value: Optional[str] = None,
     *, planner_mode: str = "legacy", catalog_version: str | None = None,
     plan_hash: str | None = None,
 ) -> str:
     key_parts = [
         "db_insights", str(tenant_id), str(connection_id), f"v{cache_version}",
         selected_table or "all", date_from or "none", date_to or "none",
+        filter_column or "no-filter", filter_value or "no-value",
     ]
     if planner_mode == "v2":
         key_parts.extend(("planner_v2", catalog_version or "unknown", plan_hash or "unknown"))
@@ -434,6 +452,8 @@ class DatabasePipelineService:
         date_to: Optional[str],
         date_bindings: Dict[str, str],
         selected_table: Optional[str],
+        filter_column: Optional[str],
+        filter_value: Optional[str],
     ) -> Dict[str, Any]:
         """Execute opt-in V2 planning, using tenant and schema-derived cache namespaces."""
         from services.insights.runner import (
@@ -501,7 +521,8 @@ class DatabasePipelineService:
                 available_tables = [table.name for table in prepared.catalog.tables]
                 cache_key = _cache_key(
                     tenant_id, connection_id, selected_table, date_from, date_to,
-                    cache_version, planner_mode="v2", catalog_version=catalog_version,
+                    cache_version, filter_column, filter_value,
+                    planner_mode="v2", catalog_version=catalog_version,
                     plan_hash=plan_hash,
                 )
                 cached_data = cache_get(cache_key)
@@ -525,6 +546,7 @@ class DatabasePipelineService:
                 result = execute_prepared_sql_plan(
                     source_connection, prepared, date_from=date_from,
                     date_to_excl=date_to_excl, selected_table=selected_table,
+                    filter_column=filter_column, filter_value=filter_value,
                 )
         elif db_type == "mongodb":
             from pymongo import MongoClient
@@ -557,7 +579,8 @@ class DatabasePipelineService:
                 available_tables = [collection.name for collection in prepared.catalog.collections]
                 cache_key = _cache_key(
                     tenant_id, connection_id, selected_table, date_from, date_to,
-                    cache_version, planner_mode="v2", catalog_version=catalog_version,
+                    cache_version, filter_column, filter_value,
+                    planner_mode="v2", catalog_version=catalog_version,
                     plan_hash=plan_hash,
                 )
                 cached_data = cache_get(cache_key)
@@ -581,6 +604,7 @@ class DatabasePipelineService:
                 result = execute_prepared_mongo_plan(
                     mongo_database, prepared, date_from=date_from,
                     date_to_excl=date_to_excl, selected_collection=selected_table,
+                    filter_column=filter_column, filter_value=filter_value,
                 )
             finally:
                 client.close()
@@ -644,6 +668,13 @@ class DatabasePipelineService:
             "data_quality": result["data_quality"],
             "applied_date_from": date_from,
             "applied_date_to": date_to,
+            "date_filter_status": (
+                "not_requested" if not (date_from or date_to)
+                else "applied" if active_date_filter or analysis_mode == "mongodb"
+                else "unavailable"
+            ),
+            "applied_filter_column": filter_column,
+            "applied_filter_value": filter_value,
             "layout_plan": layout.model_dump(),
             "pipeline_layers": [
                 {"layer": index, "name": name, "status": "completed"}
@@ -691,6 +722,8 @@ class DatabasePipelineService:
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
         selected_table: Optional[str] = None,
+        filter_column: Optional[str] = None,
+        filter_value: Optional[str] = None,
         force_refresh: bool = False,
         progress_callback: Optional[Callable[[int, str], None]] = None,
         tenant_id: Optional[int] = None,
@@ -702,6 +735,10 @@ class DatabasePipelineService:
             raise ValueError("Tenant ID is required for database insights")
 
         date_from, date_to, date_bindings = _normalize_date_range(date_from, date_to)
+        if (filter_column is None) != (filter_value is None):
+            raise ValueError("Dimension filter requires both column and value")
+        if filter_column is not None and (len(str(filter_column)) > 255 or len(str(filter_value)) > 255):
+            raise ValueError("Dimension filter is too long")
 
         # 1. Fetch connection and verify ownership
         query = db.query(models.DatabaseConnection).filter(
@@ -724,11 +761,13 @@ class DatabasePipelineService:
                 db, db_conn, tenant_id=tenant_id, connection_id=connection_id,
                 cache_version=cache_version, date_from=date_from, date_to=date_to,
                 date_bindings=date_bindings, selected_table=selected_table,
+                filter_column=filter_column, filter_value=filter_value,
             )
 
         # 2. Check Cache if not force_refresh
         cache_key = _cache_key(
             tenant_id, connection_id, selected_table, date_from, date_to, cache_version,
+            filter_column, filter_value,
         )
         if not force_refresh and _insights_planner_mode() != "v2":
             cached_data = cache_get(cache_key)
@@ -811,6 +850,7 @@ class DatabasePipelineService:
                 }
 
         active_date_filter: Optional[Tuple[str, str]] = None
+        active_dimension_filter: Optional[Tuple[str, str]] = None
 
         def execute_sql(
             query_str: str, metric_ids: Optional[List[str]] = None,
@@ -833,6 +873,11 @@ class DatabasePipelineService:
                     return []
                 query_str = scoped
                 query_params.update(date_bindings)
+            if active_dimension_filter:
+                scoped = _with_dimension_predicate(query_str, *active_dimension_filter)
+                if scoped is not None:
+                    query_str = scoped
+                    query_params["dimension_value"] = filter_value
             # Try native DataSpeakAI pooled engine first
             try:
                 from services.db_utils import get_connection_url
@@ -1022,6 +1067,27 @@ class DatabasePipelineService:
                 "success": False,
                 "message": "No accessible tables found in this database connection."
             }
+
+        mongo_dimension_filter: Optional[Tuple[str, str]] = None
+        if filter_column is not None:
+            raw_filter = str(filter_column).strip()
+            filter_parts = raw_filter.split(".", 1)
+            filter_table = filter_parts[0] if len(filter_parts) == 2 else (selected_table or "")
+            filter_col = filter_parts[1] if len(filter_parts) == 2 else raw_filter
+            table_meta = schema.get(filter_table) or {}
+            columns_meta = table_meta.get("columns", {}) if isinstance(table_meta, dict) else {}
+            if filter_table not in available_tables or filter_col not in columns_meta:
+                query_errors.append("Selected dimension filter is unavailable for this schema.")
+                metric_query_states["dimension_filter"] = {
+                    "status": "unavailable", "reason": "missing_role"
+                }
+            elif str(db_conn.db_type).lower() != "mongodb":
+                active_dimension_filter = (
+                    _clean_sql_identifier(filter_table, db_conn.db_type),
+                    _clean_sql_identifier(filter_col, db_conn.db_type),
+                )
+            else:
+                mongo_dimension_filter = (filter_table, filter_col)
 
         def normalize_name(s: str) -> str:
             return re.sub(r'[\s_\-]+', '', s.lower())
@@ -2000,6 +2066,9 @@ class DatabasePipelineService:
                     tbl_title = tbl.replace("_", " ").title()
                     date_cols = prof.get("date_cols", [])
                     t_col = _pick_date_column(date_cols)
+                    dimension_match = {}
+                    if mongo_dimension_filter and mongo_dimension_filter[0] == tbl:
+                        dimension_match[mongo_dimension_filter[1]] = filter_value
 
                     # 1. Total document count (never discard a requested date filter)
                     count_metric_id = f"{tbl}_total_rows"
@@ -2011,7 +2080,7 @@ class DatabasePipelineService:
                         query_errors.append(f"{count_metric_id}: Date-filtered document count is unavailable because no date field was detected.")
                     elif date_filter_requested:
                         try:
-                            total_records = coll.count_documents({t_col: {"$ne": None, **date_match}})
+                            total_records = coll.count_documents({t_col: {"$ne": None, **date_match}, **dimension_match})
                             trend_sub = "documents in filtered horizon"
                         except Exception:
                             logger.exception("MongoDB date-filtered count failed for collection %s", tbl)
@@ -2021,7 +2090,10 @@ class DatabasePipelineService:
                             query_errors.append(f"{count_metric_id}: Date-filtered document count failed.")
                     else:
                         try:
-                            total_records = coll.estimated_document_count()
+                            total_records = (
+                                coll.count_documents(dimension_match)
+                                if dimension_match else coll.estimated_document_count()
+                            )
                             trend_sub = "verified documents"
                         except Exception:
                             try:
@@ -2063,7 +2135,7 @@ class DatabasePipelineService:
                                 if schema.get(tbl, {}).get("columns", {}).get(parent_arr) == "list":
                                     m_pipe.append({"$unwind": f"${parent_arr}"})
 
-                            match_criteria = {m_col: {"$ne": None}}
+                            match_criteria = {m_col: {"$ne": None}, **dimension_match}
                             if date_match and t_col:
                                 match_criteria[t_col] = {"$ne": None, **date_match}
                             m_pipe.append({"$match": match_criteria})
@@ -2133,7 +2205,7 @@ class DatabasePipelineService:
                                 if schema.get(tbl, {}).get("columns", {}).get(parent_arr) == "list":
                                     continue
                             d_vals = (
-                                coll.distinct(d_col, {t_col: {"$ne": None, **date_match}})
+                                coll.distinct(d_col, {t_col: {"$ne": None, **date_match}, **dimension_match})
                                 if date_match else coll.distinct(d_col)
                             )
                             d_cnt = len(d_vals)
@@ -2171,7 +2243,7 @@ class DatabasePipelineService:
                                 if schema.get(tbl, {}).get("columns", {}).get(parent_arr) == "list":
                                     t_pipe.append({"$unwind": f"${parent_arr}"})
 
-                            match_criteria = {t_col: {"$ne": None}}
+                            match_criteria = {t_col: {"$ne": None}, **dimension_match}
                             if date_match:
                                 match_criteria[t_col].update(date_match)
 
@@ -2219,7 +2291,7 @@ class DatabasePipelineService:
                                 if schema.get(tbl, {}).get("columns", {}).get(parent_arr) == "list":
                                     chart_pipe.append({"$unwind": f"${parent_arr}"})
 
-                            match_criteria = {d_col: {"$ne": None}}
+                            match_criteria = {d_col: {"$ne": None}, **dimension_match}
                             if date_match and t_col:
                                 match_criteria[t_col] = {"$ne": None, **date_match}
                             if m_col:
@@ -2837,6 +2909,8 @@ class DatabasePipelineService:
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
         selected_table: Optional[str] = None,
+        filter_column: Optional[str] = None,
+        filter_value: Optional[str] = None,
         force_refresh: bool = False,
         tenant_id: Optional[int] = None,
     ) -> Generator[Dict[str, Any], None, None]:
@@ -2859,6 +2933,7 @@ class DatabasePipelineService:
         cache_version = int(getattr(db_conn, "insights_cache_version", 0) or 0)
         cache_key = _cache_key(
             tenant_id, connection_id, selected_table, date_from, date_to, cache_version,
+            filter_column, filter_value,
         )
         if not force_refresh and _insights_planner_mode() == "legacy":
             cached_data = cache_get(cache_key)
@@ -2941,6 +3016,8 @@ class DatabasePipelineService:
                 date_from=date_from,
                 date_to=date_to,
                 selected_table=selected_table,
+                filter_column=filter_column,
+                filter_value=filter_value,
                 force_refresh=force_refresh,
                 tenant_id=tenant_id,
             )

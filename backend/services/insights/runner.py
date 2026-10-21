@@ -170,6 +170,8 @@ def execute_prepared_sql_plan(
     date_from: str | None = None,
     date_to_excl: str | None = None,
     selected_table: str | None = None,
+    filter_column: str | None = None,
+    filter_value: str | None = None,
 ) -> dict[str, Any]:
     """Execute a prepared plan; catalog/roles can participate in a generation-safe cache key."""
     catalog, profiles, plan, deadline = (
@@ -188,6 +190,7 @@ def execute_prepared_sql_plan(
             try:
                 compiled = compile_metric(
                     metric, catalog, date_from=date_from, date_to_excl=date_to_excl,
+                    filter_column=filter_column, filter_value=filter_value,
                 )
                 result = execute_metric(connection, compiled, deadline=deadline)
             except UnsupportedDialectError:
@@ -234,6 +237,8 @@ def run_sql_plan(
     date_from: str | None = None,
     date_to_excl: str | None = None,
     selected_table: str | None = None,
+    filter_column: str | None = None,
+    filter_value: str | None = None,
     sample_size: int = 10_000,
     max_tables: int = 100,
     max_columns_per_table: int = 256,
@@ -247,6 +252,7 @@ def run_sql_plan(
     return execute_prepared_sql_plan(
         connection, prepared, date_from=date_from,
         date_to_excl=date_to_excl, selected_table=selected_table,
+        filter_column=filter_column, filter_value=filter_value,
     )
 
 
@@ -293,6 +299,8 @@ def execute_prepared_mongo_plan(
     date_from: str | None = None,
     date_to_excl: str | None = None,
     selected_collection: str | None = None,
+    filter_column: str | None = None,
+    filter_value: str | None = None,
 ) -> dict[str, Any]:
     catalog, plan, deadline = prepared.catalog, prepared.plan, prepared.deadline
     metrics: list[dict[str, Any]] = []
@@ -337,9 +345,17 @@ def execute_prepared_mongo_plan(
         elif time.monotonic() >= deadline:
             result = MongoMetricResult(metric.id, "unavailable", "budget_exceeded")
         else:
+            filter_path = None
+            if filter_column:
+                if filter_column.startswith(f"{metric.collection}."):
+                    filter_path = filter_column.split(".", 1)[1]
+                elif "." not in filter_column:
+                    filter_path = filter_column
             result = execute_mongo_metric(
                 database[metric.collection], metric, date_from=date_from,
                 date_to_excl=date_to_excl, deadline=deadline,
+                filter_path=filter_path,
+                filter_value=filter_value,
             )
         if result.status in {"error", "unavailable"} and result.reason:
             warnings.append(_result_warning(metric.id, result.reason))
