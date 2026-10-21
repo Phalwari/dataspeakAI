@@ -631,7 +631,7 @@ export function SettingsPage() {
                 </p>
               </div>
 
-              {isEditingProfile ? (
+              {isEditingProfile && (
                 <div className="flex items-center gap-3 pt-2">
                   <Button
                     onClick={handleSaveProfile}
@@ -648,20 +648,6 @@ export function SettingsPage() {
                     disabled={profileSaving}
                   >
                     Cancel
-                  </Button>
-                </div>
-              ) : (
-                <div className="pt-2">
-                  <Button
-                    type="button"
-                    onClick={() => {
-                      setIsEditingProfile(true);
-                      setProfileMessage({ type: "", text: "" });
-                    }}
-                    className="gap-2"
-                  >
-                    <Pencil className="w-4 h-4" />
-                    Edit Profile
                   </Button>
                 </div>
               )}
