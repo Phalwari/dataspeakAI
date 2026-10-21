@@ -45,7 +45,7 @@ To maintain seamless multi-developer and AI agent collaboration:
 
 ### Changed
 
-- **Analytics & Visualization retirement** (`src/app/routes.ts`, `src/app/components/DashboardLayout.tsx`, `backend/main.py`): Removed the Analytics & Visualization navigation entry and frontend route, and stopped mounting its feature API router. Shared Dashboard, Logs, Usage and Platform Admin endpoints remain mounted under their neutral `/api` paths.
+- **Analytics & Visualization retirement** (`src/app/routes.ts`, `src/app/components/DashboardLayout.tsx`, `src/app/pages/LandingPage.tsx`, `backend/main.py`): Removed the navigation entry, frontend route, landing-page card and dedicated visualization components, and stopped mounting its feature API router. Shared Dashboard, Logs, Usage and Platform Admin endpoints remain mounted under their neutral `/api` paths.
 
 - **Database connection cards** (`src/app/pages/dashboard/DatabasesPage.tsx`): Removed the inactive settings control so each card only shows actions that are available to users.
 

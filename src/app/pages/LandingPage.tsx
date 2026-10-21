@@ -15,7 +15,6 @@ import {
   Twitter,
   Linkedin,
   FileText,
-  BarChart3,
   Brain,
   Building2,
   MessageSquareCode,
@@ -47,12 +46,6 @@ const features = [
     title: "Secure Infrastructure",
     description:
       "Enterprise-grade security with encrypted connections, role-based access, and SOC 2 compliance",
-  },
-  {
-    icon: BarChart3,
-    title: "Analytics & Visualization",
-    description:
-      "Beautiful dashboards and charts to visualize your data. Track trends and monitor KPIs in real-time",
   },
   {
     icon: Code2,
