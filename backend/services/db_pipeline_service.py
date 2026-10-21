@@ -22,6 +22,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
 from sqlalchemy import func
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 import models
 from services.database_connection_service import db_connection_service, DatabaseConnectionService
@@ -41,6 +42,37 @@ from services.sql_dialect import (
 
 logger = logging.getLogger(__name__)
 INSIGHTS_CACHE_VERSION = 4
+
+
+def _inspect_accessible_sql_schema(inspector: Any) -> Tuple[Dict[str, Dict[str, Any]], List[str]]:
+    """Return metadata for inspectable tables and skip catalog entries unavailable to the engine.
+
+    Some externally managed MySQL catalogs can list a table whose storage engine
+    is no longer available. One such entry must not make the complete Insights
+    catalog unusable; it is excluded from this run without exposing driver text.
+    """
+    schema: Dict[str, Dict[str, Any]] = {}
+    skipped_tables: List[str] = []
+    for table_name in inspector.get_table_names():
+        try:
+            columns = inspector.get_columns(table_name)
+        except SQLAlchemyError:
+            skipped_tables.append(str(table_name))
+            continue
+        schema[str(table_name)] = {
+            "columns": {
+                str(column["name"]): str(column.get("type", "TEXT"))
+                for column in columns
+            },
+            "row_count": 0,
+        }
+
+    if skipped_tables:
+        logger.warning(
+            "Skipped %d inaccessible table(s) during schema discovery",
+            len(skipped_tables),
+        )
+    return schema, skipped_tables
 
 
 def _normalize_date_range(
@@ -947,13 +979,7 @@ class DatabasePipelineService:
                 if conn_url and db_conn.db_type.lower() != "mongodb":
                     engine = get_engine(conn_url)
                     insp = inspect(engine)
-                    table_names = insp.get_table_names()
-                    schema = {}
-                    for t in table_names:
-                        cols = {}
-                        for c in insp.get_columns(t):
-                            cols[c["name"]] = str(c.get("type", "TEXT"))
-                        schema[t] = {"columns": cols, "row_count": 0}
+                    schema, _skipped_tables = _inspect_accessible_sql_schema(insp)
                     if hasattr(db_conn, "tables_metadata"):
                         db_conn.tables_metadata = schema
                         db.commit()

@@ -592,6 +592,27 @@ def _make_json_serializable(val: Any) -> Any:
     return str(val)
 
 
+def _apply_optional_mysql_statement_timeout(conn_handle: Any) -> None:
+    """Apply MySQL's optional execution limit once per pooled DBAPI connection.
+
+    Read-only mode remains mandatory and is set separately. Some public or
+    hosted MySQL services reject ``max_execution_time``; the application
+    watchdog remains the hard deadline in that case. Remembering the rejected
+    capability prevents a warning for every generated metric query.
+    """
+    capability_key = "dataspeak_mysql_statement_timeout_unsupported"
+    connection_info = conn_handle.info
+    if connection_info.get(capability_key):
+        return
+    try:
+        conn_handle.execute(text("SET SESSION max_execution_time = 10000;"))
+    except SQLAlchemyError:
+        connection_info[capability_key] = True
+        logger.debug(
+            "MySQL statement timeout is unavailable; using the application watchdog"
+        )
+
+
 def execute_safe_sql(
     db_conn: models.DatabaseConnection,
     sql_query: str | SafeExecutionRequest,
@@ -671,10 +692,7 @@ def execute_safe_sql(
                     conn_handle.execute(text("SET SESSION sql_mode = CONCAT(@@sql_mode, ',ANSI_QUOTES');"))
                 except Exception as var_err:
                     logger.warning("Could not apply MySQL ANSI_QUOTES mode (%s)", type(var_err).__name__)
-                try:
-                    conn_handle.execute(text("SET SESSION max_execution_time = 10000;"))
-                except Exception as var_err:
-                    logger.warning("Could not apply MySQL statement timeout (%s)", type(var_err).__name__)
+                _apply_optional_mysql_statement_timeout(conn_handle)
             else:
                 raise RuntimeError("Unsupported database dialect for read-only execution")
         except Exception as err:
