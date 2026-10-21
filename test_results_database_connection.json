@@ -1,0 +1,116 @@
+{
+  "timestamp": "2026-10-20T22:47:46.065741",
+  "total": 12,
+  "passed": 12,
+  "failed": 0,
+  "results": [
+    {
+      "no": 1,
+      "test_case": "Check SQLite connection test with valid database file",
+      "attribute_value": "db_type: 'sqlite', database: 'orders_10rows.sqlite'",
+      "expected_result": "Validates path in sandbox, establishes SQLite engine, returns Success",
+      "actual_result": "Pass",
+      "execution_time_ms": 9.25,
+      "error": null
+    },
+    {
+      "no": 2,
+      "test_case": "Check directory traversal attack defense on SQLite path",
+      "attribute_value": "database: '../../app.db'",
+      "expected_result": "Blocks traversal sequence ('..') and raises InvalidDatabasePathError",
+      "actual_result": "Pass",
+      "execution_time_ms": 0.01,
+      "error": null
+    },
+    {
+      "no": 3,
+      "test_case": "Check path sandbox containment for external absolute paths",
+      "attribute_value": "database: 'C:/untrusted_dir/external.sqlite'",
+      "expected_result": "Rejects external file path outside managed root data/sqlite_dbs",
+      "actual_result": "Pass",
+      "execution_time_ms": 1.04,
+      "error": null
+    },
+    {
+      "no": 4,
+      "test_case": "Check file extension whitelist validation (.db, .sqlite, .sqlite3)",
+      "attribute_value": "database: 'malicious_script.txt'",
+      "expected_result": "Rejects non-database extensions and raises InvalidDatabasePathError",
+      "actual_result": "Pass",
+      "execution_time_ms": 0.89,
+      "error": null
+    },
+    {
+      "no": 5,
+      "test_case": "Check empty database path field validation",
+      "attribute_value": "database: ''",
+      "expected_result": "Displays validation error stating database path is required",
+      "actual_result": "Pass",
+      "execution_time_ms": 0.01,
+      "error": null
+    },
+    {
+      "no": 6,
+      "test_case": "Check SSRF loopback IP blocking on network connections",
+      "attribute_value": "host: '127.0.0.1', port: 5432",
+      "expected_result": "Blocks loopback routing and raises SSRFSecurityViolation",
+      "actual_result": "Pass",
+      "execution_time_ms": 10.12,
+      "error": null
+    },
+    {
+      "no": 7,
+      "test_case": "Check SSRF private network subnet blocking (RFC 1918)",
+      "attribute_value": "host: '192.168.1.100', port: 5432",
+      "expected_result": "Blocks private Class C address and raises SSRFSecurityViolation",
+      "actual_result": "Pass",
+      "execution_time_ms": 0.32,
+      "error": null
+    },
+    {
+      "no": 8,
+      "test_case": "Check external database credential symmetric encryption at rest",
+      "attribute_value": "password: 'SuperSecretPostgresPassword123!'",
+      "expected_result": "Encrypts with v1 Fernet envelope, securely decrypts on demand",
+      "actual_result": "Pass",
+      "execution_time_ms": 5.46,
+      "error": null
+    },
+    {
+      "no": 9,
+      "test_case": "Check automatic schema reflection & table introspection",
+      "attribute_value": "database: 'orders_10rows.sqlite'",
+      "expected_result": "Reflects SQLite catalog and discovers 'orders' table",
+      "actual_result": "Pass",
+      "execution_time_ms": 8.98,
+      "error": null
+    },
+    {
+      "no": 10,
+      "test_case": "Check safe table data preview with accurate row retrieval",
+      "attribute_value": "table_name: 'orders', limit: 100",
+      "expected_result": "Retrieves exactly 10 rows with accurate schema columns and data values",
+      "actual_result": "Pass",
+      "execution_time_ms": 4.77,
+      "error": null
+    },
+    {
+      "no": 11,
+      "test_case": "Check database connection persistence in metadata repository",
+      "attribute_value": "name: 'Unit Test Store DB', db_type: 'sqlite'",
+      "expected_result": "Creates database record with status 'connected' and valid ID",
+      "actual_result": "Pass",
+      "execution_time_ms": 435.9,
+      "error": null
+    },
+    {
+      "no": 12,
+      "test_case": "Check database connection deletion and resource teardown",
+      "attribute_value": "db_id: 60",
+      "expected_result": "Removes database record from metadata catalog without orphaned resources",
+      "actual_result": "Pass",
+      "execution_time_ms": 66.2,
+      "error": null
+    }
+  ]
+}

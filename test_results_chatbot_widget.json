@@ -1,0 +1,116 @@
+{
+  "timestamp": "2026-10-21T00:55:06.904916",
+  "total": 12,
+  "passed": 12,
+  "failed": 0,
+  "results": [
+    {
+      "no": 1,
+      "test_case": "Check publishable key format standard ('pk_live_...')",
+      "attribute_value": "public_key: 'pk_live_fbf257...'",
+      "expected_result": "Enforces safe publishable key prefix 'pk_live_' preventing internal secret key exposure",
+      "actual_result": "Pass",
+      "execution_time_ms": 0.0,
+      "error": null
+    },
+    {
+      "no": 2,
+      "test_case": "Check origin-checked HMAC session handshake",
+      "attribute_value": "Origin: 'http://localhost:5173', public_key: 'pk_live_fbf257...'",
+      "expected_result": "Validates permitted origin and issues cryptographically signed HMAC session token",
+      "actual_result": "Pass",
+      "execution_time_ms": 161.57,
+      "error": null
+    },
+    {
+      "no": 3,
+      "test_case": "Check unauthorized origin rejection (CORS / CSRF defense)",
+      "attribute_value": "Origin: 'https://malicious-attacker-site.com'",
+      "expected_result": "Blocks unlisted foreign origin and returns HTTP 403 Forbidden",
+      "actual_result": "Pass",
+      "execution_time_ms": 12.14,
+      "error": null
+    },
+    {
+      "no": 4,
+      "test_case": "Check non-existent / invalid public key rejection",
+      "attribute_value": "public_key: 'pk_live_00000000000000000000000000000000'",
+      "expected_result": "Rejects invalid public key and returns HTTP 403 Forbidden",
+      "actual_result": "Pass",
+      "execution_time_ms": 15.22,
+      "error": null
+    },
+    {
+      "no": 5,
+      "test_case": "Check HMAC session token integrity and 60-minute expiration",
+      "attribute_value": "session_token: 'eyJhbGciOiJIUzI1NiIs...'",
+      "expected_result": "Cryptographically verifies tenant_id=1 claim and validates active expiration window",
+      "actual_result": "Pass",
+      "execution_time_ms": 0.51,
+      "error": null
+    },
+    {
+      "no": 6,
+      "test_case": "Check visitor conversation continuity token verification",
+      "attribute_value": "continuity_token: 'eyJhbGciOiJIUzI1NiIs...'",
+      "expected_result": "Verifies visitor session resumption proof for multi-turn chat continuity",
+      "actual_result": "Pass",
+      "execution_time_ms": 0.28,
+      "error": null
+    },
+    {
+      "no": 7,
+      "test_case": "Check chatbot theme & appearance configuration endpoint",
+      "attribute_value": "endpoint: 'GET /api/widget/config?key=pk_live_fbf257...'",
+      "expected_result": "Returns HTTP 200 with bot title, theme color, greeting message, and position",
+      "actual_result": "Pass",
+      "execution_time_ms": 14.48,
+      "error": null
+    },
+    {
+      "no": 8,
+      "test_case": "Check Knowledge Base document retrieval via widget chat",
+      "attribute_value": "query: 'What is AI Engineering?', mode: RAG retrieval",
+      "expected_result": "Returns HTTP 200 with natural language answer synthesized from published documents",
+      "actual_result": "Pass",
+      "execution_time_ms": 3255.15,
+      "error": null
+    },
+    {
+      "no": 9,
+      "test_case": "Check strict tenant scoping & claim extraction",
+      "attribute_value": "tenant_id: 1 (extracted strictly from cryptographically signed claims)",
+      "expected_result": "Prevents client-side tenant injection and ensures 100% data access isolation",
+      "actual_result": "Pass",
+      "execution_time_ms": 0.21,
+      "error": null
+    },
+    {
+      "no": 10,
+      "test_case": "Check SQL safety guardrails & destructive query defense",
+      "attribute_value": "queries: 'SELECT ...' vs 'DROP TABLE users;'",
+      "expected_result": "Allows safe SELECT queries and strictly blocks destructive DDL/DML statements",
+      "actual_result": "Pass",
+      "execution_time_ms": 1116.13,
+      "error": null
+    },
+    {
+      "no": 11,
+      "test_case": "Check token bucket rate limiting on widget handshake",
+      "attribute_value": "rate_limiter: widget_limiter.check_session_handshake_rate_limits",
+      "expected_result": "Evaluates IP and public key token buckets returning retry_after when exhausted",
+      "actual_result": "Pass",
+      "execution_time_ms": 3.44,
+      "error": null
+    },
+    {
+      "no": 12,
+      "test_case": "Check standalone embed HTML page & frame-ancestors CSP header",
+      "attribute_value": "endpoint: 'GET /api/widget/embed/pk_live_fbf257...'",
+      "expected_result": "Returns HTML embed shell with strictly restricted frame-ancestors CSP header",
+      "actual_result": "Pass",
+      "execution_time_ms": 11.83,
+      "error": null
+    }
+  ]
+}
