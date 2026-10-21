@@ -1,6 +1,6 @@
 import os
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -97,7 +97,7 @@ def invite_member(
         db_ids_str = ",".join(map(str, sorted(set(invite.database_ids))))
 
     token = str(uuid.uuid4())
-    expires_at = datetime.utcnow() + timedelta(days=7)
+    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
 
     # Check for existing pending invite
     existing_invite = db.query(models.TenantInvite).filter(

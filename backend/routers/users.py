@@ -20,6 +20,13 @@ ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 
 
+def _as_utc(value: datetime) -> datetime:
+    """Normalize database datetimes before comparing them with UTC now."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 
 @router.post("/register", response_model=schemas.UserResponse)
 def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
@@ -43,7 +50,7 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
                 raise HTTPException(status_code=400, detail="This invite was sent to a different email address")
             
             # Security Check: Ensure invite hasn't expired
-            if invite.expires_at < datetime.now(timezone.utc):
+            if _as_utc(invite.expires_at) < datetime.now(timezone.utc):
                 raise HTTPException(status_code=400, detail="This invitation has expired")
 
             tenant_id = invite.tenant_id
