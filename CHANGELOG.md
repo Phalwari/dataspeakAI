@@ -17,6 +17,12 @@ To maintain seamless multi-developer and AI agent collaboration:
 
 ## [Unreleased]
 
+### Fixed — Northwind Insights compatibility
+
+- Qualified line-derived money expressions and retained fact/line joins in segment and customer breakdowns; lifecycle counts preserve order grain. CamelCase transaction dates now resolve before shipping dates. Bumped Insights payload version to reject old reports.
+- Period comparisons now require an available numeric time series rather than falling back to a categorical chart. Executive synthesis accepts case-insensitive JSON fences and makes at most one format-repair request within the original deadline; invalid output still falls back honestly.
+- Verification: 70 backend regressions, 50 frontend tests, Vite build and FastAPI import passed. Direct local Northwind pipeline produced five available charts with no quality warnings. See `docs/sessions/2026-10-22_northwind_insights.md`.
+
 ### Fixed — Demo QA remediation (2026-10-22)
 
 - Resolved DQA-01..10: removed fabricated KPI history; fixed chart value-key rankings, scoped customer/unit/Mongo distinct metrics and L2 cache reuse, missing-table rejection with audit retention, Decimal monetary summaries, and safe summary labels. Added bounded catalog-validated Mongo chat read plans with BSON date binding and an explicit paid-billing metric. Corrected passage identity in hybrid retrieval, unified widget parent evidence, aligned claim verification to actual paragraphs/sentences, excluded nonclaims, and made provider fallback honest while preserving streaming failover. See `docs/reports/demo_qa_remediation_2026-10-22/REPORT.md` and captured live evidence. Verification: 231 affected backend tests passed; a later overlapping 38-test Mongo edge suite passed; 47 frontend tests and the production build passed. Provider quotas remain an external availability limitation; no Planner V2 default cutover or production load certification is claimed.

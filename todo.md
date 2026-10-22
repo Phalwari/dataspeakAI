@@ -1203,6 +1203,8 @@ The implementation session must receive the saved plan in the same up-to-date ch
 ---
 
 ## 📦 Archived / Completed Tasks
+
+- [x] **NW-01** — Fix line-derived Insights joins, CamelCase date roles, false categorical period comparisons and bounded AI JSON repair. [Completed: 2026-10-22 | Codex | 70 backend and 50 frontend tests passed; build, FastAPI import and direct Northwind pipeline verified. See docs/sessions/2026-10-22_northwind_insights.md.]
 - [x] **QA-NR2-20261019 — Independently verify readiness through Phase NR-2**. [Completed: 2026-10-19 | Codex / QA | Verification audit delivered; NR-2 sign-off withheld, with seven reproduced gaps and corrective tasks recorded.] Evidence: [readiness report](docs/reports/nr2_readiness_verification_2026-10-19.md), `tests/manual/nr2_readiness_verification.py`, `.agents/nr2-readiness/`. Completion applies to the audit only; no implementation defect or phase gate is marked fixed.
 
 - [x] **NR-0.1-A-T01 — Record the reproducible implementation baseline**

@@ -17,6 +17,7 @@ import {
 } from 'recharts';
 import { API_BASE_URL } from '../../config/api';
 import { databaseConnectionsAPI } from '../../api/connections';
+import { selectPeriodChart } from '../../utils/insightPeriods';
 const API_URL = `${API_BASE_URL}/api`;
 
 // Curated vibrant enterprise chart palette
@@ -507,7 +508,7 @@ export function BusinessInsightsPage() {
   }, [baseKpis, activeTable, selectedDimensionFilter]);
 
   // Dynamically derive Period Comparison from Time-Series Chart data & KPIs
-  const timeSeriesChart = charts.find((c: any) => c.type === 'line' || c.type === 'area') || charts[0];
+  const timeSeriesChart = selectPeriodChart(charts);
   const periodComparisonData = useMemo(() => {
     if (pipelineData?.trends && pipelineData.trends.length >= 3) {
       return pipelineData.trends;

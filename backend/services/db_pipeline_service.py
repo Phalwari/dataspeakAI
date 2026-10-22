@@ -42,7 +42,7 @@ from services.sql_dialect import (
 )
 
 logger = logging.getLogger(__name__)
-INSIGHTS_CACHE_VERSION = 5
+INSIGHTS_CACHE_VERSION = 6
 
 
 class InvalidInsightScope(ValueError):
@@ -117,10 +117,11 @@ def _pick_date_column(columns: List[str]) -> Optional[str]:
         "transaction_date", "order_date", "invoice_date", "sale_date",
         "payment_date", "created_at", "created_on", "date",
     )
-    by_name = {column.casefold(): column for column in columns}
+    by_name = {re.sub(r"[^a-z0-9]", "", column.casefold()): column for column in columns}
     for candidate in priorities:
-        if candidate in by_name:
-            return by_name[candidate]
+        normalized = candidate.replace("_", "")
+        if normalized in by_name:
+            return by_name[normalized]
     return columns[0] if len(columns) == 1 else None
 
 
@@ -188,6 +189,35 @@ def _insights_planner_mode() -> str:
         return "v2"
     logger.warning("Unsupported INSIGHTS_PLANNER value; using legacy planner")
     return "legacy"
+
+
+def _parse_executive_summary(response: str) -> Dict[str, Any]:
+    """Accept plain/fenced JSON, but never promote malformed output to a finding."""
+    from services.llm_generation_service import LLMFailure
+
+    response = response.strip()
+    fenced = re.fullmatch(r"```(?:json)?\s*([\s\S]*?)\s*```", response, re.IGNORECASE)
+    if fenced:
+        response = fenced.group(1)
+    try:
+        parsed = json.loads(response)
+    except (ValueError, TypeError):
+        raise LLMFailure("InvalidResponse") from None
+    if (not isinstance(parsed, dict)
+            or not isinstance(parsed.get("executive_summary"), str)
+            or not parsed["executive_summary"].strip()
+            or not isinstance(parsed.get("business_domain"), str)
+            or not isinstance(parsed.get("strategic_insights"), list)
+            or not isinstance(parsed.get("tactical_recommendations"), list)
+            or any(not isinstance(item, dict)
+                   or any(not isinstance(item.get(field, ""), str)
+                          for field in ("title", "finding", "impact", "category"))
+                   for item in parsed["strategic_insights"])
+            or any(not isinstance(item, str) for item in parsed["tactical_recommendations"])):
+        raise LLMFailure("InvalidResponse")
+    parsed["source"] = "llm"
+    parsed.pop("llm_error", None)
+    return parsed
 
 
 def classify_status(value: Any) -> str:
@@ -1247,10 +1277,10 @@ class DatabasePipelineService:
                         break
 
                 if l_price_col and l_qty_col:
-                    q_lp = _clean_sql_identifier(l_price_col, db_conn.db_type)
-                    q_lq = _clean_sql_identifier(l_qty_col, db_conn.db_type)
+                    q_lp = f"{q_line}.{_clean_sql_identifier(l_price_col, db_conn.db_type)}"
+                    q_lq = f"{q_line}.{_clean_sql_identifier(l_qty_col, db_conn.db_type)}"
                     if l_disc_col:
-                        q_ld = _clean_sql_identifier(l_disc_col, db_conn.db_type)
+                        q_ld = f"{q_line}.{_clean_sql_identifier(l_disc_col, db_conn.db_type)}"
                         line_money_expr = f"({q_lp} * {q_lq} * (1.0 - COALESCE({q_ld}, 0.0)))"
                     else:
                         line_money_expr = f"({q_lp} * {q_lq})"
@@ -1319,6 +1349,13 @@ class DatabasePipelineService:
                         money_expr = line_money_expr
                         fallback_revenue_column = l_price_col
 
+            # Keep the source grain of a line-derived amount in every fact breakdown.
+            revenue_from = q_fact
+            if join_col and line_money_expr and not has_genuine_fact_revenue:
+                q_jf = _clean_sql_identifier(join_col[0], db_conn.db_type)
+                q_jl = _clean_sql_identifier(join_col[1], db_conn.db_type)
+                revenue_from = f"{q_fact} JOIN {q_line} ON {q_fact}.{q_jf} = {q_line}.{q_jl}"
+
             # Status & Lifecycle introspection (Truthful accounting)
             status_col = next((c for c in fact_prof.get("dim_cols", []) + list(fact_prof.get("columns", {}).keys()) 
                                if any(k in c.lower() for k in ["status", "order_status", "delivery_status", "state"]) 
@@ -1330,11 +1367,12 @@ class DatabasePipelineService:
             status_distribution: List[Dict[str, Any]] = []
             if status_col and money_expr:
                 q_status = _clean_sql_identifier(status_col, db_conn.db_type)
+                status_count = f"COUNT(DISTINCT {q_fact}.{q_jf})" if revenue_from != q_fact else "COUNT(*)"
                 status_res = execute_sql(f"""
-                    SELECT {q_status} as st, COUNT(*) as cnt, {round_aggregate('SUM', money_expr)} as rev
-                    FROM {q_fact}
-                    WHERE {q_status} IS NOT NULL
-                    GROUP BY {q_status}
+                    SELECT {q_fact}.{q_status} as st, {status_count} as cnt, {round_aggregate('SUM', money_expr)} as rev
+                    FROM {revenue_from}
+                    WHERE {q_fact}.{q_status} IS NOT NULL
+                    GROUP BY {q_fact}.{q_status}
                     ORDER BY cnt DESC
                 """, ["net_revenue_delivered", "order_status_distribution"])
                 for sr in status_res:
@@ -1823,10 +1861,10 @@ class DatabasePipelineService:
             if segment_dim and money_expr:
                 q_seg = _clean_sql_identifier(segment_dim, db_conn.db_type)
                 seg_res = execute_sql(f"""
-                    SELECT {q_seg} as name, {round_aggregate('SUM', money_expr)} as value
-                    FROM {q_fact}
-                    WHERE {q_seg} IS NOT NULL
-                    GROUP BY {q_seg}
+                    SELECT {q_fact}.{q_seg} as name, {round_aggregate('SUM', money_expr)} as value
+                    FROM {revenue_from}
+                    WHERE {q_fact}.{q_seg} IS NOT NULL
+                    GROUP BY {q_fact}.{q_seg}
                     ORDER BY value DESC
                     LIMIT 6
                 """, ["revenue_by_segment"])
@@ -1920,7 +1958,7 @@ class DatabasePipelineService:
                         c_col = next(c for c in cu_cols if "contactname" in c.lower())
                         name_expr = f"{q_cu}.{_clean_sql_identifier(c_col, db_conn.db_type)}"
 
-                    if name_expr and money_expr:
+                    if name_expr and money_expr and revenue_from == q_fact:
                         cust_spend_query = f"""
                             SELECT {cast_text(f'{q_fact}.{q_cid}', db_conn.db_type)} as name, {round_aggregate('SUM', money_expr)} as value
                             FROM {q_fact}
@@ -2763,36 +2801,22 @@ class DatabasePipelineService:
             when the numeric aggregates do not support an insight or recommendation.
             """
             from services.llm_generation_service import LLMFailure, generate
-            res_text = generate(
-                prompt,
-                provider="auto",
-                raise_on_failure=True,
-                deadline=deadline,
-            ).strip()
-            if res_text.startswith("```json"):
-                res_text = res_text[7:-3].strip()
-            elif res_text.startswith("```"):
-                res_text = res_text[3:-3].strip()
-            try:
-                parsed = json.loads(res_text)
-            except (ValueError, TypeError):
-                raise LLMFailure("InvalidResponse") from None
-            if (not isinstance(parsed, dict)
-                    or not isinstance(parsed.get("executive_summary"), str)
-                    or not parsed["executive_summary"].strip()
-                    or not isinstance(parsed.get("business_domain"), str)
-                    or not isinstance(parsed.get("strategic_insights"), list)
-                    or not isinstance(parsed.get("tactical_recommendations"), list)
-                    or any(not isinstance(item, dict)
-                           or any(not isinstance(item.get(field, ""), str)
-                                  for field in ("title", "finding", "impact", "category"))
-                           for item in parsed["strategic_insights"])
-                    or any(not isinstance(item, str)
-                           for item in parsed["tactical_recommendations"])):
-                raise LLMFailure("InvalidResponse")
-            parsed["source"] = "llm"
-            parsed.pop("llm_error", None)
-            return parsed
+            for attempt in range(2):
+                res_text = generate(
+                    prompt,
+                    provider="auto",
+                    raise_on_failure=True,
+                    deadline=deadline,
+                )
+                try:
+                    return _parse_executive_summary(res_text)
+                except LLMFailure:
+                    if attempt or time.monotonic() >= deadline:
+                        raise
+                    # One format-repair request shares the original deadline.
+                    # Do not forward/log the rejected provider response.
+                    prompt += "\nYour response must be a single JSON object with all required fields. No prose or Markdown."
+
 
         def computed_fallback(category: str) -> Dict[str, Any]:
             metrics = {item.get("id"): item for item in computed_kpis}

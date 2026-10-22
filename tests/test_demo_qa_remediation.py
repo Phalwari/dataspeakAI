@@ -121,6 +121,37 @@ def test_missing_selected_table_does_not_substitute_another_source(scoped_orders
         pipeline.DatabasePipelineService().run_db_pipeline(db,connection.id,tenant_id=connection.tenant_id,selected_table='does_not_exist')
 
 
+def test_camelcase_order_dates_take_priority_over_shipping_dates():
+    assert pipeline._pick_date_column(['OrderDate', 'RequiredDate', 'ShippedDate']) == 'OrderDate'
+    assert pipeline._pick_date_column(['RequiredDate', 'ShippedDate']) is None
+
+
+def test_line_amount_breakdowns_include_the_line_source(scoped_orders):
+    db, connection = scoped_orders
+    engine = db_pool.get_engine(None)
+    with engine.begin() as source:
+        source.exec_driver_sql('DROP TABLE order_items')
+        source.exec_driver_sql('DROP TABLE orders')
+        source.exec_driver_sql('DROP TABLE customers')
+        source.exec_driver_sql('CREATE TABLE Customers(CustomerID TEXT PRIMARY KEY, ContactName TEXT)')
+        source.exec_driver_sql('CREATE TABLE Orders(OrderID INTEGER PRIMARY KEY, CustomerID TEXT, OrderDate DATETIME, RequiredDate DATETIME, ShippedDate DATETIME, Freight NUMERIC, ShipCity TEXT, Channel TEXT, Status TEXT)')
+        source.exec_driver_sql('CREATE TABLE "Order Details"(OrderID INTEGER REFERENCES Orders(OrderID), UnitPrice NUMERIC, Quantity INTEGER, Discount REAL)')
+        source.exec_driver_sql("INSERT INTO Customers VALUES('A','Synthetic A'),('B','Synthetic B')")
+        source.exec_driver_sql("INSERT INTO Orders VALUES(1,'A','2026-09-01',NULL,NULL,5,'East','Online','delivered'),(2,'B','2026-10-01',NULL,NULL,6,'West','Retail','cancelled')")
+        source.exec_driver_sql('INSERT INTO "Order Details" VALUES(1,10,2,0),(1,5,2,0),(2,10,5,0.2)')
+    result = pipeline.DatabasePipelineService().run_db_pipeline(db, connection.id, tenant_id=connection.tenant_id, force_refresh=True)
+    metrics = {m['id']: m for m in result['key_metrics']}
+    charts = {c['id']: c for c in result['charts']}
+    assert metrics['total_revenue']['raw_value'] == 70
+    assert metrics['total_orders']['raw_value'] == 2
+    assert metrics['net_revenue_delivered']['raw_value'] == 30
+    assert [(p['period'], p['value']) for p in charts['monthly_revenue_velocity']['data']] == [('2026-09', 30), ('2026-10', 40)]
+    assert sorted(p['value'] for p in charts['revenue_by_segment']['data']) == [30, 40]
+    assert sorted(p['value'] for p in charts['top_customers_spend']['data']) == [30, 40]
+    assert charts['order_status_distribution']['data'][0]['value'] == 1
+    assert not result['data_quality']['warnings']
+
+
 def test_dimension_request_does_not_reuse_unfiltered_l2_payload(scoped_orders):
     db,connection=scoped_orders
     service=pipeline.DatabasePipelineService()

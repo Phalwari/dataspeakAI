@@ -73,6 +73,21 @@ def _success_response():
     })
 
 
+def test_format_repair_is_bounded_and_does_not_forward_invalid_response(orders_case, monkeypatch):
+    prompts = []
+    deadlines = []
+    def generate(prompt, **kwargs):
+        prompts.append(prompt)
+        deadlines.append(kwargs['deadline'])
+        return 'PRIVATE_INVALID_OUTPUT' if len(prompts) == 1 else '```JSON\n' + _success_response() + '\n```'
+    monkeypatch.setattr(llm, 'generate', generate)
+    result = _run(orders_case)
+    assert result['executive_summary']['source'] == 'llm'
+    assert len(prompts) == 2
+    assert deadlines[0] == deadlines[1]
+    assert 'PRIVATE_INVALID_OUTPUT' not in prompts[1]
+
+
 def test_T1_hanging_generate_returns_fallback_within_budget(orders_case, monkeypatch):
     def slow_generate(*_args, **_kwargs):
         time.sleep(5)
