@@ -235,7 +235,7 @@ class SQLAgent:
             elif db_conn.db_type == "postgresql":
                 connect_args = {"options": "-c statement_timeout=6000"}
             elif db_conn.db_type in ("mysql", "mariadb"):
-                connect_args = {"init_command": "SET SESSION MAX_EXECUTION_TIME=6000"}
+                connect_args = {}
 
             engine = create_engine(conn_url, poolclass=NullPool, connect_args=connect_args)
             with engine.connect() as conn:
@@ -243,6 +243,11 @@ class SQLAgent:
                 try:
                     if db_conn.db_type == "sqlite":
                         conn.execute(text("PRAGMA query_only = ON;"))
+                    elif db_conn.db_type in ("mysql", "mariadb"):
+                        try:
+                            conn.execute(text("SET SESSION max_execution_time = 6000;"))
+                        except Exception:
+                            pass
 
                     dry_sql = sql_query.strip().rstrip(";")
                     # First attempt wrapped subquery with LIMIT 1
@@ -299,6 +304,11 @@ class SQLAgent:
             "4. Format your output EXACTLY with the following structure:\n"
             "```sql\n<your SQL query here>\n```\n"
             "Explanation: <1-2 sentence explanation of how the query works>\n\n"
+            "ANAPHORA & CONTEXT CONTINUITY RULES:\n"
+            "- If the user's question is a follow-up, refinement, or continuation referencing prior queries (e.g., 'filter those by California', 'show the top 3', 'order by total', 'what about status completed', 'summarize that in a table'):\n"
+            "  1. Carefully inspect the previous executed SQL queries and referenced tables in the CONVERSATION CONTEXT.\n"
+            "  2. Build upon the preceding query and table structure rather than querying disconnected tables or failing.\n"
+            "  3. Retain existing valid filters from preceding queries unless the user explicitly requests replacing them.\n\n"
             f"DATABASE SCHEMA:\n{schema_ctx}\n\n"
             f"{conv_ctx}"
             f"USER QUESTION: {user_question}"

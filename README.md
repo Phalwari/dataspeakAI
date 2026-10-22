@@ -98,7 +98,6 @@ Start both the backend and frontend development servers.
 **Terminal 1 — Backend Server:**
 ```bash
 cd backend
-# Ensure virtual environment is active
 .\venv\Scripts\Activate.ps1
 python -m uvicorn main:app --reload --port 8000
 ```

@@ -17,7 +17,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine, URL, make_url
 from sqlalchemy.pool import NullPool
 
-from services.crypto_service import decrypt_secret, redact_connection_url
+from services.crypto_service import decrypt_secret
 
 logger = logging.getLogger(__name__)
 
@@ -56,11 +56,28 @@ class DatabaseConnectionFactory:
         port_num = port or 5432
         
         # Check direct IP string or resolve DNS
+        addr_info = []
         try:
             addr_info = socket.getaddrinfo(host_clean, port_num, proto=socket.IPPROTO_TCP)
-        except socket.gaierror as exc:
-            logger.warning("DNS resolution failed for host %s: %s", host_clean, exc)
-            raise ValueError(f"Could not resolve host '{host_clean}'") from exc
+        except socket.gaierror:
+            # Check if this might be a DNS SRV record (e.g. MongoDB+srv: _mongodb._tcp.<host>)
+            srv_resolved = False
+            try:
+                import dns.resolver
+                srv_target = f"_mongodb._tcp.{host_clean}"
+                answers = dns.resolver.resolve(srv_target, "SRV")
+                for rdata in answers:
+                    shard_host = str(rdata.target).rstrip(".")
+                    shard_port = rdata.port
+                    shard_addr = socket.getaddrinfo(shard_host, shard_port, proto=socket.IPPROTO_TCP)
+                    addr_info.extend(shard_addr)
+                    srv_resolved = True
+            except Exception:
+                pass
+
+            if not srv_resolved or not addr_info:
+                logger.warning("Database host DNS resolution failed")
+                raise ValueError("Could not resolve database host") from None
         
         resolved_ips = set()
         for family, _, _, _, sockaddr in addr_info:
@@ -79,10 +96,9 @@ class DatabaseConnectionFactory:
                     or ip.is_reserved
                     or ip.is_unspecified
                 ):
-                    logger.warning("SSRF violation blocked: host '%s' resolved to prohibited IP %s", host_clean, ip_str)
+                    logger.warning("SSRF violation blocked for a database host")
                     raise SSRFSecurityViolation(
-                        f"SSRF violation: Host '{host_clean}' resolves to private or internal IP ({ip_str}), "
-                        "which is forbidden."
+                        "Database host resolves to a prohibited IP address (private or internal IP)."
                     )
         
         return host_clean
@@ -145,16 +161,32 @@ class DatabaseConnectionFactory:
         
         try:
             url_obj = make_url(raw_clean)
-        except Exception as exc:
-            raise ValueError(f"Invalid connection URI: {exc}") from exc
+        except Exception:
+            logger.warning("Invalid database connection URI")
+            raise ValueError("Invalid database connection URI") from None
         
         backend = url_obj.get_backend_name().lower()
         if backend == "sqlite":
             db_path = url_obj.database or ""
             cls.validate_sqlite_path(db_path)
         else:
+            query = url_obj.query or {}
+            if any(key.lower() in {"unix_socket", "socket", "socket_path"} for key in query):
+                raise SSRFSecurityViolation("Unix socket database connections are not permitted.")
+
+            hosts = []
             if url_obj.host:
-                cls.validate_host_ssrf(url_obj.host, url_obj.port)
+                hosts.append(url_obj.host)
+            for key in ("host", "hostaddr"):
+                query_host = query.get(key)
+                if query_host:
+                    hosts.extend(query_host if isinstance(query_host, (tuple, list)) else [query_host])
+            if not hosts:
+                raise ValueError("A network database host is required.")
+            for target_host in hosts:
+                if str(target_host).startswith(("/", "\\\\")):
+                    raise SSRFSecurityViolation("Unix socket database connections are not permitted.")
+                cls.validate_host_ssrf(str(target_host), url_obj.port)
         
         return raw_clean
 
@@ -176,7 +208,7 @@ class DatabaseConnectionFactory:
                 validated = cls.validate_connection_string(decrypted)
                 return validated
             except Exception as exc:
-                logger.warning("Failed to validate connection_string: %s", exc)
+                logger.error("Failed to validate database connection URI (%s)", type(exc).__name__)
                 return None
         
         db_type = _get_attr("db_type")
@@ -194,7 +226,7 @@ class DatabaseConnectionFactory:
             )
             return url.render_as_string(hide_password=False)
         except Exception as exc:
-            logger.warning("Could not assemble database connection URL: %s", exc)
+            logger.error("Could not assemble database connection URL (%s)", type(exc).__name__)
             return None
 
     @classmethod
@@ -282,7 +314,9 @@ class DatabaseConnectionFactory:
         timeout_sec = max(1, int(statement_timeout_ms / 1000))
         
         if dialect == "postgresql":
-            connect_args["options"] = f"-c statement_timeout={statement_timeout_ms}"
+            url_str = str(url).lower()
+            if "pooler" not in url_str and "pgbouncer" not in url_str:
+                connect_args["options"] = f"-c statement_timeout={statement_timeout_ms}"
             connect_args["connect_timeout"] = timeout_sec
         elif dialect in ("mysql", "mariadb"):
             connect_args["connect_timeout"] = timeout_sec
@@ -335,9 +369,8 @@ class DatabaseConnectionFactory:
                 client.close()
                 return True, None
             except Exception as exc:
-                err_msg = redact_connection_url(str(exc))
-                logger.warning("MongoDB connection test failed: %s", err_msg)
-                return False, f"MongoDB connection failed: {err_msg}"
+                logger.error("MongoDB connection test failed (%s)", type(exc).__name__)
+                return False, "MongoDB connection failed"
 
         if connection_string:
             try:
@@ -348,9 +381,8 @@ class DatabaseConnectionFactory:
                 engine.dispose()
                 return True, None
             except Exception as exc:
-                err_msg = redact_connection_url(str(exc))
-                logger.warning("Database connection test failed: %s", err_msg)
-                return False, f"Connection failed: {err_msg}"
+                logger.error("Database connection test failed (%s)", type(exc).__name__)
+                return False, "Database connection failed"
         
         try:
             engine = cls.create_engine_instance(
@@ -367,6 +399,5 @@ class DatabaseConnectionFactory:
             engine.dispose()
             return True, None
         except Exception as exc:
-            err_msg = redact_connection_url(str(exc))
-            logger.warning("Database connection test failed: %s", err_msg)
-            return False, f"Connection failed: {err_msg}"
+            logger.error("Database connection test failed (%s)", type(exc).__name__)
+            return False, "Database connection failed"

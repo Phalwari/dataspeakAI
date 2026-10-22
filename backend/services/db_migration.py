@@ -44,6 +44,7 @@ MIGRATION_COLUMNS = [
     ("database_connections", "tables_metadata", "JSON", "JSONB"),
     ("database_connections", "insights_cache", "JSON", "JSONB"),
     ("database_connections", "insights_cached_at", "DATETIME", "TIMESTAMP"),
+    ("database_connections", "insights_cache_version", "INTEGER NOT NULL DEFAULT 0", "INTEGER NOT NULL DEFAULT 0"),
     ("database_connections", "description", "VARCHAR", "VARCHAR(500)"),
     # Tenant subscription plan column
     ("tenants", "plan", "VARCHAR DEFAULT 'Starter'", "VARCHAR(50) DEFAULT 'Starter'"),
@@ -98,6 +99,9 @@ MIGRATION_COLUMNS = [
     # Phase 7: Task 7.2.2 Hierarchical Document Chunks
     ("document_chunks", "parent_chunk_id", "INTEGER", "INTEGER"),
     ("document_chunks", "hierarchy_level", "INTEGER DEFAULT 1", "INTEGER DEFAULT 1"),
+    # User Profile Columns (Avatar & Phone)
+    ("users", "avatar_url", "VARCHAR(500)", "VARCHAR(500)"),
+    ("users", "phone", "VARCHAR(50)", "VARCHAR(50)"),
 ]
 
 

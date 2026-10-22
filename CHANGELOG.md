@@ -19,19 +19,64 @@ To maintain seamless multi-developer and AI agent collaboration:
 
 ### Fixed
 
-- **NR-2 independent readiness remediation (2026-10-19):** Repaired all seven reproduced findings: explicit dated KPI comparison windows, bounded spawned AutoML execution, chronological/grouped validation, winner-only holdout scoring, typed grounding failures, durable ingestion retries with propagated errors, and serialized immutable dense/sparse generation publication. Explicit upstream stream closure releases resources on disconnect; SQL-disabled widget responses remain on the RAG contract. Affected `automl_service.py`, `training_worker.py`, `citation_service.py`, `chat_stream.py`, `routers/documents.py`, `routers/widget.py`, `ingestion/task_queue.py`, and `search/generation_manager.py`.
-- **Index repair consistency:** `scripts/reconcile_indexes.py` verifies chunk/version/content-hash manifests and rebuilds drifted or missing active generations under the publication lock, deferring during active ingestion. Published generations are retained for readers. Re-embedding uses the requested model and child chunks consistently.
+- **NR-2 independent readiness remediation (2026-10-19):** Repaired the seven reproduced correctness and reliability findings, including explicit KPI comparison windows, bounded AutoML execution, chronological/grouped validation, winner-only holdout scoring, typed grounding failures, durable ingestion retries, immutable dense/sparse generation publication, explicit upstream stream cleanup, and SQL-disabled widget RAG consistency.
 
 ### Added
 
-- **Permanent NR-2 verification:** 16 remediation regressions in `tests/test_nr2_readiness.py`; 50 synthetic-provider application workflows and 30 stream lifecycle samples in `tests/test_nr2_workflow_evidence.py`, with structured evidence under `docs/reports/nr2_evidence_2026-10-19/`. Final offline backend coverage: 656 passed, four external database integrations skipped; FYP: 19 passed; frontend: 35 passed and production build passed.
+- **Permanent NR-2 verification:** Added remediation regressions and synthetic-provider workflow evidence, with offline backend, FYP, frontend, and production-build verification recorded in the NR-2 reports.
 
 ### Changed
 
-- **Accurate NR-2 readiness records:** Consolidated 43 unique historical roadmap task blocks and seven completed repairs in `todo.md`, removed duplicate active/archive copies, documented verification contracts in `AGENTS.md`, and corrected unsupported historical quality/performance claims. Production acceptance still requires NR-3.1-A service/storage/recovery evidence. See [remediation report](docs/reports/nr2_remediation_2026-10-19.md) and [session log](docs/sessions/2026-10-19_nr2_remediation.md).
+- **Accurate NR-2 readiness records:** Consolidated historical roadmap records and documented the remaining NR-3.1-A production integration gate in `todo.md`, `AGENTS.md`, and the remediation reports.
 - Public PostgreSQL/MySQL integration tests require `RUN_LIVE_DATABASE_TESTS=1`; skipped checks are explicitly excluded from pass totals.
 
-### Earlier unreleased work
+### Fixed — Northwind Insights compatibility
+
+- Qualified line-derived money expressions and retained fact/line joins in segment and customer breakdowns; lifecycle counts preserve order grain. CamelCase transaction dates now resolve before shipping dates. Bumped Insights payload version to reject old reports.
+- Period comparisons now require an available numeric time series rather than falling back to a categorical chart. Executive synthesis accepts case-insensitive JSON fences and makes at most one format-repair request within the original deadline; invalid output still falls back honestly.
+- Verification: 70 backend regressions, 50 frontend tests, Vite build and FastAPI import passed. Direct local Northwind pipeline produced five available charts with no quality warnings. See `docs/sessions/2026-10-22_northwind_insights.md`.
+
+### Fixed — Demo QA remediation (2026-10-22)
+
+- Resolved DQA-01..10: removed fabricated KPI history; fixed chart value-key rankings, scoped customer/unit/Mongo distinct metrics and L2 cache reuse, missing-table rejection with audit retention, Decimal monetary summaries, and safe summary labels. Added bounded catalog-validated Mongo chat read plans with BSON date binding and an explicit paid-billing metric. Corrected passage identity in hybrid retrieval, unified widget parent evidence, aligned claim verification to actual paragraphs/sentences, excluded nonclaims, and made provider fallback honest while preserving streaming failover. See `docs/reports/demo_qa_remediation_2026-10-22/REPORT.md` and captured live evidence. Verification: 231 affected backend tests passed; a later overlapping 38-test Mongo edge suite passed; 47 frontend tests and the production build passed. Provider quotas remain an external availability limitation; no Planner V2 default cutover or production load certification is claimed.
+
+### Added — Live demo QA (2026-10-21)
+
+- Provisioned isolated loopback PostgreSQL coffee retail, MySQL solar wholesale, and MongoDB subscription billing demo sources for the owner-selected tenant; replaced its prior saved connections/datasets and pre-demo conversations, and indexed three demo policy documents. Added reusable provisioning, live HTTP probing, and evidence evaluation utilities in `tests/manual/`, fixtures in `tests/fixtures/demo_business/`, and the acceptance report/evidence in `docs/reports/demo_qa_2026-10-21/`. Forty targeted checks yielded 30 passes and 10 failures; recorded open retrieval/grounding, Mongo chat, filtered-population, summary, ranking, and selected-table defects. No production defect fixes or Planner V2 cutover are claimed.
+
+### Added
+
+- **Opt-in Insights Planner V2 (Phase F0–F7; F8 parity partial)** (`backend/services/insights/`, `backend/services/db_pipeline_service.py`, `backend/services/sql_dialect.py`, `tests/test_insights_planner_v2.py`, `tests/test_insights_generic_fixtures.py`): Added normalized SQL/Mongo catalogs, bounded metadata-only profiling, evidence-scored roles, pure metric plans, catalog-allowlisted SQL compilation, FK and conservative inferred joins, status-aware Mongo aggregation, query budgets, and versioned profile caching. Headline metrics distinguish Gross Revenue (all statuses) and Net Revenue (delivered only). `INSIGHTS_PLANNER` stays opt-in with `legacy` default pending full ten-family parity review and owner cutover approval. Temporary SQLite/fake Mongo tests only; PostgreSQL, MySQL/MariaDB and live MongoDB execution are not verified by execution. See `docs/insights/PLANNER_V2.md`, `docs/insights/KNOWN_ISSUES.md`, and the [Phase F session log](docs/sessions/2026-10-21_insights_phase_f.md).
+
+- **Conversational Intelligence, Multi-Turn Memory & Suggested Follow-ups (`backend/routers/chat.py`, `backend/routers/widget.py`, `backend/services/query_router.py`, `backend/services/conversation_memory.py`, `backend/services/sql_agent.py`, `backend/schemas.py`, `src/app/pages/dashboard/ChatPage.tsx`, `src/app/components/SafeMarkdown.tsx`, `tests/test_conversational_and_suggestions.py`)**:
+  - **Dedicated Conversational Routing**: Introduced explicit `"conversational"` classification in `QueryRouter` equipped with DataSpeakAI platform knowledge so greetings, product capability questions, and general dialogue return helpful executive guidance rather than empty RAG chunks or inappropriate SQL attempts.
+  - **Rich Multi-Turn Context & Anaphora**: Injected prior query history, referenced database tables, and key entities into `SQLAgent` and conversational synthesis, resolving follow-up pronouns and filter requests against preceding turns.
+  - **Structured Executive Synthesis & Follow-Up Suggestions**: Overhauled synthesis prompts across SQL and RAG to produce structured Markdown takeaways, bold statistics, formatted Markdown tables, and structured follow-up suggestions (`suggestions: List[str]`) extracted automatically into interactive chips. Added table list guidance for missing columns or schema errors.
+  - **Frontend Safe Markdown & Suggestion Chips UI**: Integrated sanitized Markdown rendering with syntax highlighting, lists, and alternating table rows in `ChatPage.tsx`; rendered clickable follow-up suggestion chips beneath assistant replies that auto-populate the chat input.
+  - **Automated Verification**: Added comprehensive test suite `tests/test_conversational_and_suggestions.py` covering conversational routing, context memory propagation, suggestion extraction, and schema compliance (16/16 tests passing).
+
+- **Demonstration Databases & Multi-Dialect Compatibility (`backend/services/sql_agent.py`, `backend/services/llm_generation_service.py`, `backend/.env`, `.trail/learnings/2026-10-20-demo-databases-mariadb-llm-fallback.md`)**:
+  - **Containerized Demo Databases**: Provisioned and seeded three live Docker databases registered in platform catalog:
+    1. **PostgreSQL 15** (`dataspeak_ecommerce` on port 5432) with `customers`, `products`, `orders`, `order_items`, and a `users` alias view.
+    2. **MySQL / MariaDB 10.11** (`retail_inventory` on port 3306) with `warehouses`, `suppliers`, `inventory`, and `shipments`.
+    3. **MongoDB** (`analytics_store` on port 27017) with `events`, `customer_feedback`, and `system_telemetry`.
+  - **MariaDB Timeout Compatibility**: Removed connection-level `init_command: SET SESSION MAX_EXECUTION_TIME=6000` from `sql_agent.py` to prevent MariaDB connection handshake crashes (`OperationalError 1193`), delegating timeout enforcement to post-connection execution and caller watchdog timers.
+  - **LLMGateway Model Fallback & Groq 404 Recovery**: Updated `GEMINI_MODELS` to active supported candidates (`gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3.8-flash`, `gemini-flash-latest`) and `GROQ_MODELS` to (`openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `qwen/qwen3.8-27b`), handling HTTP 404 gracefully so Groq falls through to available models.
+  - **Local Development SSRF Authorization**: Enabled `ALLOW_PRIVATE_DB_HOSTS=true` for local Docker database exploration.
+  - **Trail Knowledge Base**: Initialized `.trail/learnings/` store with decision and watch-out records for multi-dialect database exploration.
+
+### Fixed
+
+- **Insights Phase D (INS-D2-01..03, INS-D3-01..07, INS-D4-01..03, INS-GEN-01):** Applied strict, bound calendar windows to generated SQL Insights queries and server-backed date presets; added response range metadata, matching prior-year comparisons, and versioned Redis/DB cache payloads. Centralized SQLite/PostgreSQL/MySQL/MariaDB SQL fragments, rejected unknown dialects, prioritized Mongo analytics, and aligned Mongo counts/charts to exact exclusive date bounds. Corrected misleading money and quantity role classification. Added temporary SQLite and offline Mongo tests; live connectors, browser rendering, and concurrent-user capacity remain unverified.
+  - Session record: `docs/sessions/2026-10-20_insights_phase_d.md`.
+
+### Changed
+
+- **Analytics & Visualization retirement** (`src/app/routes.ts`, `src/app/components/DashboardLayout.tsx`, `src/app/pages/LandingPage.tsx`, `backend/main.py`): Removed the navigation entry, frontend route, landing-page card and dedicated visualization components, and stopped mounting its feature API router. Shared Dashboard, Logs, Usage and Platform Admin endpoints remain mounted under their neutral `/api` paths.
+
+- **Database connection cards** (`src/app/pages/dashboard/DatabasesPage.tsx`): Removed the inactive settings control so each card only shows actions that are available to users.
+
+- **Business Insights run progress** (`src/app/pages/dashboard/BusinessInsightsPage.tsx`): Replaced the legacy six-layer loading card with a Phase A–F analysis workflow that explains secure scope, catalog discovery, role classification, safe metric planning, quality-aware execution, and the final chart/summary stage. The screen keeps the existing purple and teal visual language while making the run scope, date range, progress and safeguards understandable to business users.
 
 - **Database Connections & Data Preview Support (`backend/services/connection_factory.py`, `backend/services/sql_engine.py`, `backend/routers/databases.py`, `src/app/pages/dashboard/DatabasesPage.tsx`, `tests/test_databases_connection_and_preview.py`, `tests/test_databases_api_e2e.py`)**:
   - **MySQL ANSI_QUOTES & Execution Timeout**: Handled `SET SESSION max_execution_time` gracefully to eliminate MySQL error 1193 on versions lacking the variable; injected `SET SESSION sql_mode = CONCAT(@@sql_mode, ',ANSI_QUOTES')` so table preview queries (`SELECT * FROM "{table_name}"`) execute seamlessly across all MySQL versions.

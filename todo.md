@@ -664,6 +664,8 @@ The implementation session must receive the saved plan in the same up-to-date ch
 
 ## 📦 Archived / Completed Tasks
 
+- [x] **NW-01** — Fix line-derived Insights joins, CamelCase date roles, false categorical period comparisons and bounded AI JSON repair. [Completed: 2026-10-22 | Codex | 70 backend and 50 frontend tests passed; build, FastAPI import and direct Northwind pipeline verified. See docs/sessions/2026-10-22_northwind_insights.md.]
+
 ### NR-2 consolidated historical completion records
 
 Historical completion claims are retained. The [current verification record](docs/reports/nr2_remediation_2026-10-19.md) qualifies production readiness; deduplication does not waive the NR-3.1-A prerequisite.

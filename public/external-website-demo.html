@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Apex Global Enterprises — Customer Portal & Live Chatbot</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #f8fafc;
+      color: #1e293b;
+      min-height: 100vh;
+    }
+    header {
+      background: #0f172a;
+      color: #ffffff;
+      padding: 16px 32px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .logo {
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .logo-badge {
+      background: #3b82f6;
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+    nav a {
+      color: #94a3b8;
+      text-decoration: none;
+      margin-left: 24px;
+      font-size: 14px;
+      font-weight: 500;
+    }
+    nav a:hover { color: #ffffff; }
+    .hero {
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      color: #ffffff;
+      padding: 72px 32px;
+      text-align: center;
+    }
+    .hero h1 {
+      font-size: 40px;
+      font-weight: 800;
+      margin-bottom: 16px;
+      letter-spacing: -1px;
+    }
+    .hero p {
+      font-size: 18px;
+      color: #94a3b8;
+      max-width: 650px;
+      margin: 0 auto 28px;
+      line-height: 1.6;
+    }
+    .container {
+      max-width: 1100px;
+      margin: 40px auto;
+      padding: 0 24px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 24px;
+    }
+    .card {
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 28px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    .card h3 {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 10px;
+      color: #0f172a;
+    }
+    .card p {
+      font-size: 14px;
+      color: #64748b;
+      line-height: 1.6;
+    }
+    .embed-banner {
+      background: #eff6ff;
+      border: 1px dashed #3b82f6;
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 32px;
+      font-size: 13px;
+      color: #1e40af;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">
+      <span>Apex Global</span>
+      <span class="logo-badge">Host Site</span>
+    </div>
+    <nav>
+      <a href="#services">Services</a>
+      <a href="#solutions">Solutions</a>
+      <a href="#contact">Contact Support</a>
+    </nav>
+  </header>
+
+  <div class="hero">
+    <h1>Third-Party Host Website Demonstration</h1>
+    <p>Simulating an external enterprise portal embedding DataSpeakAI's lightweight Standalone Chatbot Widget via zero-leakage publishable key.</p>
+  </div>
+
+  <div class="container">
+    <div class="grid">
+      <div class="card">
+        <h3>Enterprise Logistics</h3>
+        <p>Global supply chain visibility and automated warehousing intelligence integrated with internal relational database pipelines.</p>
+      </div>
+      <div class="card">
+        <h3>Customer Knowledge Hub</h3>
+        <p>Semantic document analysis powered by RAG vector indexing, providing instantaneous natural language answers to visitors.</p>
+      </div>
+      <div class="card">
+        <h3>Autonomous AI Support</h3>
+        <p>Notice the floating chatbot icon in the bottom right corner — completely sandboxed in Shadow DOM without CSS collisions.</p>
+      </div>
+    </div>
+
+    <div class="embed-banner">
+      <strong>Verified Integration:</strong> Standalone widget script successfully loaded from <code>http://localhost:8000/widget.js</code> with key <code>pk_live_fbf2575c029c1fa55c9d51a2cabb986c</code>.
+    </div>
+  </div>
+
+  <!-- Standalone DataSpeakAI Chatbot Widget Integration -->
+  <script 
+    src="http://localhost:8000/widget.js" 
+    data-key="pk_live_fbf2575c029c1fa55c9d51a2cabb986c" 
+    data-api="http://localhost:8000" 
+    async
+  ></script>
+</body>
+</html>

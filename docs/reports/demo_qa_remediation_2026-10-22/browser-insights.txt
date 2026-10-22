@@ -1,0 +1,294 @@
+Browser tab: 1, Title: "DataSpeakAI", URL: "http://localhost:5173/dashboard/insights".
+0 AXWebArea DataSpeakAI, URL: localhost:5173/dashboard/insights
+	1 container root
+		2 container
+			3 image
+			4 text DataSpeakAI
+			5 link Description: Dashboard, Value: localhost:5173/dashboard
+			6 link Description: AI Assistant (Chat), Value: localhost:5173/dashboard/chat
+			7 link Description: Databases, Value: localhost:5173/dashboard/databases
+			8 link Description: Knowledge Base, Value: localhost:5173/dashboard/knowledge-base
+			9 link Description: DB AI Insights, Value: localhost:5173/dashboard/insights
+			10 link Description: CSV / File Analytics, Value: localhost:5173/dashboard/csv-analytics
+			11 link Description: AI Insights, Value: localhost:5173/dashboard/ai-insights
+			12 link Description: API Keys, Value: localhost:5173/dashboard/api-keys
+			13 link Description: Chatbot Widget, Value: localhost:5173/dashboard/chatbot
+			14 link Description: Usage, Value: localhost:5173/dashboard/usage
+			15 link Description: Logs, Value: localhost:5173/dashboard/logs
+			16 link Description: Settings, Value: localhost:5173/dashboard/settings
+			17 text Upgrade to Pro Unlock unlimited queries and advanced features
+			18 button Upgrade Now
+		19 container
+			20 heading Welcome back!, Value: 2
+				21 text Welcome back!
+			22 text Manage your business data and AI insights
+			23 button j
+				24 image
+				25 text j
+			26 text Tenant Admin
+			27 button
+				28 image
+			29 pop up button (collapsed) W WALI Rehman, ID: radix-:r0:, Secondary Actions: Expand
+				30 text W
+				31 text WALI Rehman
+				32 image
+		83 container bi-dashboard-export-target
+			84 button Back to Databases
+				85 image
+				86 text Back to Databases
+			87 image
+			88 heading Demo | Coffee Retail | PostgreSQL, Value: 1
+				89 text Demo | Coffee Retail | PostgreSQL
+			90 text POSTGRESQL ● Live Analysis
+			91 container
+				92 text Live Multi-Table Relational Intelligence ·  9  Deterministic Metrics ·  5  Analytical Views
+			93 text All dates
+			94 button Refresh
+				95 image
+				96 text Refresh
+			97 button Export Report, Help: Download high-resolution image of this dashboard
+				98 image
+				99 text Export Report
+			100 button Ask AI Analyst
+				101 image
+				102 text Ask AI Analyst
+			103 image
+			104 text Horizon:
+			105 button All time
+			106 button Last 90 days
+			107 button Last 30 days
+			108 button Last 7 days
+			109 image
+			110 text Scope:
+			111 button Federated (All)
+			112 button customers
+			113 button orders
+			114 button order_items
+			115 button products
+			116 image
+			117 text Filter by:
+			118 pop up button (collapsed, settable) Value: Region: All, Secondary Actions: Expand
+				119 menu
+					120 (selected) Region: All
+					121 East
+					122 South
+					123 North
+					124 West
+			125 image
+			126 text AUTO-GENERATED SUMMARY (AI UNAVAILABLE)
+			127 text Computed gross revenue is $30,200.00 across 240 records.
+			128 heading Deterministic Key Metrics (9), Value: 2
+				129 image
+				130 text Deterministic Key Metrics ( 9 )
+			131 text Click any card to expand sparkline & inspect records
+			132 container
+				133 text GROSS REVENUE (ALL STATUSES)
+				134 image
+				135 text $30,200.00
+				136 image
+				137 text All-time value
+				138 image
+			139 container
+				140 text NET REVENUE (DELIVERED ONLY)
+				141 image
+				142 text $23,695.00
+				143 image
+				144 text delivered transactions only
+				145 image
+			146 container
+				147 text TOTAL ORDER VOLUME
+				148 image
+				149 text 240
+				150 image
+				151 text 185 delivered (55 other)
+				152 image
+			153 container
+				154 text AVERAGE ORDER VALUE (AOV)
+				155 image
+				156 text $125.83
+				157 image
+				158 text revenue / order
+				159 image
+			160 container
+				161 text ACTIVE CUSTOMERS
+				162 image
+				163 text 24
+				164 image
+				165 text unique buyer accounts
+				166 image
+			167 container
+				168 text CUSTOMER LIFETIME VALUE (CLV)
+				169 image
+				170 text $1,258.33
+				171 image
+				172 text spend per account
+				173 image
+			174 container
+				175 text TOTAL UNITS SOLD
+				176 image
+				177 text 600
+				178 image
+				179 text items sold
+				180 image
+			181 container
+				182 text ACTIVE CATALOG SIZE
+				183 image
+				184 text 6
+				185 image
+				186 text catalog entities
+				187 image
+			188 container
+				189 text TOP MARKET
+				190 image
+				191 text East ($12,400.00)
+				192 image
+				193 text of total sales
+				194 image
+			195 heading Period Velocity & Growth Comparison, Value: 3
+				196 image
+				197 text Period Velocity & Growth Comparison
+			198 table
+				199 row
+					200 cell
+						201 text Metric / Entity
+					202 cell
+						203 text Current
+					204 cell
+						205 text Previous
+					206 cell
+						207 text Change
+				208 row
+					209 cell
+						210 text Monthly Revenue Velocity (Latest Period)
+						211 text orders
+					212 cell
+						213 text 11,255
+					214 cell
+						215 text 18,945
+					216 cell
+						217 text -40.6 %
+			218 heading Top Performers Ranking, Value: 3
+				219 image
+				220 text Top Performers Ranking
+			221 button Region
+			222 button Status
+			223 button Customer
+			224 button Category
+			225 container Click to inspect records for East
+				226 text # 1 East 12,400
+			227 container Click to inspect records for South
+				228 text # 2 South 8,700
+			229 container Click to inspect records for North
+				230 text # 3 North 6,200
+			231 container Click to inspect records for West
+				232 text # 4 West 2,900
+			233 heading Relational Dimensional Charts (5), Value: 2
+				234 image
+				235 text Relational Dimensional Charts ( 5 )
+			236 text Click any bar or chart point to drill into underlying records
+			237 heading Monthly Revenue Velocity, Value: 3
+				238 text Monthly Revenue Velocity
+			239 text Deterministic monthly sales trajectory over time
+			240 text AREA
+			241 image
+				242 text 2026-09
+				243 text 2026-10
+				244 text 0
+				245 text 5000
+				246 text 10000
+				247 text 15000
+				248 text 20000
+			249 text Source:  orders
+			250 text Inspect All Records →
+			251 heading Revenue by Region, Value: 3
+				252 text Revenue by Region
+			253 text Top revenue-generating segments across buyer base
+			254 text BAR
+			255 image
+				256 text East
+				257 text South
+				258 text North
+				259 text West
+				260 text 0
+				261 text 3500
+				262 text 7000
+				263 text 10500
+				264 text 14000
+			265 text Source:  orders
+			266 text Inspect All Records →
+			267 heading Order Lifecycle & Status Distribution, Value: 3
+				268 text Order Lifecycle & Status Distribution
+			269 text Breakdown across completed, delivered, and cancelled records
+			270 text DONUT
+			271 container
+				272 image
+					273 container
+						274 image
+						275 image
+						276 image
+				277 content list
+					278 container
+						279 image
+						280 text Delivered
+					281 container
+						282 image
+						283 text Pending
+					284 container
+						285 image
+						286 text Cancelled
+			287 text Source:  orders
+			288 text Inspect All Records →
+			289 heading Top High-Value Buyers by Spend, Value: 3
+				290 text Top High-Value Buyers by Spend
+			291 text Leading customer accounts by cumulative lifetime spend
+			292 text BAR
+			293 image
+				294 text 19
+				295 text 7
+				296 text 2
+				297 text 1
+				298 text 13
+				299 text 14
+				300 text 18
+				301 text 6
+				302 text 0
+				303 text 1500
+				304 text 3000
+				305 text 4500
+				306 text 6000
+			307 text Source:  orders
+			308 text Inspect All Records →
+			309 heading Catalog Distribution by Category, Value: 3
+				310 text Catalog Distribution by Category
+			311 text Product diversity across inventory taxonomy
+			312 text BAR
+			313 image
+				314 text Accessories
+				315 text Equipment
+				316 text 0
+				317 text 0.75
+				318 text 1.5
+				319 text 2.25
+				320 text 3
+			321 text Source:  products
+			322 text Inspect All Records →
+			323 image
+			324 text Statistical Outlier & Anomaly Detected 1  FLAGGED
+			325 container
+				326 text orders  ·  total_amount : Peak transaction is 3.8x higher than table average
+			327 button Inspect Outlier Records →
+				328 image
+				329 text Inspect Outlier Records →
+			330 heading Strategic Tactical Recommendations (1), Value: 3
+				331 image
+				332 text Strategic Tactical Recommendations ( 1 )
+			333 text AI synthesized from multi-table metric recipes # 01  PILLAR Medium  Impact
+			334 heading Computed monetary aggregate, Value: 4
+				335 text Computed monetary aggregate
+			336 text Computed gross revenue is $30,200.00 across 240 records.
+			337 image
+			338 text TACTICAL ACTION
+			339 text Take data-driven action
+		82 container Notifications alt+T
+
+The focused UI element is 0 AXWebArea DataSpeakAI, URL: localhost:5173/dashboard/insights

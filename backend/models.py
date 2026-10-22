@@ -55,6 +55,8 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
     tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True)
+    avatar_url = Column(String(500), nullable=True)
+    phone = Column(String(50), nullable=True)
     created_at = Column(DateTime, default=utc_now)
 
     tenant = relationship("Tenant", back_populates="users")
@@ -134,6 +136,7 @@ class DatabaseConnection(Base):
     tables_metadata = Column(JSON, nullable=True)
     insights_cache = Column(JSON, nullable=True)
     insights_cached_at = Column(DateTime, nullable=True)
+    insights_cache_version = Column(Integer, nullable=False, default=0, server_default=text("0"))
     description = Column(String, nullable=True)
     status = Column(String, default="connected")
     created_at = Column(DateTime, default=utc_now)

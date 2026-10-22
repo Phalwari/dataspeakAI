@@ -234,9 +234,13 @@ def test_mariadb_timeout_syntax_differentiation(monkeypatch):
     url = DatabaseConnectionFactory.build_connection_url("sqlite", database=":memory:")
     mariadb_conn.connection_string = url.render_as_string(hide_password=False)
 
-    # When running on sqlite backend, dialect guardrails for sqlite apply, but let's verify syntax strings in sql_engine:
+    # When running on sqlite backend, dialect guardrails for sqlite apply, so
+    # verify the dialect-specific timeout syntax without opening a live server.
     import inspect
-    source = inspect.getsource(execute_safe_sql)
-    assert "max_statement_time = 10.0" in source
-    assert "max_execution_time = 10000" in source
+    from services import sql_engine as sql_engine_module
+
+    mariadb_source = inspect.getsource(execute_safe_sql)
+    mysql_source = inspect.getsource(sql_engine_module._apply_optional_mysql_statement_timeout)
+    assert "max_statement_time = 10.0" in mariadb_source
+    assert "max_execution_time = 10000" in mysql_source
 

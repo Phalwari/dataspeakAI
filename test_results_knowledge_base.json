@@ -1,0 +1,116 @@
+{
+  "timestamp": "2026-10-21T00:36:28.397803",
+  "total": 12,
+  "passed": 12,
+  "failed": 0,
+  "results": [
+    {
+      "no": 1,
+      "test_case": "Check document catalog listing and tenant scoping",
+      "attribute_value": "endpoint: 'GET /api/documents'",
+      "expected_result": "Returns HTTP 200 with list of tenant documents, statuses, and embedding counts",
+      "actual_result": "Pass",
+      "execution_time_ms": 13.38,
+      "error": null
+    },
+    {
+      "no": 2,
+      "test_case": "Check semantic document chunk extraction and retrieval",
+      "attribute_value": "document_id: 1",
+      "expected_result": "Returns HTTP 200 with segmented text chunks, chunk index, and token metadata",
+      "actual_result": "Pass",
+      "execution_time_ms": 544.15,
+      "error": null
+    },
+    {
+      "no": 3,
+      "test_case": "Check real-time document ingestion lifecycle status",
+      "attribute_value": "document_id: 1",
+      "expected_result": "Returns HTTP 200 with accurate pipeline stage, progress float, and heartbeat",
+      "actual_result": "Pass",
+      "execution_time_ms": 13.31,
+      "error": null
+    },
+    {
+      "no": 4,
+      "test_case": "Check cross-tenant document isolation & access denial",
+      "attribute_value": "document_id: 999999 (unowned)",
+      "expected_result": "Blocks cross-tenant enumeration and returns HTTP 404 Not Found",
+      "actual_result": "Pass",
+      "execution_time_ms": 11.48,
+      "error": null
+    },
+    {
+      "no": 5,
+      "test_case": "Check hybrid RAG search with reciprocal rank fusion (RRF)",
+      "attribute_value": "query: 'What are the core engineering concepts?', mode: 'hybrid'",
+      "expected_result": "Returns HTTP 200 with ranked document chunks and synthesized AI response",
+      "actual_result": "Pass",
+      "execution_time_ms": 4386.77,
+      "error": null
+    },
+    {
+      "no": 6,
+      "test_case": "Check semantic dense vector search via FAISS cosine index",
+      "attribute_value": "query: 'Foundation models', mode: 'semantic'",
+      "expected_result": "Returns top-k dense vector matches with valid similarity scores",
+      "actual_result": "Pass",
+      "execution_time_ms": 813.21,
+      "error": null
+    },
+    {
+      "no": 7,
+      "test_case": "Check search metadata filtering (document_ids & content_types)",
+      "attribute_value": "document_ids: [1], content_types: ['text']",
+      "expected_result": "Restricts search chunks strictly to specified document ID and text modality",
+      "actual_result": "Pass",
+      "execution_time_ms": 965.17,
+      "error": null
+    },
+    {
+      "no": 8,
+      "test_case": "Check file magic header signature validation & spoofing defense",
+      "attribute_value": "file: 'malicious.pdf' with MZ executable header",
+      "expected_result": "Rejects executable spoofing attempt and validates genuine %PDF- magic bytes",
+      "actual_result": "Pass",
+      "execution_time_ms": 18.22,
+      "error": null
+    },
+    {
+      "no": 9,
+      "test_case": "Check file upload size ceiling (25MB HTTP 413 guard)",
+      "attribute_value": "MAX_FILE_SIZE: 25 * 1024 * 1024 bytes (25 MB)",
+      "expected_result": "Enforces strict 25MB boundary limit preventing memory exhaustion DOS attacks",
+      "actual_result": "Pass",
+      "execution_time_ms": 2116.98,
+      "error": null
+    },
+    {
+      "no": 10,
+      "test_case": "Check recursive character chunking with configured overlap",
+      "attribute_value": "chunk_size: 200, chunk_overlap: 30",
+      "expected_result": "Partitions text cleanly without semantic truncation and maintains overlap window",
+      "actual_result": "Pass",
+      "execution_time_ms": 999.2,
+      "error": null
+    },
+    {
+      "no": 11,
+      "test_case": "Check sparse BM25 inverted index tokenization and ranking",
+      "attribute_value": "engine: BM25IndexManager(tenant_id=1)",
+      "expected_result": "Initializes tokenized inverted index for exact term matching and frequency scoring",
+      "actual_result": "Pass",
+      "execution_time_ms": 1.61,
+      "error": null
+    },
+    {
+      "no": 12,
+      "test_case": "Check document audit persistence & active status flags",
+      "attribute_value": "document_id: 1",
+      "expected_result": "Confirms document integrity, storage key persistence, and uncorrupted state",
+      "actual_result": "Pass",
+      "execution_time_ms": 469.35,
+      "error": null
+    }
+  ]
+}

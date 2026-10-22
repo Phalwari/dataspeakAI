@@ -8,15 +8,77 @@ from fastapi.responses import StreamingResponse, HTMLResponse
 from sqlalchemy.orm import Session, joinedload, selectinload
 from typing import Optional, Dict, Any, List
 import json
+import html
+import logging
+import re
+import time
 
 import models
 import schemas
 from database import get_db
 from dependencies import get_current_user
-from services.db_pipeline_service import db_pipeline_service
+from services.db_pipeline_service import db_pipeline_service, _normalize_date_range, InvalidInsightScope
 from services.insights_engine import insights_engine
 
 router = APIRouter(prefix="/api/insights", tags=["Database Insights"])
+logger = logging.getLogger(__name__)
+
+
+def _record_insight_audit(
+    db: Session, *, tenant_id: int, user_id: Optional[int], connection_id: Optional[int],
+    action: str, result_status: str, started: float,
+    table: Optional[str] = None, date_from: Optional[str] = None,
+    date_to: Optional[str] = None, entry: Optional[models.AuditLog] = None,
+) -> Optional[models.AuditLog]:
+    """Persist a bounded audit envelope without source rows or provider details."""
+    if not isinstance(db, Session):
+        return None  # Direct offline render tests use a non-database stub.
+    safe_table = table if isinstance(table, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", table) else None
+    details = {
+        "connection_id": connection_id,
+        "filters": {"table": safe_table, "date_from": date_from, "date_to": date_to},
+        "status": result_status,
+        "duration_ms": max(0, int((time.monotonic() - started) * 1000)),
+    }
+    try:
+        audit = entry or models.AuditLog(
+            tenant_id=tenant_id, user_id=user_id, action=f"insights.{action}",
+        )
+        audit.details = details
+        db.add(audit)
+        db.commit()
+        return audit
+    except Exception:
+        db.rollback()
+        logger.error("Insights audit write failed")
+        raise HTTPException(status_code=503, detail="Insights audit logging unavailable") from None
+
+
+def _audit_result_status(result: Dict[str, Any]) -> str:
+    summary = result.get("executive_summary") or {}
+    return "fallback" if isinstance(summary, dict) and summary.get("source") == "deterministic_fallback" else "success"
+
+
+def _owned_connection(db: Session, connection_id: int, tenant_id: int) -> models.DatabaseConnection:
+    connection = (
+        db.query(models.DatabaseConnection)
+        .filter(
+            models.DatabaseConnection.id == connection_id,
+            models.DatabaseConnection.tenant_id == tenant_id,
+        )
+        .first()
+    )
+    if not connection:
+        raise HTTPException(status_code=404, detail="Database connection not found")
+    return connection
+
+
+def _validated_dates(date_from: Optional[str], date_to: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    try:
+        normalized_from, normalized_to, _ = _normalize_date_range(date_from, date_to)
+        return normalized_from, normalized_to
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date filter") from None
 
 
 # ── Phase 3: Dynamic AI Insights & Recommendation Engine ──────────────────
@@ -179,19 +241,29 @@ def refresh_ai_insights(
     if not current_user.tenant_id:
         raise HTTPException(status_code=403, detail="User must belong to a tenant.")
 
-    # Verify database ownership if scoped to prevent cross-tenant enumeration or leaks
-    if database_id is not None:
-        db_conn = db.query(models.DatabaseConnection).filter(
-            models.DatabaseConnection.id == database_id,
-            models.DatabaseConnection.tenant_id == current_user.tenant_id
-        ).first()
-        if not db_conn:
-            raise HTTPException(status_code=404, detail="Database connection not found.")
+    started = time.monotonic()
 
-    refreshed = insights_engine.refresh_tenant_insights(
-        tenant_id=current_user.tenant_id,
-        database_id=database_id,
-        db=db,
+    try:
+        # Verify ownership before touching a connection cache.
+        if database_id is not None:
+            _owned_connection(db, database_id, current_user.tenant_id)
+            db_pipeline_service.invalidate_connection_cache(
+                db=db, tenant_id=current_user.tenant_id, connection_id=database_id,
+            )
+
+        # Tenant-wide refresh still applies only to the legacy insights engine.
+        refreshed = insights_engine.refresh_tenant_insights(
+            tenant_id=current_user.tenant_id, database_id=database_id, db=db,
+        )
+    except Exception:
+        _record_insight_audit(
+            db, tenant_id=current_user.tenant_id, user_id=getattr(current_user, "id", None),
+            connection_id=database_id, action="refresh", result_status="error", started=started,
+        )
+        raise
+    _record_insight_audit(
+        db, tenant_id=current_user.tenant_id, user_id=getattr(current_user, "id", None),
+        connection_id=database_id, action="refresh", result_status="success", started=started,
     )
 
     return schemas.AIInsightsRefreshResponse(
@@ -280,6 +352,8 @@ def generate_database_insights(
     refresh: bool = Query(False, description="Bypass cache and force re-generation"),
     date_from: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
     date_to: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    filter_column: Optional[str] = Query(None, description="Validated dimension filter column"),
+    filter_value: Optional[str] = Query(None, description="Exact dimension filter value"),
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -290,6 +364,8 @@ def generate_database_insights(
     if not current_user.tenant_id:
         raise HTTPException(status_code=403, detail="User must belong to a tenant.")
 
+    date_from, date_to = _validated_dates(date_from, date_to)
+    started = time.monotonic()
     try:
         result = db_pipeline_service.run_db_pipeline(
             db=db,
@@ -299,13 +375,34 @@ def generate_database_insights(
             selected_table=table,
             date_from=date_from,
             date_to=date_to,
+            filter_column=filter_column,
+            filter_value=filter_value,
             force_refresh=refresh,
         )
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate database insights: {str(e)}")
+    except ValueError as error:
+        _record_insight_audit(
+            db, tenant_id=current_user.tenant_id, user_id=current_user.id,
+            connection_id=connection_id, action="generate", result_status="error",
+            started=started, table=table, date_from=date_from, date_to=date_to,
+        )
+        if isinstance(error, InvalidInsightScope):
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        logger.exception("Database insights request could not resolve an owned connection")
+        raise HTTPException(status_code=404, detail="Database connection not found")
+    except Exception:
+        _record_insight_audit(
+            db, tenant_id=current_user.tenant_id, user_id=current_user.id,
+            connection_id=connection_id, action="generate", result_status="error",
+            started=started, table=table, date_from=date_from, date_to=date_to,
+        )
+        logger.exception("Database insights generation failed")
+        raise HTTPException(status_code=500, detail="Failed to generate database insights")
+    _record_insight_audit(
+        db, tenant_id=current_user.tenant_id, user_id=current_user.id,
+        connection_id=connection_id, action="generate", result_status=_audit_result_status(result),
+        started=started, table=table, date_from=date_from, date_to=date_to,
+    )
+    return result
 
 
 @router.post("/pipeline/{connection_id}")
@@ -323,6 +420,10 @@ def run_database_pipeline_post(
     refresh = payload.get("refresh", False)
     date_from = payload.get("date_from")
     date_to = payload.get("date_to")
+    filter_column = payload.get("filter_column")
+    filter_value = payload.get("filter_value")
+    date_from, date_to = _validated_dates(date_from, date_to)
+    started = time.monotonic()
 
     try:
         result = db_pipeline_service.run_db_pipeline(
@@ -333,13 +434,34 @@ def run_database_pipeline_post(
             selected_table=table,
             date_from=date_from,
             date_to=date_to,
+            filter_column=filter_column,
+            filter_value=filter_value,
             force_refresh=refresh,
         )
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except ValueError as error:
+        _record_insight_audit(
+            db, tenant_id=current_user.tenant_id, user_id=current_user.id,
+            connection_id=connection_id, action="pipeline", result_status="error",
+            started=started, table=table, date_from=date_from, date_to=date_to,
+        )
+        if isinstance(error, InvalidInsightScope):
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        logger.exception("Database pipeline request could not resolve an owned connection")
+        raise HTTPException(status_code=404, detail="Database connection not found")
+    except Exception:
+        _record_insight_audit(
+            db, tenant_id=current_user.tenant_id, user_id=current_user.id,
+            connection_id=connection_id, action="pipeline", result_status="error",
+            started=started, table=table, date_from=date_from, date_to=date_to,
+        )
+        logger.exception("Database pipeline execution failed")
+        raise HTTPException(status_code=500, detail="Database pipeline execution failed")
+    _record_insight_audit(
+        db, tenant_id=current_user.tenant_id, user_id=current_user.id,
+        connection_id=connection_id, action="pipeline", result_status=_audit_result_status(result),
+        started=started, table=table, date_from=date_from, date_to=date_to,
+    )
+    return result
 
 
 @router.get("/pipeline/{connection_id}/stream")
@@ -349,6 +471,8 @@ def stream_database_pipeline(
     refresh: bool = Query(False),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
+    filter_column: Optional[str] = Query(None),
+    filter_value: Optional[str] = Query(None),
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -356,19 +480,41 @@ def stream_database_pipeline(
     if not current_user.tenant_id:
         raise HTTPException(status_code=403, detail="Unauthorized")
 
+    # Resolve tenant ownership before the generator can read the Redis or DB cache.
+    _owned_connection(db, connection_id, current_user.tenant_id)
+    date_from, date_to = _validated_dates(date_from, date_to)
+    started = time.monotonic()
+    audit_entry = _record_insight_audit(
+        db, tenant_id=current_user.tenant_id, user_id=current_user.id,
+        connection_id=connection_id, action="stream", result_status="in_progress",
+        started=started, table=table, date_from=date_from, date_to=date_to,
+    )
+
     def event_generator():
-        gen = db_pipeline_service.run_db_pipeline_stream(
-            db=db,
-            connection_id=connection_id,
-            tenant_id=current_user.tenant_id,
-            user_id=current_user.id,
-            selected_table=table,
-            date_from=date_from,
-            date_to=date_to,
-            force_refresh=refresh,
-        )
-        for event in gen:
-            yield f"data: {json.dumps(event)}\n\n"
+        result_status = "error"
+        try:
+            gen = db_pipeline_service.run_db_pipeline_stream(
+                db=db, connection_id=connection_id, tenant_id=current_user.tenant_id,
+                user_id=current_user.id, selected_table=table,
+                date_from=date_from, date_to=date_to, force_refresh=refresh,
+                filter_column=filter_column, filter_value=filter_value,
+            )
+            for event in gen:
+                if event.get("type") == "result":
+                    result_status = _audit_result_status(event.get("data") or {})
+                elif event.get("type") == "error":
+                    result_status = "error"
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception:
+            logger.error("Insights stream failed")
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Insights stream failed'})}\n\n"
+        finally:
+            _record_insight_audit(
+                db, tenant_id=current_user.tenant_id, user_id=current_user.id,
+                connection_id=connection_id, action="stream", result_status=result_status,
+                started=started, table=table, date_from=date_from, date_to=date_to,
+                entry=audit_entry,
+            )
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -380,16 +526,8 @@ def export_insights(
     db: Session = Depends(get_db)
 ):
     """Export cached or freshly generated business insights as an HTML report."""
-    connection = (
-        db.query(models.DatabaseConnection)
-        .filter(
-            models.DatabaseConnection.id == connection_id,
-            models.DatabaseConnection.tenant_id == current_user.tenant_id
-        )
-        .first()
-    )
-    if not connection:
-        raise HTTPException(status_code=404, detail="Database connection not found")
+    connection = _owned_connection(db, connection_id, current_user.tenant_id)
+    started = time.monotonic()
 
     try:
         insights_data = db_pipeline_service.run_db_pipeline(
@@ -399,8 +537,30 @@ def export_insights(
             user_id=current_user.id,
             force_refresh=False
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate insights for export: {str(e)}")
+    except Exception:
+        _record_insight_audit(
+            db, tenant_id=current_user.tenant_id, user_id=current_user.id,
+            connection_id=connection_id, action="export", result_status="error", started=started,
+        )
+        logger.exception("Insights export generation failed")
+        raise HTTPException(status_code=500, detail="Failed to generate insights for export")
+
+    def esc(value: Any) -> str:
+        return html.escape("" if value is None else str(value), quote=True)
+
+    summary_data = insights_data.get("executive_summary") or insights_data.get("business_summary") or {}
+    if not isinstance(summary_data, dict):
+        summary_data = {}
+    summary_text = summary_data.get("executive_summary")
+    summary_source = summary_data.get("source")
+    summary_heading = (
+        "Auto-generated summary (AI unavailable)" if summary_source == "deterministic_fallback"
+        else "AI Executive Summary" if summary_source == "llm" else "Executive Summary"
+    )
+    summary_html = (
+        f'<div class="section-title">{esc(summary_heading)}</div><div class="card">{esc(summary_text)}</div>'
+        if summary_text else ""
+    )
 
     business_name = connection.name or connection.database or connection.db_type.capitalize()
     observations = insights_data.get("observations", [])
@@ -413,11 +573,14 @@ def export_insights(
         key_metrics = insights_data["business_summary"].get("key_metrics", [])
 
     for m in key_metrics:
+        metric_value = m.get("value")
+        if m.get("status") in ("unavailable", "error") or metric_value is None:
+            metric_value = "N/A"
         metrics_html += f"""
         <div class="metric-card">
-            <div class="metric-title">{m.get('label', 'Metric')}</div>
-            <div class="metric-value">{m.get('value', 'N/A')}</div>
-            <div class="metric-desc">{m.get('description', '')}</div>
+            <div class="metric-title">{esc(m.get('label', 'Metric'))}</div>
+            <div class="metric-value">{esc(metric_value)}</div>
+            <div class="metric-desc">{esc(m.get('description', ''))}</div>
         </div>
         """
 
@@ -425,7 +588,7 @@ def export_insights(
     for o in observations:
         obs_html += f"""
         <div class="card obs-card">
-            <strong>Observation:</strong> {o}
+            <strong>Observation:</strong> {esc(o)}
         </div>
         """
     if not observations:
@@ -435,7 +598,7 @@ def export_insights(
     for a in anomalies:
         anom_html += f"""
         <div class="card anom-card">
-            <strong>Anomaly in {a.get('field', 'Field')}:</strong> Value {a.get('value', 'N/A')} deviates by {a.get('deviation', 'N/A')} (Reason: {a.get('reason', 'N/A')})
+            <strong>Anomaly in {esc(a.get('field', 'Field'))}:</strong> Value {esc(a.get('value', 'N/A'))} deviates by {esc(a.get('deviation', 'N/A'))} (Reason: {esc(a.get('reason', 'N/A'))})
         </div>
         """
     if not anomalies:
@@ -443,16 +606,16 @@ def export_insights(
 
     rec_html = ""
     for r in recommendations:
-        impact = str(r.get('impact', 'LOW')).upper()
-        impact_class = f"badge-{impact.lower()}"
+        impact = esc(str(r.get('impact', 'LOW')).upper())
+        impact_class = esc(f"badge-{impact.lower()}")
         rec_html += f"""
         <div class="card rec-card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                <strong style="font-size: 16px;">{r.get('title', 'Recommendation')}</strong>
+                <strong style="font-size: 16px;">{esc(r.get('title', 'Recommendation'))}</strong>
                 <span class="badge {impact_class}">{impact}</span>
             </div>
-            <p>{r.get('description', '')}</p>
-            <p style="font-style: italic; font-size: 13px; color: #555;">Suggested Action: {r.get('suggested_action', '')}</p>
+            <p>{esc(r.get('description', ''))}</p>
+            <p style="font-style: italic; font-size: 13px; color: #555;">Suggested Action: {esc(r.get('suggested_action', ''))}</p>
         </div>
         """
     if not recommendations:
@@ -462,7 +625,8 @@ def export_insights(
 <html>
 <head>
     <meta charset="utf-8">
-    <title>DataSpeakAI Insights Report - {business_name}</title>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+    <title>DataSpeakAI Insights Report - {esc(business_name)}</title>
     <style>
         body {{
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -531,8 +695,9 @@ def export_insights(
     <div class="container">
         <div class="header">
             <h1>DataSpeakAI Intelligence Report</h1>
-            <p>Database: <strong>{business_name}</strong> | Type: {connection.db_type.upper()} | Status: {connection.status.upper()}</p>
+            <p>Database: <strong>{esc(business_name)}</strong> | Type: {esc(connection.db_type.upper())} | Status: {esc(connection.status.upper())}</p>
         </div>
+        {summary_html}
         <div class="section-title">Key Executive Performance Metrics</div>
         <div class="grid">{metrics_html}</div>
         <div class="section-title">Strategic Observations & Insights</div>
@@ -544,4 +709,9 @@ def export_insights(
     </div>
 </body>
 </html>"""
+    _record_insight_audit(
+        db, tenant_id=current_user.tenant_id, user_id=current_user.id,
+        connection_id=connection_id, action="export", result_status=_audit_result_status(insights_data),
+        started=started,
+    )
     return HTMLResponse(content=html_content)

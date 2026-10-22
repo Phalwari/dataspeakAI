@@ -467,7 +467,7 @@ def process_widget_chat(
     exec_res = None
     rows_summary = ""
     context_text = ""
-    rag_hits = []
+    rag_hits: List[Dict[str, Any]] = []
 
     # 6. SQL Security Policy Evaluation (NR-1.1-B-T07)
     allow_sql = bool(widget_key.allow_sql)
@@ -542,40 +542,8 @@ def process_widget_chat(
         )
 
         if rag_hits:
-            context_parts = []
-            for idx, r in enumerate(rag_hits, 1):
-                meta = r.get("metadata", {}) or {}
-                source_name = meta.get("source", f"Document_{idx}")
-                page_num = meta.get("page_number")
-                c_type = meta.get("content_type", "text")
-                ref_id = meta.get("reference_id")
-                content = r.get("content", "").strip()
-                clean_content = sanitize_evidence_text(content)
-                raw_score = round(float(r.get("score", 0.0)), 3)
-
-                citation_obj = schemas.SourceCitation(
-                    document_name=source_name,
-                    page_number=page_num,
-                    content_type=c_type,
-                    reference_id=ref_id,
-                    snippet=(clean_content[:200] + "...") if len(clean_content) > 200 else clean_content,
-                    score=raw_score,
-                    retrieval_similarity=raw_score,
-                    claim_support_score=None,
-                    document_id=meta.get("document_id"),
-                    chunk_id=meta.get("chunk_id") or r.get("id"),
-                    document_version=meta.get("version", 1),
-                    grounding_status=schemas.GroundingStatus.UNVERIFIED.value
-                )
-                citations.append(citation_obj)
-                page_tag = f' page="{page_num}"' if page_num else ''
-                context_parts.append(
-                    f'<document_evidence id="{idx}" source="{source_name}"{page_tag} type="{c_type}">\n'
-                    f'<passage>{clean_content}</passage>\n'
-                    f'</document_evidence>'
-                )
-
-            context_text = "\n\n".join(context_parts)
+            from routers.chat import build_grounded_rag_context
+            context_text, citations = build_grounded_rag_context(rag_hits, db)
 
     exec_duration_ms = round((time.time() - start_time) * 1000, 2)
 
@@ -658,9 +626,19 @@ def process_widget_chat(
                 except Exception as g_err:
                     print(f"Widget stream grounding error: {g_err}")
 
+            from routers.chat import extract_suggested_followups
+            stream_sugg = extract_suggested_followups(full_answer)
+            if not stream_sugg:
+                stream_sugg = [
+                    "Can you tell me more about this?",
+                    "Where can I find more details?",
+                    "How can I contact support?"
+                ]
+
             meta_json = {
                 "source": "widget",
-                "citations": [c.model_dump() for c in verified_citations]
+                "citations": [c.model_dump() for c in verified_citations],
+                "suggestions": stream_sugg
             }
             if grounding_data:
                 meta_json["grounding"] = grounding_data
@@ -691,6 +669,7 @@ def process_widget_chat(
                 "message_id": int(assistant_msg.id),
                 "sources": meta_json.get("citations"),
                 "grounding": meta_json.get("grounding"),
+                "suggestions": stream_sugg
             }
 
         return StreamingResponse(
@@ -705,7 +684,7 @@ def process_widget_chat(
                 sql_data=None,
                 query_type=route_type,
                 on_complete=on_stream_complete,
-                static_fallback=assistant_answer,
+                static_fallback=assistant_answer or "I couldn't verify an answer. AI generation is temporarily unavailable; please try again.",
             ),
             media_type="text/event-stream",
             headers={"Vary": "Origin", "Cache-Control": "no-cache"}
@@ -721,7 +700,7 @@ def process_widget_chat(
         if route_type == "sql" and sql_executed and exec_res:
             assistant_answer = f"Found {exec_res.get('row_count', 0)} matching records for your question."
         elif citations:
-            assistant_answer = f"Found relevant information across {len(citations)} document citation(s):\n\n" + "\n".join([f"- {c.snippet} [{c.document_name}]" for c in citations[:2]])
+            assistant_answer = "I couldn't verify an answer to your question. AI synthesis is temporarily unavailable; please review the cited documents or try again."
         else:
             assistant_answer = "I'm sorry, I couldn't find relevant information in our knowledge base. Please feel free to ask another question or contact support."
 
@@ -755,9 +734,19 @@ def process_widget_chat(
             print(f"Widget sync grounding error: {g_err}")
 
     exec_duration_ms = round((time.time() - start_time) * 1000, 2)
+    from routers.chat import extract_suggested_followups
+    sync_sugg = extract_suggested_followups(assistant_answer)
+    if not sync_sugg:
+        sync_sugg = [
+            "Can you tell me more about this?",
+            "Where can I find more details?",
+            "How can I contact support?"
+        ]
+
     meta_json = {
         "source": "widget",
-        "citations": [c.model_dump() for c in verified_citations]
+        "citations": [c.model_dump() for c in verified_citations],
+        "suggestions": sync_sugg
     }
     if grounding_data:
         meta_json["grounding"] = grounding_data
@@ -794,6 +783,7 @@ def process_widget_chat(
         sources=verified_citations,
         grounding=grounding_data,
         grounding_status=grounding_data.get("status") if grounding_data else None,
+        suggestions=sync_sugg,
         created_at=assistant_msg.created_at
     )
 

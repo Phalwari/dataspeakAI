@@ -1,0 +1,12 @@
+SUNRIDGE SOLAR WHOLESALE — OPERATIONS POLICY
+Synthetic demo document. Effective 1 September 2026. Currency: USD.
+
+Commercial terms: Standard wholesale payment terms are Net 45, measured from the invoice issue date. A 2 percent early-payment discount applies only when full payment is received within 10 calendar days. The minimum wholesale purchase order value is $500.
+
+Warranty: Solar panels carry a 10-year product warranty and a separate 25-year performance warranty. Inverters have a 5-year product warranty. Battery packs have a 3-year product warranty. Warranty claims require the serial number and purchase invoice.
+
+Fulfillment: Standard dispatch is within 3 business days after credit approval. Freight is quoted separately and is not included in merchandise revenue. The escalation reference is SSW-OPS-42.
+
+Reporting definitions: The solar wholesale database contains customers, products, orders, and order_items. total_amount is the full merchandise value of an order. Delivered revenue is the sum of total_amount for delivered orders only. Pending and cancelled orders are excluded from delivered revenue. Products are Solar Panel, Inverter, Battery Pack, Charge Controller, Mounting Kit, and Cable Kit.
+
+The document contains no tax advice, exact current inventory balance, cash collection dates, customer personal email addresses, or future sales forecast. Those answers require additional evidence.

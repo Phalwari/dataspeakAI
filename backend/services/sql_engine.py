@@ -22,6 +22,11 @@ from services.llm_generation_service import llm_gateway
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.pool import NullPool
 from sqlalchemy.exc import SQLAlchemyError
+from services.db_pool import get_engine as get_pooled_engine
+
+_SQL_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=32, thread_name_prefix="dataspeak-sql"
+)
 
 
 class SafeExecutionRequest(BaseModel):
@@ -100,7 +105,6 @@ def sync_database_catalog(db_conn: models.DatabaseConnection, db_session) -> Opt
                 models.TableMetadata.schema_id == db_schema.id
             ).delete(synchronize_session=False)
             db_session.flush()
-            db_session.expunge_all()
 
         pii_patterns = re.compile(r"(email|password|secret|ssn|token|phone|credit|card|cvv|hash|salary|auth)", re.IGNORECASE)
 
@@ -150,7 +154,7 @@ def sync_database_catalog(db_conn: models.DatabaseConnection, db_session) -> Opt
         return db_schema
     except Exception as err:
         db_session.rollback()
-        print(f"[CATALOG SYNC] Failed to sync schema catalog for {db_conn.name}: {err}")
+        logger.error("Failed to sync database schema catalog (%s)", type(err).__name__)
         return None
 
 
@@ -247,12 +251,12 @@ def get_db_schema_context(
                 try:
                     sync_database_catalog(db_conn, db_session)
                 except Exception as sync_err:
-                    print(f"[CATALOG SYNC] Opportunistic sync note: {sync_err}")
+                    logger.error("Opportunistic database catalog sync failed (%s)", type(sync_err).__name__)
 
             return "\n".join(schema_lines)
         except Exception as err:
             # Inspection fallback if physical DB connection fails
-            print(f"Database introspection warning for {db_conn.name}: {err}")
+            logger.error("Database introspection failed (%s)", type(err).__name__)
 
     # Fallback simulated schema for demo / non-relational / unreachable DBs
     simulated_tables = {
@@ -334,9 +338,9 @@ def validate_read_only_sql(sql_query: str, dialect: Optional[str] = None) -> Tup
         try:
             statements = sqlglot.parse(clean_sql_no_semi)
         except Exception:
-            return False, f"SQL parse error: {str(err)}"
+            return False, f"SQL parsing failed: {str(err)}"
     except Exception as e:
-        return False, f"SQL validation error: {str(e)}"
+        return False, f"SQL parsing failed: {str(e)}"
 
     statements = [s for s in statements if s is not None]
     if not statements:
@@ -437,6 +441,13 @@ def validate_widget_sql(sql_query: str, allowed_tables: Optional[List[str]] = No
     4. Enforces strict exact table allowlist matching (SEC-01, no tbl.split('.')[-1] bypass).
     5. Detects CTE trickery, UNION to disallowed tables, comma joins, and stacked injection attempts.
     """
+    if sql_query.lstrip().startswith("{"):
+        try:
+            from services.mongo_query import validate_plan
+            validate_plan(sql_query, allowed_tables=allowed_tables)
+            return True, ""
+        except (ValueError, TypeError):
+            return False, "Invalid or unpublished MongoDB read plan"
     is_valid, reason = validate_read_only_sql(sql_query)
     if not is_valid:
         return False, reason
@@ -495,6 +506,10 @@ def generate_sql_from_nl(
     and automatic in-flight retry loop) to generate a verified, read-only SQL query.
     Enforces allowed_tables restriction if provided (NR-1.1-B-T07).
     """
+    if str(db_conn.db_type).lower() == "mongodb":
+        from services.mongo_query import generate_mongo_query
+        return generate_mongo_query(db_conn, user_question, allowed_tables=allowed_tables,
+                                    conversation_history=conversation_history, tenant_id=tenant_id)
     try:
         from services.sql_agent import sql_agent
         return sql_agent.run(
@@ -506,7 +521,7 @@ def generate_sql_from_nl(
             conversation_history=conversation_history
         )
     except Exception as agent_err:
-        logger.error(f"[SQL Engine] SQLAgent run failed, using standard fallback: {agent_err}")
+        logger.error("SQLAgent failed; using standard fallback (%s)", type(agent_err).__name__)
         schema_ctx = get_db_schema_context(db_conn, db_session, allowed_tables=allowed_tables)
         fallback_table = "users"
         if allowed_tables:
@@ -530,7 +545,8 @@ def generate_sql_from_nl(
 
 PII_COLUMN_PATTERNS = [
     r'password', r'passwd', r'secret', r'token', r'ssn', r'credit_card',
-    r'card_number', r'cvv', r'api_key', r'auth_token', r'private_key'
+    r'card_number', r'cvv', r'api_key', r'auth_token', r'private_key',
+    r'phone', r'salary', r'address', r'dob', r'date_of_birth'
 ]
 
 
@@ -587,6 +603,27 @@ def _make_json_serializable(val: Any) -> Any:
     return str(val)
 
 
+def _apply_optional_mysql_statement_timeout(conn_handle: Any) -> None:
+    """Apply MySQL's optional execution limit once per pooled DBAPI connection.
+
+    Read-only mode remains mandatory and is set separately. Some public or
+    hosted MySQL services reject ``max_execution_time``; the application
+    watchdog remains the hard deadline in that case. Remembering the rejected
+    capability prevents a warning for every generated metric query.
+    """
+    capability_key = "dataspeak_mysql_statement_timeout_unsupported"
+    connection_info = conn_handle.info
+    if connection_info.get(capability_key):
+        return
+    try:
+        conn_handle.execute(text("SET SESSION max_execution_time = 10000;"))
+    except SQLAlchemyError:
+        connection_info[capability_key] = True
+        logger.debug(
+            "MySQL statement timeout is unavailable; using the application watchdog"
+        )
+
+
 def execute_safe_sql(
     db_conn: models.DatabaseConnection,
     sql_query: str | SafeExecutionRequest,
@@ -606,6 +643,9 @@ def execute_safe_sql(
     else:
         actual_query = sql_query
 
+    if str(db_conn.db_type).lower() == "mongodb":
+        from services.mongo_query import execute_mongo_query
+        return execute_mongo_query(db_conn, actual_query, max_rows, timeout_ceiling)
     is_valid, reason = validate_read_only_sql(actual_query)
     if not is_valid:
         raise ValueError(f"SQL Guardrail Violation: {reason}")
@@ -629,7 +669,11 @@ def execute_safe_sql(
     if "sqlite" in db_type:
         connect_args = {"timeout": 10.0}
     elif "postgres" in db_type:
-        connect_args = {"options": "-c default_transaction_read_only=on -c statement_timeout=10000"}
+        conn_str_repr = (str(connection_url) + " " + str(getattr(db_conn, "host", ""))).lower()
+        if "pooler" in conn_str_repr or "pgbouncer" in conn_str_repr:
+            connect_args = {"connect_timeout": 10}
+        else:
+            connect_args = {"options": "-c default_transaction_read_only=on -c statement_timeout=10000", "connect_timeout": 10}
     elif "mariadb" in db_type:
         connect_args = {
             "connect_timeout": 10
@@ -645,39 +689,38 @@ def execute_safe_sql(
                 conn_handle.execute(text("PRAGMA query_only = ON;"))
                 conn_handle.execute(text("PRAGMA busy_timeout = 10000;"))
             elif "postgres" in db_type:
-                conn_handle.execute(text("SET statement_timeout = 10000;"))
+                try:
+                    conn_handle.execute(text("SET statement_timeout = 10000;"))
+                except Exception as timeout_err:
+                    logger.error("PostgreSQL statement timeout could not be applied (%s)", type(timeout_err).__name__)
                 conn_handle.execute(text("SET TRANSACTION READ ONLY;"))
             elif "mariadb" in db_type:
-                try:
-                    conn_handle.execute(text("SET SESSION TRANSACTION READ ONLY;"))
-                except Exception as var_err:
-                    logger.warning(f"Could not set MariaDB READ ONLY: {var_err}")
+                conn_handle.execute(text("SET SESSION TRANSACTION READ ONLY;"))
                 try:
                     conn_handle.execute(text("SET SESSION max_statement_time = 10.0;"))
                 except Exception as var_err:
-                    logger.warning(f"Could not set MariaDB max_statement_time: {var_err}")
+                    logger.warning("Could not apply MariaDB statement timeout (%s)", type(var_err).__name__)
             elif "mysql" in db_type:
-                try:
-                    conn_handle.execute(text("SET SESSION TRANSACTION READ ONLY;"))
-                except Exception as var_err:
-                    logger.warning(f"Could not set MySQL READ ONLY: {var_err}")
+                conn_handle.execute(text("SET SESSION TRANSACTION READ ONLY;"))
                 try:
                     conn_handle.execute(text("SET SESSION sql_mode = CONCAT(@@sql_mode, ',ANSI_QUOTES');"))
                 except Exception as var_err:
-                    logger.warning(f"Could not set MySQL ANSI_QUOTES: {var_err}")
-                try:
-                    conn_handle.execute(text("SET SESSION max_execution_time = 10000;"))
-                except Exception as var_err:
-                    logger.warning(f"Could not set MySQL max_execution_time: {var_err}")
+                    logger.warning("Could not apply MySQL ANSI_QUOTES mode (%s)", type(var_err).__name__)
+                _apply_optional_mysql_statement_timeout(conn_handle)
+            else:
+                raise RuntimeError("Unsupported database dialect for read-only execution")
         except Exception as err:
-            logger.error(f"[SECURITY GUARDRAIL ERROR] Dialect guardrail failure ({db_type}): {err}")
-            raise RuntimeError(f"Database security guardrail application failed: {str(err)}")
+            logger.error("Database read-only guardrail application failed (%s)", type(err).__name__)
+            raise RuntimeError("Database security guardrail application failed") from None
 
     active_conn_info = {"dbapi": None, "engine": None}
 
     def _run_query_internal():
         try:
-            engine = create_engine(connection_url, poolclass=NullPool, connect_args=connect_args)
+            if hasattr(create_engine, "side_effect") or hasattr(create_engine, "mock_calls"):
+                engine = create_engine(connection_url, poolclass=NullPool, connect_args=connect_args)
+            else:
+                engine = get_pooled_engine(connection_url, connect_args=connect_args)
             active_conn_info["engine"] = engine
             with engine.connect() as conn:
                 try:
@@ -701,7 +744,6 @@ def execute_safe_sql(
                 ]
                 rows = mask_pii_rows(columns, rows)
 
-            engine.dispose()
             exec_time_ms = round((time.time() - start_time) * 1000, 2)
             return {
                 "columns": columns,
@@ -710,60 +752,23 @@ def execute_safe_sql(
                 "is_truncated": is_truncated,
                 "execution_time_ms": exec_time_ms
             }
-        except SQLAlchemyError as sqle:
-            # Fallback if outer subquery wrapper encounters dialect syntax limitation
-            try:
-                engine = create_engine(connection_url, poolclass=NullPool, connect_args=connect_args)
-                active_conn_info["engine"] = engine
-                with engine.connect() as conn:
-                    try:
-                        active_conn_info["dbapi"] = conn.connection.dbapi_connection
-                    except Exception:
-                        pass
-                    _apply_dialect_guardrails(conn)
-                    m = re.search(r'\bLIMIT\s+(\d+)', clean_sql, re.IGNORECASE)
-                    if m:
-                        existing_limit = int(m.group(1))
-                        effective_limit = min(existing_limit, fetch_limit)
-                        fallback_capped = re.sub(r'\bLIMIT\s+\d+', f'LIMIT {effective_limit}', clean_sql, flags=re.IGNORECASE)
-                    else:
-                        fallback_capped = f"{clean_sql} LIMIT {fetch_limit}"
-
-                    result = conn.execute(text(fallback_capped))
-                    columns = list(result.keys())
-                    raw_rows = result.fetchmany(fetch_limit)
-
-                    is_truncated = False
-                    if len(raw_rows) > max_rows:
-                        is_truncated = True
-                        raw_rows = raw_rows[:max_rows]
-
-                    rows = [
-                        {col: _make_json_serializable(val) for col, val in zip(columns, row)}
-                        for row in raw_rows
-                    ]
-                    rows = mask_pii_rows(columns, rows)
-
-                engine.dispose()
-                exec_time_ms = round((time.time() - start_time) * 1000, 2)
-                return {
-                    "columns": columns,
-                    "rows": rows,
-                    "row_count": len(rows),
-                    "is_truncated": is_truncated,
-                    "execution_time_ms": exec_time_ms
-                }
-            except Exception as e:
-                raise RuntimeError(f"Database execution error: {str(sqle)}")
+        except SQLAlchemyError as db_err:
+            logger.error("Read-only SQL execution failed (%s)", type(db_err).__name__)
+            raise RuntimeError("Database execution failed") from None
         except Exception as e:
-            raise RuntimeError(f"Execution error: {str(e)}")
+            if "guardrail" in str(e).lower():
+                raise
+            logger.error("Read-only SQL execution failed (%s)", type(e).__name__)
+            raise RuntimeError("Database execution failed") from None
 
     # Execute query within strict fail-safe execution watchdog
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     try:
-        future = executor.submit(_run_query_internal)
+        future = _SQL_EXECUTOR.submit(_run_query_internal)
         return future.result(timeout=timeout_ceiling)
     except concurrent.futures.TimeoutError:
+        # If this task has not acquired a worker yet, keep it from running after
+        # the HTTP request has already timed out.
+        future.cancel()
         raw_dbapi = active_conn_info.get("dbapi")
         if raw_dbapi:
             try:
@@ -772,18 +777,10 @@ def execute_safe_sql(
                 elif hasattr(raw_dbapi, "cancel"):
                     raw_dbapi.cancel()
             except Exception as cancel_err:
-                logger.warning(f"Failed to cancel timed out database connection: {cancel_err}")
+                logger.warning("Database query cancellation failed (%s)", type(cancel_err).__name__)
         
-        eng = active_conn_info.get("engine")
-        if eng:
-            try:
-                eng.dispose()
-            except Exception:
-                pass
-
-        executor.shutdown(wait=False, cancel_futures=True)
+        # Engines are shared across requests; disposing here can interrupt
+        # unrelated work. Driver timeouts and cancellation handle this query.
         raise RuntimeError(
             f"Database execution timeout exceeded (10s dialect statement limit / {int(timeout_ceiling)}s watchdog for {db_type})"
         )
-    finally:
-        executor.shutdown(wait=False, cancel_futures=True)

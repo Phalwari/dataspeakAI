@@ -96,6 +96,7 @@ async def stream_chat_response(
             static_sources = None
             static_grounding = None
             static_sql_agent = None
+            static_suggestions = None
             if on_complete:
                 try:
                     if inspect.iscoroutinefunction(on_complete):
@@ -110,6 +111,7 @@ async def stream_chat_response(
                         static_sources = res.get("sources")
                         static_grounding = res.get("grounding")
                         static_sql_agent = res.get("sql_agent")
+                        static_suggestions = res.get("suggestions")
                 except Exception as cb_err:
                     logger.error(f"[ChatStream Callback Error in static fallback] {cb_err}")
                     err_payload = json.dumps({
@@ -145,6 +147,8 @@ async def stream_chat_response(
                 final_payload["grounding"] = static_grounding
             if static_sql_agent is not None:
                 final_payload["sql_agent"] = static_sql_agent
+            if static_suggestions is not None:
+                final_payload["suggestions"] = static_suggestions
             yield f"data: {json.dumps(final_payload)}\n\n"
             return
 
@@ -171,6 +175,8 @@ async def stream_chat_response(
             return
 
         full_answer = "".join(collected_tokens)
+        if not full_answer.strip():
+            raise RuntimeError("AI provider returned no answer")
         completed_normally = True
 
         # Notify completion callback (e.g. to persist assistant message & QueryLog)
@@ -178,6 +184,7 @@ async def stream_chat_response(
         callback_sources = None
         callback_grounding = None
         callback_sql_agent = None
+        callback_suggestions = None
 
         if on_complete:
             try:
@@ -192,6 +199,7 @@ async def stream_chat_response(
                     callback_sources = res.get("sources")
                     callback_grounding = res.get("grounding")
                     callback_sql_agent = res.get("sql_agent")
+                    callback_suggestions = res.get("suggestions")
             except Exception as cb_err:
                 logger.error(f"[ChatStream Callback Error] {cb_err}")
                 err_payload = json.dumps({
@@ -228,6 +236,8 @@ async def stream_chat_response(
             final_payload["grounding"] = callback_grounding
         if callback_sql_agent is not None:
             final_payload["sql_agent"] = callback_sql_agent
+        if callback_suggestions is not None:
+            final_payload["suggestions"] = callback_suggestions
 
         yield f"data: {json.dumps(final_payload)}\n\n"
 
@@ -244,8 +254,18 @@ async def stream_chat_response(
             })
             yield f"data: {err_payload}\n\n"
         else:
-            # If no tokens have been sent, re-raise so outer router can handle or return 500
-            raise ex
+            if static_fallback:
+                async for event in stream_chat_response(
+                    request=request, conversation_id=conversation_id,
+                    user_query=user_query, prompt="", tenant_id=tenant_id,
+                    gateway=gateway, citations=citations, sql_data=sql_data,
+                    query_type=query_type, on_complete=on_complete,
+                    message_id=message_id, static_fallback=static_fallback,
+                ):
+                    yield event
+            else:
+                # Preserve pre-first-token failover for callers without a fallback.
+                raise ex
 
     finally:
         # async-for does not close an upstream generator when this consumer

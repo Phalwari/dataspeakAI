@@ -1,0 +1,5078 @@
+{
+  "ground_truth": {
+    "postgresql": {
+      "all": {
+        "orders": 240,
+        "gross_revenue": 30200,
+        "delivered_revenue": 23695,
+        "cancelled_orders": 24,
+        "pending_orders": 31
+      },
+      "october": {
+        "orders": 90,
+        "gross_revenue": 11255,
+        "delivered_revenue": 8490,
+        "cancelled_orders": 9,
+        "pending_orders": 13
+      },
+      "customers": 24,
+      "products": 6,
+      "top_products": [
+        {
+          "product": "Espresso Maker",
+          "revenue": 14400
+        },
+        {
+          "product": "Burr Grinder",
+          "revenue": 6400
+        },
+        {
+          "product": "Milk Frother",
+          "revenue": 3200
+        },
+        {
+          "product": "Coffee Beans",
+          "revenue": 2400
+        },
+        {
+          "product": "Travel Mug",
+          "revenue": 2000
+        },
+        {
+          "product": "Filter Kit",
+          "revenue": 1800
+        }
+      ]
+    },
+    "mysql": {
+      "all": {
+        "orders": 180,
+        "gross_revenue": 116550,
+        "delivered_revenue": 94125,
+        "cancelled_orders": 18,
+        "pending_orders": 23
+      },
+      "october": {
+        "orders": 60,
+        "gross_revenue": 39240,
+        "delivered_revenue": 31190,
+        "cancelled_orders": 6,
+        "pending_orders": 8
+      },
+      "customers": 24,
+      "products": 6,
+      "top_products": [
+        {
+          "product": "Battery Pack",
+          "revenue": 54000
+        },
+        {
+          "product": "Inverter",
+          "revenue": 24000
+        },
+        {
+          "product": "Solar Panel",
+          "revenue": 22500
+        },
+        {
+          "product": "Charge Controller",
+          "revenue": 7500
+        },
+        {
+          "product": "Mounting Kit",
+          "revenue": 6750
+        },
+        {
+          "product": "Cable Kit",
+          "revenue": 1800
+        }
+      ]
+    },
+    "mongodb": {
+      "invoices": 160,
+      "gross_billed": 16300,
+      "paid_revenue": 14736,
+      "cancelled_invoices": 16,
+      "customers": 32,
+      "support_tickets": 80,
+      "open_tickets": 20,
+      "october_gross_billed": 6140
+    }
+  },
+  "chat": [
+    {
+      "status": 200,
+      "seconds": 0.16,
+      "body": {
+        "conversation_id": 32,
+        "message_id": 90,
+        "user_message_id": 89,
+        "query": "According to Harbor Coffee Retail policy, how many days do I have to return unopened equipment and what is the free standard shipping minimum?",
+        "answer": "I searched your Knowledge Base, but found no relevant document chunks matching your question.\n\n**Suggestions to get started:**\n- Upload relevant PDF, Word, or text documents in the **Knowledge Base** section\n- Rephrase your question with specific keywords or document headings\n- If your question relates to structured business data, ensure the query is routed to **SQL Database**\n\n**Suggested Follow-ups:**\n1. What types of documents can I upload?\n2. How does document indexing and vector search work?\n3. Switch query source to SQL Database",
+        "query_type": "rag",
+        "sources": [],
+        "sql_data": null,
+        "grounding": {},
+        "grounding_status": null,
+        "unverified_reason": null,
+        "claim_coverage_ratio": null,
+        "total_claims_count": null,
+        "verified_claims_count": null,
+        "skipped_claims_count": null,
+        "sql_agent": null,
+        "suggestions": [
+          "What types of documents can I upload?",
+          "How does document indexing and vector search work?",
+          "Switch query source to SQL Database"
+        ],
+        "suggested_questions": [
+          "What types of documents can I upload?",
+          "How does document indexing and vector search work?",
+          "Switch query source to SQL Database"
+        ],
+        "created_at": "2026-10-21T18:32:26.431162"
+      },
+      "name": "coffee_policy",
+      "query": "According to Harbor Coffee Retail policy, how many days do I have to return unopened equipment and what is the free standard shipping minimum?",
+      "expected": {
+        "return_days": 30,
+        "minimum": 100
+      }
+    },
+    {
+      "status": 200,
+      "seconds": 5.02,
+      "body": {
+        "conversation_id": 24,
+        "message_id": 103,
+        "user_message_id": 102,
+        "query": "Now only delivered orders, please.",
+        "answer": "I wasn't able to complete the SQL query for your request.\n\n**What happened:** AI generation provider was unreachable or in cooldown.\n\n\n**Available Tables in `Demo | Coffee Retail | PostgreSQL`:**\n`customers`, `orders`, `order_items`, `products`, `customers`, `orders`, `order_items`, `products`\n\n**Tip:** You can ask about specific tables or columns listed above, or check the Databases tab to view the full schema.\n\n**Suggested Follow-ups:**\n1. Show me the first 5 rows from `customers`\n2. What columns are in `customers`?\n3. Count records in `orders`",
+        "query_type": "sql",
+        "sources": [],
+        "sql_data": {
+          "query": "Now only delivered orders, please.",
+          "generated_sql": "",
+          "explanation": "Note: Agent could not resolve a fully verified query after 3 attempts. Generated safe fallback preview query on table 'customers'.",
+          "columns": [],
+          "rows": [],
+          "row_count": 0,
+          "execution_time_ms": 0.0,
+          "status": "failed",
+          "error_detail": "AI generation provider was unreachable or in cooldown."
+        },
+        "grounding": {},
+        "grounding_status": null,
+        "unverified_reason": null,
+        "claim_coverage_ratio": null,
+        "total_claims_count": null,
+        "verified_claims_count": null,
+        "skipped_claims_count": null,
+        "sql_agent": {
+          "attempts": 3,
+          "corrections_made": true,
+          "database_id": 61
+        },
+        "suggestions": [
+          "Show me the first 5 rows from `customers`",
+          "What columns are in `customers`?",
+          "Count records in `orders`"
+        ],
+        "suggested_questions": [
+          "Show me the first 5 rows from `customers`",
+          "What columns are in `customers`?",
+          "Count records in `orders`"
+        ],
+        "created_at": "2026-10-21T18:33:11.950615"
+      }
+    },
+    {
+      "status": 200,
+      "seconds": 29.11,
+      "body": {
+        "conversation_id": 36,
+        "message_id": 101,
+        "user_message_id": 97,
+        "query": "What is our guaranteed coffee retail revenue for 2027?",
+        "answer": "### Key Findings\nFound relevant information across **3** document chunk(s):\n\n- Reporting definitions: Gross revenue is the sum of orders.total_amount across all order statuses. Delivered revenue includes only orders whose status is delivered. Pending and cancelled orders must not be called realized... [Source: coffee_retail_policy.txt]\n- ORBIT SUBSCRIPTIONS \u2014 BILLING AND SUPPORT GUIDE\nSynthetic demo document. Effective 1 September 2026. Currency: USD.\n\nPlans: Starter is $29 per billing cycle, Growth is $79 per billing cycle, and Enterprise is $199 per bi... [Source: subscription_billing_policy.txt]\n- SUNRIDGE SOLAR WHOLESALE \u2014 OPERATIONS POLICY\nSynthetic demo document. Effective 1 September 2026. Currency: USD.\n\nCommercial terms: Standard wholesale payment terms are Net 45, measured from the invoice issue date. A 2 p... [Source: solar_wholesale_policy.txt]\n\n**Suggested Follow-ups:**\n1. Can you provide a more detailed breakdown?\n2. Which specific section covers this topic?\n3. Are there related documents available?",
+        "query_type": "rag",
+        "sources": [
+          {
+            "document_name": "coffee_retail_policy.txt",
+            "page_number": 1,
+            "content_type": "text",
+            "reference_id": null,
+            "snippet": "Reporting definitions: Gross revenue is the sum of orders.total_amount across all order statuses. Delivered revenue includes only orders whose status is delivered. Pending and cancelled orders must not be called realized revenue. order_items.line_total is the extended line amount; do not multiply it by quantity again. ",
+            "score": 0.675,
+            "grounding_score": 0.675,
+            "is_grounded": true,
+            "retrieval_similarity": 0.065,
+            "claim_support_score": 0.675,
+            "document_id": 3,
+            "chunk_id": 2668,
+            "document_version": 1,
+            "grounding_status": "supported"
+          },
+          {
+            "document_name": "solar_wholesale_policy.txt",
+            "page_number": 1,
+            "content_type": "text",
+            "reference_id": null,
+            "snippet": "SUNRIDGE SOLAR WHOLESALE \u2014 OPERATIONS POLICY\nSynthetic demo document. Effective 1 September 2026. Currency: USD.\n\nCommercial terms: Standard wholesale payment terms are Net 45, measured from the invoice issue date. A 2 percent early-payment discount applies only when full payment is received within 10 calendar days. Th",
+            "score": 0.67,
+            "grounding_score": 0.67,
+            "is_grounded": true,
+            "retrieval_similarity": 0.062,
+            "claim_support_score": 0.67,
+            "document_id": 4,
+            "chunk_id": 2670,
+            "document_version": 1,
+            "grounding_status": "supported"
+          }
+        ],
+        "sql_data": null,
+        "grounding": {
+          "status": "partially_supported",
+          "confidence": 0.319,
+          "has_low_confidence": true,
+          "disclaimer": "Notice: Some claims in this response have low grounding confidence against the indexed source documents. Please verify details with original sources.",
+          "unverified_reason": null,
+          "claim_coverage_ratio": 0.167,
+          "total_claims_count": 12,
+          "verified_claims_count": 2,
+          "skipped_claims_count": 5,
+          "verified_claims": [
+            {
+              "claim": "Key Findings\nFound relevant information across **3** document chunk(s):\n\n- Reporting definitions: Gross revenue is the sum of orders.total_amount across all order statuses.",
+              "is_grounded": true,
+              "score": 0.675,
+              "raw_similarity": 0.675,
+              "source": "coffee_retail_policy.txt",
+              "page_number": 1,
+              "reason": null
+            },
+            {
+              "claim": "Delivered revenue includes only orders whose status is delivered.",
+              "is_grounded": false,
+              "score": 0.465,
+              "raw_similarity": 0.465,
+              "source": "coffee_retail_policy.txt",
+              "page_number": 1,
+              "reason": null
+            },
+            {
+              "claim": "Pending and cancelled orders must not be called realized...",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.313,
+              "source": "subscription_billing_policy.txt",
+              "page_number": 1,
+              "reason": "Negation polarity mismatch (claim negation=True, source negation=False)"
+            },
+            {
+              "claim": "[Source: coffee_retail_policy.txt]\n- ORBIT SUBSCRIPTIONS \u2014 BILLING AND SUPPORT GUIDE\nSynthetic demo document.",
+              "is_grounded": false,
+              "score": 0.494,
+              "raw_similarity": 0.494,
+              "source": "subscription_billing_policy.txt",
+              "page_number": 1,
+              "reason": null
+            },
+            {
+              "claim": "Effective 1 September 2026.",
+              "is_grounded": false,
+              "score": 0.227,
+              "raw_similarity": 0.227,
+              "source": "subscription_billing_policy.txt",
+              "page_number": 1,
+              "reason": null
+            },
+            {
+              "claim": "Plans: Starter is $29 per billing cycle, Growth is $79 per billing cycle, and Enterprise is $199 per bi...",
+              "is_grounded": false,
+              "score": 0.482,
+              "raw_similarity": 0.482,
+              "source": "subscription_billing_policy.txt",
+              "page_number": 1,
+              "reason": null
+            },
+            {
+              "claim": "[Source: subscription_billing_policy.txt]\n- SUNRIDGE SOLAR WHOLESALE \u2014 OPERATIONS POLICY\nSynthetic demo document.",
+              "is_grounded": true,
+              "score": 0.67,
+              "raw_similarity": 0.67,
+              "source": "solar_wholesale_policy.txt",
+              "page_number": 1,
+              "reason": null
+            },
+            {
+              "claim": "Effective 1 September 2026.",
+              "is_grounded": false,
+              "score": 0.227,
+              "raw_similarity": 0.227,
+              "source": "subscription_billing_policy.txt",
+              "page_number": 1,
+              "reason": null
+            },
+            {
+              "claim": "Commercial terms: Standard wholesale payment terms are Net 45, measured from the invoice issue date.",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.461,
+              "source": "coffee_retail_policy.txt",
+              "page_number": 1,
+              "reason": "Numerical/date token mismatch: ['45'] not found in source evidence"
+            },
+            {
+              "claim": "[Source: solar_wholesale_policy.txt]\n\n**Suggested Follow-ups:**\n1.",
+              "is_grounded": false,
+              "score": 0.591,
+              "raw_similarity": 0.591,
+              "source": "solar_wholesale_policy.txt",
+              "page_number": 1,
+              "reason": null
+            },
+            {
+              "claim": "Can you provide a more detailed breakdown?",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.216,
+              "source": "coffee_retail_policy.txt",
+              "page_number": 1,
+              "reason": "Negation polarity mismatch (claim negation=False, source negation=True)"
+            },
+            {
+              "claim": "Which specific section covers this topic?",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.073,
+              "source": "subscription_billing_policy.txt",
+              "page_number": 1,
+              "reason": "Negation polarity mismatch (claim negation=False, source negation=True)"
+            }
+          ]
+        },
+        "grounding_status": "partially_supported",
+        "unverified_reason": null,
+        "claim_coverage_ratio": 0.167,
+        "total_claims_count": 12,
+        "verified_claims_count": 2,
+        "skipped_claims_count": 5,
+        "sql_agent": null,
+        "suggestions": [
+          "Can you provide a more detailed breakdown?",
+          "Which specific section covers this topic?",
+          "Are there related documents available?"
+        ],
+        "suggested_questions": [
+          "Can you provide a more detailed breakdown?",
+          "Which specific section covers this topic?",
+          "Are there related documents available?"
+        ],
+        "created_at": "2026-10-21T18:33:06.847249"
+      },
+      "name": "forecast_limit",
+      "query": "What is our guaranteed coffee retail revenue for 2027?",
+      "expected": {
+        "expected": "No guaranteed forecast can be established"
+      }
+    },
+    {
+      "status": 200,
+      "seconds": 2.55,
+      "body": {
+        "conversation_id": 37,
+        "message_id": 100,
+        "user_message_id": 99,
+        "query": "Hi, what can you help me do with my data?",
+        "answer": "## Hello! \ud83d\udc4b  \n\nWelcome to **DataSpeakAI** \u2013 your AI\u2011powered partner for turning data into insight.  \n\n### What we can do for you\n| Capability | How it helps you |\n|------------|------------------|\n| **Natural\u2011Language to SQL** | Ask questions in plain English and we\u2019ll translate them into safe, optimized SQL for PostgreSQL, MySQL, MariaDB, or SQLite\u2014no need to write code. |\n| **Document Knowledge Base (RAG)** | Upload PDFs, Word files, or plain\u2011text docs; we index them with vector search and BM25, then retrieve precise answers with citations. |\n| **Multi\u2011Modal Vision** | Snap a chart or scan a printed report; our OCR extracts the data so you can query it just like any other source. |\n| **Embeddable Chat Widgets** | Deploy a branded chatbot on your site or intranet with a single publishable key and secure session tokens. |\n| **Enterprise Controls** | Multi\u2011tenant workspaces, role\u2011based access, API keys, and audit logs keep your data safe and compliant. |\n\nWhether you need to **explore sales trends**, **audit compliance documents**, or **build a self\u2011service analytics widget**, just tell us what you\u2019re looking for in natural language and we\u2019ll handle the rest.\n\n---\n\n**Suggested Follow-ups:**\n1. How do I connect a PostgreSQL database?  \n2. How do I upload documents to the Knowledge Base?  \n3. Show me an example natural language query.",
+        "query_type": "conversational",
+        "sources": [],
+        "sql_data": null,
+        "grounding": {},
+        "grounding_status": null,
+        "unverified_reason": null,
+        "claim_coverage_ratio": null,
+        "total_claims_count": null,
+        "verified_claims_count": null,
+        "skipped_claims_count": null,
+        "sql_agent": null,
+        "suggestions": [
+          "How do I connect a PostgreSQL database?",
+          "How do I upload documents to the Knowledge Base?",
+          "Show me an example natural language query."
+        ],
+        "suggested_questions": [
+          "How do I connect a PostgreSQL database?",
+          "How do I upload documents to the Knowledge Base?",
+          "Show me an example natural language query."
+        ],
+        "created_at": "2026-10-21T18:33:02.741819"
+      },
+      "name": "greeting",
+      "query": "Hi, what can you help me do with my data?",
+      "expected": {
+        "expected": "Conversational platform help"
+      }
+    },
+    {
+      "status": 200,
+      "seconds": 5.51,
+      "body": {
+        "conversation_id": 30,
+        "message_id": 88,
+        "user_message_id": 85,
+        "query": "How many invoices are there and what is their total amount across all statuses?",
+        "answer": "I wasn't able to complete the SQL query for your request.\n\n**What happened:** AI generation provider was unreachable or in cooldown.\n\n\n**Tip:** You can ask about specific tables or columns listed above, or check the Databases tab to view the full schema.\n\n**Suggested Follow-ups:**\n1. Check database connection status\n2. Switch to Knowledge Base search",
+        "query_type": "sql",
+        "sources": [],
+        "sql_data": {
+          "query": "How many invoices are there and what is their total amount across all statuses?",
+          "generated_sql": "",
+          "explanation": "Note: Agent could not resolve a fully verified query after 3 attempts. Generated safe fallback preview query on table 'users'.",
+          "columns": [],
+          "rows": [],
+          "row_count": 0,
+          "execution_time_ms": 0.0,
+          "status": "failed",
+          "error_detail": "AI generation provider was unreachable or in cooldown."
+        },
+        "grounding": {},
+        "grounding_status": null,
+        "unverified_reason": null,
+        "claim_coverage_ratio": null,
+        "total_claims_count": null,
+        "verified_claims_count": null,
+        "skipped_claims_count": null,
+        "sql_agent": {
+          "attempts": 3,
+          "corrections_made": true,
+          "database_id": 63
+        },
+        "suggestions": [
+          "Check database connection status",
+          "Switch to Knowledge Base search"
+        ],
+        "suggested_questions": [
+          "Check database connection status",
+          "Switch to Knowledge Base search"
+        ],
+        "created_at": "2026-10-21T18:32:26.307076"
+      },
+      "name": "mongo_billing",
+      "query": "How many invoices are there and what is their total amount across all statuses?",
+      "expected": {
+        "invoices": 160,
+        "gross": 16300
+      }
+    },
+    {
+      "status": 200,
+      "seconds": 16.05,
+      "body": {
+        "conversation_id": 31,
+        "message_id": 95,
+        "user_message_id": 87,
+        "query": "What is the total invoice amount for invoices whose status is paid?",
+        "answer": "I wasn't able to complete the SQL query for your request.\n\n**What happened:** AI generation provider was unreachable or in cooldown.\n\n\n**Tip:** You can ask about specific tables or columns listed above, or check the Databases tab to view the full schema.\n\n**Suggested Follow-ups:**\n1. Check database connection status\n2. Switch to Knowledge Base search",
+        "query_type": "sql",
+        "sources": [],
+        "sql_data": {
+          "query": "What is the total invoice amount for invoices whose status is paid?",
+          "generated_sql": "",
+          "explanation": "Note: Agent could not resolve a fully verified query after 3 attempts. Generated safe fallback preview query on table 'users'.",
+          "columns": [],
+          "rows": [],
+          "row_count": 0,
+          "execution_time_ms": 0.0,
+          "status": "failed",
+          "error_detail": "AI generation provider was unreachable or in cooldown."
+        },
+        "grounding": {},
+        "grounding_status": null,
+        "unverified_reason": null,
+        "claim_coverage_ratio": null,
+        "total_claims_count": null,
+        "verified_claims_count": null,
+        "skipped_claims_count": null,
+        "sql_agent": {
+          "attempts": 3,
+          "corrections_made": true,
+          "database_id": 63
+        },
+        "suggestions": [
+          "Check database connection status",
+          "Switch to Knowledge Base search"
+        ],
+        "suggested_questions": [
+          "Check database connection status",
+          "Switch to Knowledge Base search"
+        ],
+        "created_at": "2026-10-21T18:32:28.736972"
+      },
+      "name": "mongo_paid",
+      "query": "What is the total invoice amount for invoices whose status is paid?",
+      "expected": {
+        "paid": 14736
+      }
+    },
+    {
+      "status": 200,
+      "seconds": 12.84,
+      "body": {
+        "conversation_id": 29,
+        "message_id": 86,
+        "user_message_id": 83,
+        "query": "What is the sum of total_amount for orders with status delivered only?",
+        "answer": "**Executive Takeaway**  \nThe total value of all orders with a **delivered** status is **$94,125.00**.  \n\n---  \n\n**Suggested Follow-ups:**  \n1. What is the average order amount for delivered orders?  \n2. How does the delivered\u2011order total compare to other order statuses (e.g., pending, cancelled)?  \n3. Can we see a month\u2011by\u2011month breakdown of delivered order totals?",
+        "query_type": "sql",
+        "sources": [],
+        "sql_data": {
+          "query": "What is the sum of total_amount for orders with status delivered only?",
+          "generated_sql": "SELECT SUM(total_amount) AS delivered_total_amount\nFROM orders\nWHERE status = 'delivered'",
+          "explanation": "This query aggregates the `total_amount` column of the `orders` table, summing only those rows where the `status` is exactly 'delivered'.",
+          "columns": [
+            "delivered_total_amount"
+          ],
+          "rows": [
+            {
+              "delivered_total_amount": "94125.00"
+            }
+          ],
+          "row_count": 1,
+          "execution_time_ms": 6.08,
+          "status": "success",
+          "error_detail": null
+        },
+        "grounding": {},
+        "grounding_status": null,
+        "unverified_reason": null,
+        "claim_coverage_ratio": null,
+        "total_claims_count": null,
+        "verified_claims_count": null,
+        "skipped_claims_count": null,
+        "sql_agent": {
+          "attempts": 1,
+          "corrections_made": false,
+          "database_id": 62
+        },
+        "suggestions": [
+          "What is the average order amount for delivered orders?",
+          "How does the delivered\u2011order total compare to other order statuses (e.g., pending, cancelled)?",
+          "Can we see a month\u2011by\u2011month breakdown of delivered order totals?"
+        ],
+        "suggested_questions": [
+          "What is the average order amount for delivered orders?",
+          "How does the delivered\u2011order total compare to other order statuses (e.g., pending, cancelled)?",
+          "Can we see a month\u2011by\u2011month breakdown of delivered order totals?"
+        ],
+        "created_at": "2026-10-21T18:32:21.602471"
+      },
+      "name": "mysql_delivered",
+      "query": "What is the sum of total_amount for orders with status delivered only?",
+      "expected": {
+        "delivered": 94125
+      }
+    },
+    {
+      "status": 200,
+      "seconds": 13.53,
+      "body": {
+        "conversation_id": 28,
+        "message_id": 84,
+        "user_message_id": 81,
+        "query": "How many orders are there and what is the sum of total_amount across all order statuses?",
+        "answer": "## Executive Takeaway\n- **Total Orders:** **180**  \n- **Combined Order Value:** **$116,550**  \n\nThese figures aggregate all orders across the three current statuses (delivered, pending, cancelled).\n\n### Orders & Value by Status\n| Status     | Order Count | Total Amount |\n|------------|------------:|-------------:|\n| **Delivered** | **139** | **$94,125** |\n| **Pending**   | **23**  | **$15,765** |\n| **Cancelled** | **18**  | **$6,660** |\n| **Overall**   | **180** | **$116,550** |\n\n**Suggested Follow-ups:**\n1. How does the average order value differ by status?\n2. What is the month\u2011over\u2011month trend for orders and revenue?\n3. Which product categories contribute most to the delivered orders' revenue?",
+        "query_type": "sql",
+        "sources": [],
+        "sql_data": {
+          "query": "How many orders are there and what is the sum of total_amount across all order statuses?",
+          "generated_sql": "SELECT\n    status,\n    COUNT(*) AS order_count,\n    SUM(total_amount) AS total_amount_sum\nFROM orders\nGROUP BY status",
+          "explanation": "This query groups all rows in the **orders** table by their `status`, counting the number of orders and summing the `total_amount` for each status.",
+          "columns": [
+            "status",
+            "order_count",
+            "total_amount_sum"
+          ],
+          "rows": [
+            {
+              "status": "delivered",
+              "order_count": 139,
+              "total_amount_sum": "94125.00"
+            },
+            {
+              "status": "pending",
+              "order_count": 23,
+              "total_amount_sum": "15765.00"
+            },
+            {
+              "status": "cancelled",
+              "order_count": 18,
+              "total_amount_sum": "6660.00"
+            }
+          ],
+          "row_count": 3,
+          "execution_time_ms": 162.49,
+          "status": "success",
+          "error_detail": null
+        },
+        "grounding": {},
+        "grounding_status": null,
+        "unverified_reason": null,
+        "claim_coverage_ratio": null,
+        "total_claims_count": null,
+        "verified_claims_count": null,
+        "skipped_claims_count": null,
+        "sql_agent": {
+          "attempts": 1,
+          "corrections_made": false,
+          "database_id": 62
+        },
+        "suggestions": [
+          "How does the average order value differ by status?",
+          "What is the month\u2011over\u2011month trend for orders and revenue?",
+          "Which product categories contribute most to the delivered orders' revenue?"
+        ],
+        "suggested_questions": [
+          "How does the average order value differ by status?",
+          "What is the month\u2011over\u2011month trend for orders and revenue?",
+          "Which product categories contribute most to the delivered orders' revenue?"
+        ],
+        "created_at": "2026-10-21T18:32:20.726953"
+      },
+      "name": "mysql_total",
+      "query": "How many orders are there and what is the sum of total_amount across all order statuses?",
+      "expected": {
+        "orders": 180,
+        "gross": 116550
+      }
+    },
+    {
+      "status": 200,
+      "seconds": 1.0,
+      "body": {
+        "conversation_id": 34,
+        "message_id": 94,
+        "user_message_id": 93,
+        "query": "According to Orbit Subscriptions guide, what is the high-priority first-response target and support escalation code?",
+        "answer": "I searched your Knowledge Base, but found no relevant document chunks matching your question.\n\n**Suggestions to get started:**\n- Upload relevant PDF, Word, or text documents in the **Knowledge Base** section\n- Rephrase your question with specific keywords or document headings\n- If your question relates to structured business data, ensure the query is routed to **SQL Database**\n\n**Suggested Follow-ups:**\n1. What types of documents can I upload?\n2. How does document indexing and vector search work?\n3. Switch query source to SQL Database",
+        "query_type": "rag",
+        "sources": [],
+        "sql_data": null,
+        "grounding": {},
+        "grounding_status": null,
+        "unverified_reason": null,
+        "claim_coverage_ratio": null,
+        "total_claims_count": null,
+        "verified_claims_count": null,
+        "skipped_claims_count": null,
+        "sql_agent": null,
+        "suggestions": [
+          "What types of documents can I upload?",
+          "How does document indexing and vector search work?",
+          "Switch query source to SQL Database"
+        ],
+        "suggested_questions": [
+          "What types of documents can I upload?",
+          "How does document indexing and vector search work?",
+          "Switch query source to SQL Database"
+        ],
+        "created_at": "2026-10-21T18:32:26.985753"
+      },
+      "name": "orbit_policy",
+      "query": "According to Orbit Subscriptions guide, what is the high-priority first-response target and support escalation code?",
+      "expected": {
+        "hours": 1,
+        "code": "ORBIT-SLA-81"
+      }
+    },
+    {
+      "status": 200,
+      "seconds": 15.41,
+      "body": {
+        "conversation_id": 25,
+        "message_id": 76,
+        "user_message_id": 75,
+        "query": "What is the sum of total_amount for orders with status delivered only?",
+        "answer": "## Executive Takeaway\n**The total amount for all orders with a status of *delivered* is **$23,695.00**.**  \n\n---\n\n### Delivered Orders \u2013 Aggregate Value\n| Metric | Value |\n|--------|-------|\n| **Total Delivered Amount** | **$23,695.00** |\n\n---\n\n**Suggested Follow-ups:**\n1. What is the average order value for delivered orders?\n2. How does the delivered total compare to other order statuses (e.g., pending, cancelled)?\n3. Can we see a month\u2011by\u2011month breakdown of delivered order totals?",
+        "query_type": "sql",
+        "sources": [],
+        "sql_data": {
+          "query": "What is the sum of total_amount for orders with status delivered only?",
+          "generated_sql": "SELECT SUM(total_amount) AS delivered_total_amount\nFROM orders\nWHERE status = 'delivered'",
+          "explanation": "This query aggregates the `total_amount` column of the `orders` table, summing only those rows whose `status` is exactly `'delivered'`.",
+          "columns": [
+            "delivered_total_amount"
+          ],
+          "rows": [
+            {
+              "delivered_total_amount": "23695.00"
+            }
+          ],
+          "row_count": 1,
+          "execution_time_ms": 233.94,
+          "status": "success",
+          "error_detail": null
+        },
+        "grounding": {},
+        "grounding_status": null,
+        "unverified_reason": null,
+        "claim_coverage_ratio": null,
+        "total_claims_count": null,
+        "verified_claims_count": null,
+        "skipped_claims_count": null,
+        "sql_agent": {
+          "attempts": 1,
+          "corrections_made": false,
+          "database_id": 61
+        },
+        "suggestions": [
+          "What is the average order value for delivered orders?",
+          "How does the delivered total compare to other order statuses (e.g., pending, cancelled)?",
+          "Can we see a month\u2011by\u2011month breakdown of delivered order totals?"
+        ],
+        "suggested_questions": [
+          "What is the average order value for delivered orders?",
+          "How does the delivered total compare to other order statuses (e.g., pending, cancelled)?",
+          "Can we see a month\u2011by\u2011month breakdown of delivered order totals?"
+        ],
+        "created_at": "2026-10-21T18:32:01.188490"
+      },
+      "name": "pg_delivered",
+      "query": "What is the sum of total_amount for orders with status delivered only?",
+      "expected": {
+        "delivered": 23695
+      }
+    },
+    {
+      "status": 200,
+      "seconds": 6.22,
+      "body": {
+        "conversation_id": 27,
+        "message_id": 82,
+        "user_message_id": 79,
+        "query": "Which product has the highest total order_items.line_total across all statuses? Join products using product_id and return its name and revenue.",
+        "answer": "**Executive Takeaway**  \nThe **Espresso Maker** generates the highest total revenue across all order statuses, with **$14,400.00** in line\u2011total sales.\n\n| Rank | Product Name   | Revenue |\n|------|----------------|---------|\n| **1** | **Espresso Maker** | **$14,400.00** |\n\n*All other products fall below this revenue figure.*\n\n**Suggested Follow-ups:**  \n1. Which product categories contribute the most to overall revenue?  \n2. How does the revenue of the top\u2011selling product vary by order status (e.g., completed vs. pending)?  \n3. What is the month\u2011over\u2011month revenue trend for the Espresso Maker?",
+        "query_type": "sql",
+        "sources": [],
+        "sql_data": {
+          "query": "Which product has the highest total order_items.line_total across all statuses? Join products using product_id and return its name and revenue.",
+          "generated_sql": "SELECT p.product_name,\n       SUM(oi.line_total) AS revenue\nFROM order_items AS oi\nJOIN products AS p\n  ON oi.product_id = p.id\nGROUP BY p.product_name\nORDER BY revenue DESC\nLIMIT 1",
+          "explanation": "The query sums `line_total` for each product, orders the totals descending, and returns the product name with the highest aggregated revenue.",
+          "columns": [
+            "product_name",
+            "revenue"
+          ],
+          "rows": [
+            {
+              "product_name": "Espresso Maker",
+              "revenue": "14400.00"
+            }
+          ],
+          "row_count": 1,
+          "execution_time_ms": 18.0,
+          "status": "success",
+          "error_detail": null
+        },
+        "grounding": {},
+        "grounding_status": null,
+        "unverified_reason": null,
+        "claim_coverage_ratio": null,
+        "total_claims_count": null,
+        "verified_claims_count": null,
+        "skipped_claims_count": null,
+        "sql_agent": {
+          "attempts": 1,
+          "corrections_made": false,
+          "database_id": 61
+        },
+        "suggestions": [
+          "Which product categories contribute the most to overall revenue?",
+          "How does the revenue of the top\u2011selling product vary by order status (e.g., completed vs. pending)?",
+          "What is the month\u2011over\u2011month revenue trend for the Espresso Maker?"
+        ],
+        "suggested_questions": [
+          "Which product categories contribute the most to overall revenue?",
+          "How does the revenue of the top\u2011selling product vary by order status (e.g., completed vs. pending)?",
+          "What is the month\u2011over\u2011month revenue trend for the Espresso Maker?"
+        ],
+        "created_at": "2026-10-21T18:32:08.333184"
+      },
+      "name": "pg_join",
+      "query": "Which product has the highest total order_items.line_total across all statuses? Join products using product_id and return its name and revenue.",
+      "expected": {
+        "product": "Espresso Maker",
+        "revenue": 14400
+      }
+    },
+    {
+      "status": 200,
+      "seconds": 5.62,
+      "body": {
+        "conversation_id": 26,
+        "message_id": 80,
+        "user_message_id": 77,
+        "query": "For October 2026 only, how many orders are there and what is total_amount across all statuses?",
+        "answer": "**Executive Summary**  \nIn **October\u202f2026**, the platform processed **90 orders** with a combined **total amount of $11,255.00** across all order statuses.\n\n| Month (2026) | Order Count | Total Amount |\n|--------------|------------|--------------|\n| **October**  | **90**     | **$11,255.00** |\n\n**Suggested Follow-ups:**  \n1. Would you like a breakdown of these orders by status (e.g., pending, shipped, cancelled)?  \n2. Are you interested in seeing the average order value for October\u202f2026?  \n3. Do you want a comparison of October\u202f2026 performance against the previous month or the same month last year?",
+        "query_type": "sql",
+        "sources": [],
+        "sql_data": {
+          "query": "For October 2026 only, how many orders are there and what is total_amount across all statuses?",
+          "generated_sql": "SELECT \n    COUNT(*) AS order_count,\n    SUM(total_amount) AS total_amount_sum\nFROM orders\nWHERE order_date >= '2026-10-01'\n  AND order_date <  '2026-11-01';",
+          "explanation": "The query counts all rows in **orders** and sums their **total_amount** where the **order_date** falls within October\u202f2026 (inclusive of the 1st and exclusive of November\u202f1st).",
+          "columns": [
+            "order_count",
+            "total_amount_sum"
+          ],
+          "rows": [
+            {
+              "order_count": 90,
+              "total_amount_sum": "11255.00"
+            }
+          ],
+          "row_count": 1,
+          "execution_time_ms": 24.13,
+          "status": "success",
+          "error_detail": null
+        },
+        "grounding": {},
+        "grounding_status": null,
+        "unverified_reason": null,
+        "claim_coverage_ratio": null,
+        "total_claims_count": null,
+        "verified_claims_count": null,
+        "skipped_claims_count": null,
+        "sql_agent": {
+          "attempts": 1,
+          "corrections_made": false,
+          "database_id": 61
+        },
+        "suggestions": [
+          "Would you like a breakdown of these orders by status (e.g., pending, shipped, cancelled)?",
+          "Are you interested in seeing the average order value for October\u202f2026?",
+          "Do you want a comparison of October\u202f2026 performance against the previous month or the same month last year?"
+        ],
+        "suggested_questions": [
+          "Would you like a breakdown of these orders by status (e.g., pending, shipped, cancelled)?",
+          "Are you interested in seeing the average order value for October\u202f2026?",
+          "Do you want a comparison of October\u202f2026 performance against the previous month or the same month last year?"
+        ],
+        "created_at": "2026-10-21T18:32:07.164865"
+      },
+      "name": "pg_october",
+      "query": "For October 2026 only, how many orders are there and what is total_amount across all statuses?",
+      "expected": {
+        "orders": 90,
+        "gross": 11255
+      }
+    },
+    {
+      "status": 200,
+      "seconds": 16.39,
+      "body": {
+        "conversation_id": 24,
+        "message_id": 78,
+        "user_message_id": 74,
+        "query": "How many orders are there and what is the sum of total_amount across all order statuses?",
+        "answer": "## Executive Takeaway\nAcross all order statuses, the business has processed **240 orders** with a combined **total amount of $30,200**.\n\n### Orders & Revenue by Status\n| Status     | Order Count | Total Amount |\n|------------|------------:|-------------:|\n| **cancelled** | **24** | **$2,320** |\n| **delivered** | **185** | **$23,695** |\n| **pending**   | **31** | **$4,185** |\n| **Overall**   | **240** | **$30,200** |\n\n**Key Metrics**\n- **Total Orders:** **240**\n- **Total Revenue (all statuses):** **$30,200**\n\n---\n\n**Suggested Follow-ups:**\n1. How does the average order value differ by status?\n2. What is the month\u2011over\u2011month trend for delivered orders?\n3. Which customers contribute the most to the total revenue?",
+        "query_type": "sql",
+        "sources": [],
+        "sql_data": {
+          "query": "How many orders are there and what is the sum of total_amount across all order statuses?",
+          "generated_sql": "SELECT\n    status,\n    COUNT(*) AS order_count,\n    SUM(total_amount) AS total_amount_sum\nFROM orders\nGROUP BY status\nORDER BY status",
+          "explanation": "This query groups all rows in the\u202forders\u202ftable by their\u202fstatus, then counts the orders and sums the\u202ftotal_amount\u202ffor each status.",
+          "columns": [
+            "status",
+            "order_count",
+            "total_amount_sum"
+          ],
+          "rows": [
+            {
+              "status": "cancelled",
+              "order_count": 24,
+              "total_amount_sum": "2320.00"
+            },
+            {
+              "status": "delivered",
+              "order_count": 185,
+              "total_amount_sum": "23695.00"
+            },
+            {
+              "status": "pending",
+              "order_count": 31,
+              "total_amount_sum": "4185.00"
+            }
+          ],
+          "row_count": 3,
+          "execution_time_ms": 6.34,
+          "status": "success",
+          "error_detail": null
+        },
+        "grounding": {},
+        "grounding_status": null,
+        "unverified_reason": null,
+        "claim_coverage_ratio": null,
+        "total_claims_count": null,
+        "verified_claims_count": null,
+        "skipped_claims_count": null,
+        "sql_agent": {
+          "attempts": 1,
+          "corrections_made": false,
+          "database_id": 61
+        },
+        "suggestions": [
+          "How does the average order value differ by status?",
+          "What is the month\u2011over\u2011month trend for delivered orders?",
+          "Which customers contribute the most to the total revenue?"
+        ],
+        "suggested_questions": [
+          "How does the average order value differ by status?",
+          "What is the month\u2011over\u2011month trend for delivered orders?",
+          "Which customers contribute the most to the total revenue?"
+        ],
+        "created_at": "2026-10-21T18:32:02.486056"
+      },
+      "name": "pg_total",
+      "query": "How many orders are there and what is the sum of total_amount across all order statuses?",
+      "expected": {
+        "orders": 240,
+        "gross": 30200
+      }
+    },
+    {
+      "status": 200,
+      "seconds": 0.16,
+      "body": {
+        "conversation_id": 33,
+        "message_id": 92,
+        "user_message_id": 91,
+        "query": "According to Sunridge Solar Wholesale policy, what are payment terms and the inverter warranty duration?",
+        "answer": "I searched your Knowledge Base, but found no relevant document chunks matching your question.\n\n**Suggestions to get started:**\n- Upload relevant PDF, Word, or text documents in the **Knowledge Base** section\n- Rephrase your question with specific keywords or document headings\n- If your question relates to structured business data, ensure the query is routed to **SQL Database**\n\n**Suggested Follow-ups:**\n1. What types of documents can I upload?\n2. How does document indexing and vector search work?\n3. Switch query source to SQL Database",
+        "query_type": "rag",
+        "sources": [],
+        "sql_data": null,
+        "grounding": {},
+        "grounding_status": null,
+        "unverified_reason": null,
+        "claim_coverage_ratio": null,
+        "total_claims_count": null,
+        "verified_claims_count": null,
+        "skipped_claims_count": null,
+        "sql_agent": null,
+        "suggestions": [
+          "What types of documents can I upload?",
+          "How does document indexing and vector search work?",
+          "Switch query source to SQL Database"
+        ],
+        "suggested_questions": [
+          "What types of documents can I upload?",
+          "How does document indexing and vector search work?",
+          "Switch query source to SQL Database"
+        ],
+        "created_at": "2026-10-21T18:32:26.579012"
+      },
+      "name": "solar_policy",
+      "query": "According to Sunridge Solar Wholesale policy, what are payment terms and the inverter warranty duration?",
+      "expected": {
+        "net_days": 45,
+        "warranty_years": 5
+      }
+    },
+    {
+      "status": 200,
+      "seconds": 32.58,
+      "body": {
+        "conversation_id": 35,
+        "message_id": 98,
+        "user_message_id": 96,
+        "query": "What exact loyalty points conversion rate does Harbor Coffee Retail offer?",
+        "answer": "**Answer**\n\nThe provided **Harbor Coffee Retail \u2013 Customer and Revenue Policy** does **not** include any information about a loyalty\u2011points conversion rate. The document explicitly states:\n\n> \u201cThis policy does not specify a loyalty points conversion rate\u2026\u201d\u202f[Source: coffee_retail_policy.txt, p.\u202f1]\n\nTherefore, the exact conversion rate cannot be determined from the available policy text.\n\n---\n\n**Suggested Follow-ups:**\n1. Where can I find the Harbor Coffee Retail loyalty program documentation that details points conversion?\n2. Does Harbor Coffee Retail have a separate FAQ or member guide that outlines loyalty benefits?\n3. Are there any internal system tables or fields that store the loyalty points conversion rate for Harbor Coffee Retail?",
+        "query_type": "rag",
+        "sources": [
+          {
+            "document_name": "coffee_retail_policy.txt",
+            "page_number": 1,
+            "content_type": "text",
+            "reference_id": null,
+            "snippet": "HARBOR COFFEE RETAIL \u2014 CUSTOMER AND REVENUE POLICY\nSynthetic demo document. Effective 1 September 2026. Currency: USD.\n\nReturns: Unopened coffee equipment may be returned within 30 calendar days of delivery. Opened coffee beans are non-returnable unless defective. Refunds are issued to the original payment method withi",
+            "score": 0.065,
+            "grounding_score": 0.0,
+            "is_grounded": false,
+            "retrieval_similarity": 0.065,
+            "claim_support_score": 0.0,
+            "document_id": 3,
+            "chunk_id": 2667,
+            "document_version": 1,
+            "grounding_status": "unsupported"
+          },
+          {
+            "document_name": "solar_wholesale_policy.txt",
+            "page_number": 1,
+            "content_type": "text",
+            "reference_id": null,
+            "snippet": "Reporting definitions: The solar wholesale database contains customers, products, orders, and order_items. total_amount is the full merchandise value of an order. Delivered revenue is the sum of total_amount for delivered orders only. Pending and cancelled orders are excluded from delivered revenue. Products are Solar ",
+            "score": 0.047,
+            "grounding_score": 0.0,
+            "is_grounded": false,
+            "retrieval_similarity": 0.047,
+            "claim_support_score": 0.0,
+            "document_id": 4,
+            "chunk_id": 2671,
+            "document_version": 1,
+            "grounding_status": "unsupported"
+          },
+          {
+            "document_name": "subscription_billing_policy.txt",
+            "page_number": 1,
+            "content_type": "text",
+            "reference_id": null,
+            "snippet": "Cancellation: Subscribers can cancel before the next renewal date. Cancellation takes effect at the end of the current paid billing cycle. Refund requests are reviewed within 7 calendar days; this guide does not promise an automatic refund.\n\nData structure: The MongoDB database contains invoices, customers, and support",
+            "score": 0.046,
+            "grounding_score": 0.0,
+            "is_grounded": false,
+            "retrieval_similarity": 0.046,
+            "claim_support_score": 0.0,
+            "document_id": 5,
+            "chunk_id": 2674,
+            "document_version": 1,
+            "grounding_status": "unsupported"
+          }
+        ],
+        "sql_data": null,
+        "grounding": {
+          "status": "unsupported",
+          "confidence": 0.22,
+          "has_low_confidence": true,
+          "disclaimer": "Notice: Some claims in this response have low grounding confidence against the indexed source documents. Please verify details with original sources.",
+          "unverified_reason": null,
+          "claim_coverage_ratio": 0.0,
+          "total_claims_count": 7,
+          "verified_claims_count": 0,
+          "skipped_claims_count": 2,
+          "verified_claims": [
+            {
+              "claim": "Answer**\n\nThe provided **Harbor Coffee Retail \u2013 Customer and Revenue Policy** does **not** include any information about a loyalty\u2011points conversion rate.",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.497,
+              "source": "coffee_retail_policy.txt",
+              "page_number": 1,
+              "reason": "Negation polarity mismatch (claim negation=True, source negation=False)"
+            },
+            {
+              "claim": "The document explicitly states:\n\n> \u201cThis policy does not specify a loyalty points conversion rate\u2026\u201d\u202f[Source: coffee_retail_policy.txt, p.",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.378,
+              "source": "coffee_retail_policy.txt",
+              "page_number": 1,
+              "reason": "Negation polarity mismatch (claim negation=True, source negation=False)"
+            },
+            {
+              "claim": "]\n\nTherefore, the exact conversion rate cannot be determined from the available policy text.",
+              "is_grounded": false,
+              "score": 0.132,
+              "raw_similarity": 0.132,
+              "source": "solar_wholesale_policy.txt",
+              "page_number": 1,
+              "reason": null
+            },
+            {
+              "claim": "\n\n**Suggested Follow-ups:**\n1.",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.118,
+              "source": "subscription_billing_policy.txt",
+              "page_number": 1,
+              "reason": "Numerical/date token mismatch: ['1'] not found in source evidence"
+            },
+            {
+              "claim": "Where can I find the Harbor Coffee Retail loyalty program documentation that details points conversion?",
+              "is_grounded": false,
+              "score": 0.461,
+              "raw_similarity": 0.461,
+              "source": "coffee_retail_policy.txt",
+              "page_number": 1,
+              "reason": null
+            },
+            {
+              "claim": "Does Harbor Coffee Retail have a separate FAQ or member guide that outlines loyalty benefits?",
+              "is_grounded": false,
+              "score": 0.492,
+              "raw_similarity": 0.492,
+              "source": "coffee_retail_policy.txt",
+              "page_number": 1,
+              "reason": null
+            },
+            {
+              "claim": "Are there any internal system tables or fields that store the loyalty points conversion rate for Harbor Coffee Retail?",
+              "is_grounded": false,
+              "score": 0.452,
+              "raw_similarity": 0.452,
+              "source": "coffee_retail_policy.txt",
+              "page_number": 1,
+              "reason": null
+            }
+          ]
+        },
+        "grounding_status": "unsupported",
+        "unverified_reason": null,
+        "claim_coverage_ratio": 0.0,
+        "total_claims_count": 7,
+        "verified_claims_count": 0,
+        "skipped_claims_count": 2,
+        "sql_agent": null,
+        "suggestions": [
+          "Where can I find the Harbor Coffee Retail loyalty program documentation that details points conversion?",
+          "Does Harbor Coffee Retail have a separate FAQ or member guide that outlines loyalty benefits?",
+          "Are there any internal system tables or fields that store the loyalty points conversion rate for Harbor Coffee Retail?"
+        ],
+        "suggested_questions": [
+          "Where can I find the Harbor Coffee Retail loyalty program documentation that details points conversion?",
+          "Does Harbor Coffee Retail have a separate FAQ or member guide that outlines loyalty benefits?",
+          "Are there any internal system tables or fields that store the loyalty points conversion rate for Harbor Coffee Retail?"
+        ],
+        "created_at": "2026-10-21T18:33:00.179448"
+      },
+      "name": "unknown_fact",
+      "query": "What exact loyalty points conversion rate does Harbor Coffee Retail offer?",
+      "expected": {
+        "expected": "Explicitly state that the policy does not specify it"
+      }
+    },
+    {
+      "status": 200,
+      "seconds": 4.74,
+      "body": {
+        "conversation_id": 24,
+        "message_id": 113,
+        "user_message_id": 112,
+        "query": "Now only delivered orders, please.",
+        "answer": "## Executive Takeaway\nFor **delivered** orders only, the business has processed **185 orders** with a combined **total amount of **$23,695**.\n\n### Delivered Orders Summary\n| Metric | Value |\n|--------|------:|\n| **Order Count** | **185** |\n| **Total Amount** | **$23,695** |\n\n---\n\n**Suggested Follow-ups:**\n1. What is the average order value for delivered orders?\n2. How does the revenue from delivered orders compare to cancelled and pending orders?\n3. Can I see the top\u20115 customers by total spend on delivered orders?",
+        "query_type": "sql",
+        "sources": [],
+        "sql_data": {
+          "query": "Now only delivered orders, please.",
+          "generated_sql": "SELECT\n    COUNT(*) AS order_count,\n    SUM(total_amount) AS total_amount_sum\nFROM orders\nWHERE status = 'delivered'",
+          "explanation": "This query counts all rows and sums the total_amount column in the\u202forders\u202ftable, restricting the results to rows where the status is\u202f'delivered'.",
+          "columns": [
+            "order_count",
+            "total_amount_sum"
+          ],
+          "rows": [
+            {
+              "order_count": 185,
+              "total_amount_sum": "23695.00"
+            }
+          ],
+          "row_count": 1,
+          "execution_time_ms": 7.13,
+          "status": "success",
+          "error_detail": null
+        },
+        "grounding": {},
+        "grounding_status": null,
+        "unverified_reason": null,
+        "claim_coverage_ratio": null,
+        "total_claims_count": null,
+        "verified_claims_count": null,
+        "skipped_claims_count": null,
+        "sql_agent": {
+          "attempts": 1,
+          "corrections_made": false,
+          "database_id": 61
+        },
+        "suggestions": [
+          "What is the average order value for delivered orders?",
+          "How does the revenue from delivered orders compare to cancelled and pending orders?",
+          "Can I see the top\u20115 customers by total spend on delivered orders?"
+        ],
+        "suggested_questions": [
+          "What is the average order value for delivered orders?",
+          "How does the revenue from delivered orders compare to cancelled and pending orders?",
+          "Can I see the top\u20115 customers by total spend on delivered orders?"
+        ],
+        "created_at": "2026-10-21T18:35:51.028759"
+      }
+    },
+    {
+      "status": 200,
+      "seconds": 4.08,
+      "body": {
+        "conversation_id": 38,
+        "message_id": 105,
+        "user_message_id": 104,
+        "query": "According to Harbor Coffee Retail policy, how many days do I have to return unopened equipment and what is the free standard shipping minimum?",
+        "answer": "**Harbor Coffee Retail \u2013 Return & Shipping Highlights**\n\n| Item | Policy Detail | Source |\n|------|---------------|--------|\n| **Return window for unopened equipment** | **30\u202fcalendar days** from the date of delivery | [Source: coffee_retail_policy.txt] |\n| **Free standard shipping threshold** | **Merchandise subtotal\u202f\u2265\u202f$100** (standard shipping is $6 otherwise) | [Source: coffee_retail_policy.txt] |\n\n**Key Takeaways**\n\n- You have **30 days** to return any unopened coffee equipment.\n- To qualify for **free standard shipping**, ensure your order\u2019s merchandise subtotal reaches **$100**; otherwise, a $6 standard shipping fee applies.\n\n---\n\n**Suggested Follow-ups:**\n1. What is the process for obtaining a return authorization code for equipment returns?\n2. Are there any exceptions to the free\u2011shipping threshold for promotional or bulk orders?\n3. How are refunds processed after a returned item is inspected?",
+        "query_type": "rag",
+        "sources": [
+          {
+            "document_name": "coffee_retail_policy.txt",
+            "page_number": 1,
+            "content_type": "text",
+            "reference_id": null,
+            "snippet": "Reporting definitions: Gross revenue is the sum of orders.total_amount across all order statuses. Delivered revenue includes only orders whose status is delivered. Pending and cancelled orders must not be called realized revenue. order_items.line_total is the extended line amount; do not multiply it by quantity again. ",
+            "score": 0.065,
+            "grounding_score": 0.0,
+            "is_grounded": false,
+            "retrieval_similarity": 0.065,
+            "claim_support_score": 0.0,
+            "document_id": 3,
+            "chunk_id": 2668,
+            "document_version": 1,
+            "grounding_status": "unsupported"
+          },
+          {
+            "document_name": "subscription_billing_policy.txt",
+            "page_number": 1,
+            "content_type": "text",
+            "reference_id": null,
+            "snippet": "Cancellation: Subscribers can cancel before the next renewal date. Cancellation takes effect at the end of the current paid billing cycle. Refund requests are reviewed within 7 calendar days; this guide does not promise an automatic refund.\n\nData structure: The MongoDB database contains invoices, customers, and support",
+            "score": 0.062,
+            "grounding_score": 0.0,
+            "is_grounded": false,
+            "retrieval_similarity": 0.062,
+            "claim_support_score": 0.0,
+            "document_id": 5,
+            "chunk_id": 2674,
+            "document_version": 1,
+            "grounding_status": "unsupported"
+          },
+          {
+            "document_name": "solar_wholesale_policy.txt",
+            "page_number": 1,
+            "content_type": "text",
+            "reference_id": null,
+            "snippet": "Reporting definitions: The solar wholesale database contains customers, products, orders, and order_items. total_amount is the full merchandise value of an order. Delivered revenue is the sum of total_amount for delivered orders only. Pending and cancelled orders are excluded from delivered revenue. Products are Solar ",
+            "score": 0.062,
+            "grounding_score": 0.0,
+            "is_grounded": false,
+            "retrieval_similarity": 0.062,
+            "claim_support_score": 0.0,
+            "document_id": 4,
+            "chunk_id": 2671,
+            "document_version": 1,
+            "grounding_status": "unsupported"
+          }
+        ],
+        "sql_data": null,
+        "grounding": {
+          "status": "unsupported",
+          "confidence": 0.038,
+          "has_low_confidence": true,
+          "disclaimer": "Notice: Some claims in this response have low grounding confidence against the indexed source documents. Please verify details with original sources.",
+          "unverified_reason": null,
+          "claim_coverage_ratio": 0.0,
+          "total_claims_count": 8,
+          "verified_claims_count": 0,
+          "skipped_claims_count": 2,
+          "verified_claims": [
+            {
+              "claim": "Harbor Coffee Retail \u2013 Return & Shipping Highlights**\n\n\n**Key Takeaways**\n\n- You have **30 days** to return any unopened coffee equipment.",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.378,
+              "source": "coffee_retail_policy.txt",
+              "page_number": 1,
+              "reason": "Numerical/date token mismatch: ['30'] not found in source evidence"
+            },
+            {
+              "claim": "To qualify for **free standard shipping**, ensure your order\u2019s merchandise subtotal reaches **$100**; otherwise, a $6 standard shipping fee applies.",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.321,
+              "source": "coffee_retail_policy.txt",
+              "page_number": 1,
+              "reason": "Numerical/date token mismatch: ['100', '$100'] not found in source evidence"
+            },
+            {
+              "claim": "\n\n**Suggested Follow-ups:**\n1.",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.118,
+              "source": "subscription_billing_policy.txt",
+              "page_number": 1,
+              "reason": "Numerical/date token mismatch: ['1'] not found in source evidence"
+            },
+            {
+              "claim": "What is the process for obtaining a return authorization code for equipment returns?",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.168,
+              "source": "solar_wholesale_policy.txt",
+              "page_number": 1,
+              "reason": "Negation polarity mismatch (claim negation=False, source negation=True)"
+            },
+            {
+              "claim": "Are there any exceptions to the free\u2011shipping threshold for promotional or bulk orders?",
+              "is_grounded": false,
+              "score": 0.307,
+              "raw_similarity": 0.307,
+              "source": "coffee_retail_policy.txt",
+              "page_number": 1,
+              "reason": null
+            },
+            {
+              "claim": "How are refunds processed after a returned item is inspected?",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.275,
+              "source": "subscription_billing_policy.txt",
+              "page_number": 1,
+              "reason": "Negation polarity mismatch (claim negation=False, source negation=True)"
+            },
+            {
+              "claim": "Item is **Return window for unopened equipment**, Policy Detail is **30\u202fcalendar days** from the date of delivery, Source is [Source: coffee_retail_policy.txt].",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.366,
+              "source": "coffee_retail_policy.txt",
+              "page_number": 1,
+              "reason": "Numerical/date token mismatch: ['30'] not found in source evidence"
+            },
+            {
+              "claim": "Item is **Free standard shipping threshold**, Policy Detail is **Merchandise subtotal\u202f\u2265\u202f$100** (standard shipping is $6 otherwise), Source is [Source: coffee_retail_policy.txt].",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.428,
+              "source": "coffee_retail_policy.txt",
+              "page_number": 1,
+              "reason": "Numerical/date token mismatch: ['100', '$100'] not found in source evidence"
+            }
+          ]
+        },
+        "grounding_status": "unsupported",
+        "unverified_reason": null,
+        "claim_coverage_ratio": 0.0,
+        "total_claims_count": 8,
+        "verified_claims_count": 0,
+        "skipped_claims_count": 2,
+        "sql_agent": null,
+        "suggestions": [
+          "What is the process for obtaining a return authorization code for equipment returns?",
+          "Are there any exceptions to the free\u2011shipping threshold for promotional or bulk orders?",
+          "How are refunds processed after a returned item is inspected?"
+        ],
+        "suggested_questions": [
+          "What is the process for obtaining a return authorization code for equipment returns?",
+          "Are there any exceptions to the free\u2011shipping threshold for promotional or bulk orders?",
+          "How are refunds processed after a returned item is inspected?"
+        ],
+        "created_at": "2026-10-21T18:35:30.153506"
+      }
+    },
+    {
+      "status": 200,
+      "seconds": 4.83,
+      "body": {
+        "conversation_id": 40,
+        "message_id": 109,
+        "user_message_id": 108,
+        "query": "According to Orbit Subscriptions guide, what is the high-priority first-response target and support escalation code?",
+        "answer": "**Answer**\n\n- **High\u2011priority first\u2011response target:** **1 business hour**\u3010Source: subscription_billing_policy.txt, p.\u202f1\u3011  \n- **Support escalation code:** **ORBIT\u2011SLA\u201181**\u3010Source: subscription_billing_policy.txt, p.\u202f1\u3011\n\nThese values are defined in the \u201cSupport SLA\u201d section of the Orbit Subscriptions \u2013 Billing and Support Guide.\n\n---\n\n**Suggested Follow-ups:**\n1. What are the first\u2011response targets for normal\u2011priority tickets in the Orbit Subscriptions guide?  \n2. How does the guide define \u201cresolution hours\u201d and their relationship to SLA compliance?  \n3. Are there any penalties or service credits associated with missing the high\u2011priority response target?",
+        "query_type": "rag",
+        "sources": [
+          {
+            "document_name": "subscription_billing_policy.txt",
+            "page_number": 1,
+            "content_type": "text",
+            "reference_id": null,
+            "snippet": "Cancellation: Subscribers can cancel before the next renewal date. Cancellation takes effect at the end of the current paid billing cycle. Refund requests are reviewed within 7 calendar days; this guide does not promise an automatic refund.\n\nData structure: The MongoDB database contains invoices, customers, and support",
+            "score": 0.064,
+            "grounding_score": 0.0,
+            "is_grounded": false,
+            "retrieval_similarity": 0.064,
+            "claim_support_score": 0.0,
+            "document_id": 5,
+            "chunk_id": 2674,
+            "document_version": 1,
+            "grounding_status": "unsupported"
+          },
+          {
+            "document_name": "coffee_retail_policy.txt",
+            "page_number": 1,
+            "content_type": "text",
+            "reference_id": null,
+            "snippet": "Reporting definitions: Gross revenue is the sum of orders.total_amount across all order statuses. Delivered revenue includes only orders whose status is delivered. Pending and cancelled orders must not be called realized revenue. order_items.line_total is the extended line amount; do not multiply it by quantity again. ",
+            "score": 0.063,
+            "grounding_score": 0.0,
+            "is_grounded": false,
+            "retrieval_similarity": 0.063,
+            "claim_support_score": 0.0,
+            "document_id": 3,
+            "chunk_id": 2668,
+            "document_version": 1,
+            "grounding_status": "unsupported"
+          },
+          {
+            "document_name": "solar_wholesale_policy.txt",
+            "page_number": 1,
+            "content_type": "text",
+            "reference_id": null,
+            "snippet": "Reporting definitions: The solar wholesale database contains customers, products, orders, and order_items. total_amount is the full merchandise value of an order. Delivered revenue is the sum of total_amount for delivered orders only. Pending and cancelled orders are excluded from delivered revenue. Products are Solar ",
+            "score": 0.063,
+            "grounding_score": 0.0,
+            "is_grounded": false,
+            "retrieval_similarity": 0.063,
+            "claim_support_score": 0.0,
+            "document_id": 4,
+            "chunk_id": 2671,
+            "document_version": 1,
+            "grounding_status": "unsupported"
+          }
+        ],
+        "sql_data": null,
+        "grounding": {
+          "status": "unsupported",
+          "confidence": 0.0,
+          "has_low_confidence": true,
+          "disclaimer": "Notice: Some claims in this response have low grounding confidence against the indexed source documents. Please verify details with original sources.",
+          "unverified_reason": null,
+          "claim_coverage_ratio": 0.0,
+          "total_claims_count": 7,
+          "verified_claims_count": 0,
+          "skipped_claims_count": 2,
+          "verified_claims": [
+            {
+              "claim": "Answer**\n\n- **High\u2011priority first\u2011response target:** **1 business hour**\u3010Source: subscription_billing_policy.txt, p.",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.339,
+              "source": "subscription_billing_policy.txt",
+              "page_number": 1,
+              "reason": "Numerical/date token mismatch: ['1'] not found in source evidence"
+            },
+            {
+              "claim": "\u3011  \n- **Support escalation code:** **ORBIT\u2011SLA\u201181**\u3010Source: subscription_billing_policy.txt, p.",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.282,
+              "source": "subscription_billing_policy.txt",
+              "page_number": 1,
+              "reason": "Numerical/date token mismatch: ['81'] not found in source evidence"
+            },
+            {
+              "claim": "\u3011\n\nThese values are defined in the \u201cSupport SLA\u201d section of the Orbit Subscriptions \u2013 Billing and Support Guide.",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.341,
+              "source": "coffee_retail_policy.txt",
+              "page_number": 1,
+              "reason": "Negation polarity mismatch (claim negation=False, source negation=True)"
+            },
+            {
+              "claim": "\n\n**Suggested Follow-ups:**\n1.",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.118,
+              "source": "subscription_billing_policy.txt",
+              "page_number": 1,
+              "reason": "Numerical/date token mismatch: ['1'] not found in source evidence"
+            },
+            {
+              "claim": "What are the first\u2011response targets for normal\u2011priority tickets in the Orbit Subscriptions guide?",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.189,
+              "source": "subscription_billing_policy.txt",
+              "page_number": 1,
+              "reason": "Negation polarity mismatch (claim negation=False, source negation=True)"
+            },
+            {
+              "claim": "How does the guide define \u201cresolution hours\u201d and their relationship to SLA compliance?",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.242,
+              "source": "coffee_retail_policy.txt",
+              "page_number": 1,
+              "reason": "Negation polarity mismatch (claim negation=False, source negation=True)"
+            },
+            {
+              "claim": "Are there any penalties or service credits associated with missing the high\u2011priority response target?",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.224,
+              "source": "subscription_billing_policy.txt",
+              "page_number": 1,
+              "reason": "Negation polarity mismatch (claim negation=False, source negation=True)"
+            }
+          ]
+        },
+        "grounding_status": "unsupported",
+        "unverified_reason": null,
+        "claim_coverage_ratio": 0.0,
+        "total_claims_count": 7,
+        "verified_claims_count": 0,
+        "skipped_claims_count": 2,
+        "sql_agent": null,
+        "suggestions": [
+          "What are the first\u2011response targets for normal\u2011priority tickets in the Orbit Subscriptions guide?",
+          "How does the guide define \u201cresolution hours\u201d and their relationship to SLA compliance?",
+          "Are there any penalties or service credits associated with missing the high\u2011priority response target?"
+        ],
+        "suggested_questions": [
+          "What are the first\u2011response targets for normal\u2011priority tickets in the Orbit Subscriptions guide?",
+          "How does the guide define \u201cresolution hours\u201d and their relationship to SLA compliance?",
+          "Are there any penalties or service credits associated with missing the high\u2011priority response target?"
+        ],
+        "created_at": "2026-10-21T18:35:39.215878"
+      }
+    },
+    {
+      "status": 200,
+      "seconds": 4.16,
+      "body": {
+        "conversation_id": 39,
+        "message_id": 107,
+        "user_message_id": 106,
+        "query": "According to Sunridge Solar Wholesale policy, what are payment terms and the inverter warranty duration?",
+        "answer": "**Sunridge Solar Wholesale \u2013 Key Policy Details**\n\n| Item | Policy Statement | Key Figure |\n|------|------------------|------------|\n| **Payment Terms** | \u201cStandard wholesale payment terms are **Net\u202f45**, measured from the invoice issue date. A 2\u202f% early\u2011payment discount applies only when full payment is received within 10 calendar days.\u201d | **Net\u202f45**; **2\u202f% discount if paid within 10\u202fdays** |\n| **Inverter Warranty** | \u201cInverters have a **5\u2011year product warranty**.\u201d | **5\u202fyears** |\n\n**Sources**  \n- Payment terms and early\u2011payment discount: **[Source: solar_wholesale_policy.txt, p.\u202f1]**  \n- Inverter warranty duration: **[Source: solar_wholesale_policy.txt, p.\u202f1]**\n\n---\n\n**Suggested Follow-ups:**  \n1. What are the warranty claim requirements for inverters under this policy?  \n2. Are there any penalties or interest charges for payments made after the Net\u202f45 deadline?  \n3. How does the early\u2011payment discount apply to partial payments versus full invoice settlement?",
+        "query_type": "rag",
+        "sources": [
+          {
+            "document_name": "solar_wholesale_policy.txt",
+            "page_number": 1,
+            "content_type": "text",
+            "reference_id": null,
+            "snippet": "Reporting definitions: The solar wholesale database contains customers, products, orders, and order_items. total_amount is the full merchandise value of an order. Delivered revenue is the sum of total_amount for delivered orders only. Pending and cancelled orders are excluded from delivered revenue. Products are Solar ",
+            "score": 0.065,
+            "grounding_score": 0.0,
+            "is_grounded": false,
+            "retrieval_similarity": 0.065,
+            "claim_support_score": 0.0,
+            "document_id": 4,
+            "chunk_id": 2671,
+            "document_version": 1,
+            "grounding_status": "unsupported"
+          },
+          {
+            "document_name": "subscription_billing_policy.txt",
+            "page_number": 1,
+            "content_type": "text",
+            "reference_id": null,
+            "snippet": "Cancellation: Subscribers can cancel before the next renewal date. Cancellation takes effect at the end of the current paid billing cycle. Refund requests are reviewed within 7 calendar days; this guide does not promise an automatic refund.\n\nData structure: The MongoDB database contains invoices, customers, and support",
+            "score": 0.062,
+            "grounding_score": 0.0,
+            "is_grounded": false,
+            "retrieval_similarity": 0.062,
+            "claim_support_score": 0.0,
+            "document_id": 5,
+            "chunk_id": 2674,
+            "document_version": 1,
+            "grounding_status": "unsupported"
+          },
+          {
+            "document_name": "coffee_retail_policy.txt",
+            "page_number": 1,
+            "content_type": "text",
+            "reference_id": null,
+            "snippet": "Reporting definitions: Gross revenue is the sum of orders.total_amount across all order statuses. Delivered revenue includes only orders whose status is delivered. Pending and cancelled orders must not be called realized revenue. order_items.line_total is the extended line amount; do not multiply it by quantity again. ",
+            "score": 0.062,
+            "grounding_score": 0.0,
+            "is_grounded": false,
+            "retrieval_similarity": 0.062,
+            "claim_support_score": 0.0,
+            "document_id": 3,
+            "chunk_id": 2668,
+            "document_version": 1,
+            "grounding_status": "unsupported"
+          }
+        ],
+        "sql_data": null,
+        "grounding": {
+          "status": "unsupported",
+          "confidence": 0.152,
+          "has_low_confidence": true,
+          "disclaimer": "Notice: Some claims in this response have low grounding confidence against the indexed source documents. Please verify details with original sources.",
+          "unverified_reason": null,
+          "claim_coverage_ratio": 0.0,
+          "total_claims_count": 8,
+          "verified_claims_count": 0,
+          "skipped_claims_count": 2,
+          "verified_claims": [
+            {
+              "claim": "Sunridge Solar Wholesale \u2013 Key Policy Details**\n\n\n**Sources**  \n- Payment terms and early\u2011payment discount: **[Source: solar_wholesale_policy.txt, p.",
+              "is_grounded": false,
+              "score": 0.554,
+              "raw_similarity": 0.554,
+              "source": "solar_wholesale_policy.txt",
+              "page_number": 1,
+              "reason": null
+            },
+            {
+              "claim": "]**  \n- Inverter warranty duration: **[Source: solar_wholesale_policy.txt, p.",
+              "is_grounded": false,
+              "score": 0.398,
+              "raw_similarity": 0.398,
+              "source": "solar_wholesale_policy.txt",
+              "page_number": 1,
+              "reason": null
+            },
+            {
+              "claim": "]**\n\n---\n\n**Suggested Follow-ups:**  \n1.",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.089,
+              "source": "subscription_billing_policy.txt",
+              "page_number": 1,
+              "reason": "Numerical/date token mismatch: ['1'] not found in source evidence"
+            },
+            {
+              "claim": "What are the warranty claim requirements for inverters under this policy?",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.22,
+              "source": "solar_wholesale_policy.txt",
+              "page_number": 1,
+              "reason": "Negation polarity mismatch (claim negation=False, source negation=True)"
+            },
+            {
+              "claim": "Are there any penalties or interest charges for payments made after the Net\u202f45 deadline?",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.297,
+              "source": "subscription_billing_policy.txt",
+              "page_number": 1,
+              "reason": "Numerical/date token mismatch: ['45'] not found in source evidence"
+            },
+            {
+              "claim": "How does the early\u2011payment discount apply to partial payments versus full invoice settlement?",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.242,
+              "source": "subscription_billing_policy.txt",
+              "page_number": 1,
+              "reason": "Negation polarity mismatch (claim negation=False, source negation=True)"
+            },
+            {
+              "claim": "Item is **Payment Terms**, Policy Statement is \u201cStandard wholesale payment terms are **Net\u202f45**, measured from the invoice issue date. A 2\u202f% early\u2011payment discount applies only when full payment is received within 10 calendar days.\u201d, Key Figure is **Net\u202f45**; **2\u202f% discount if paid within 10\u202fdays**.",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.384,
+              "source": "coffee_retail_policy.txt",
+              "page_number": 1,
+              "reason": "Numerical/date token mismatch: ['10', '45'] not found in source evidence"
+            },
+            {
+              "claim": "Item is **Inverter Warranty**, Policy Statement is \u201cInverters have a **5\u2011year product warranty**.\u201d, Key Figure is **5\u202fyears**.",
+              "is_grounded": false,
+              "score": 0.26,
+              "raw_similarity": 0.26,
+              "source": "solar_wholesale_policy.txt",
+              "page_number": 1,
+              "reason": null
+            }
+          ]
+        },
+        "grounding_status": "unsupported",
+        "unverified_reason": null,
+        "claim_coverage_ratio": 0.0,
+        "total_claims_count": 8,
+        "verified_claims_count": 0,
+        "skipped_claims_count": 2,
+        "sql_agent": null,
+        "suggestions": [
+          "What are the warranty claim requirements for inverters under this policy?",
+          "Are there any penalties or interest charges for payments made after the Net\u202f45 deadline?",
+          "How does the early\u2011payment discount apply to partial payments versus full invoice settlement?"
+        ],
+        "suggested_questions": [
+          "What are the warranty claim requirements for inverters under this policy?",
+          "Are there any penalties or interest charges for payments made after the Net\u202f45 deadline?",
+          "How does the early\u2011payment discount apply to partial payments versus full invoice settlement?"
+        ],
+        "created_at": "2026-10-21T18:35:34.240191"
+      }
+    },
+    {
+      "status": 200,
+      "seconds": 6.97,
+      "body": {
+        "conversation_id": 41,
+        "message_id": 111,
+        "user_message_id": 110,
+        "query": "What exact loyalty points conversion rate does Harbor Coffee Retail offer?",
+        "answer": "### Key Findings\nFound relevant information across **3** document chunk(s):\n\n- HARBOR COFFEE RETAIL \u2014 CUSTOMER AND REVENUE POLICY\nSynthetic demo document. Effective 1 September 2026. Currency: USD.\n\nReturns: Unopened coffee equipment may be returned within 30 calendar days of delivery. Opened coffe... [Source: coffee_retail_policy.txt]\n- Reporting definitions: The solar wholesale database contains customers, products, orders, and order_items. total_amount is the full merchandise value of an order. Delivered revenue is the sum of total_amount for delivere... [Source: solar_wholesale_policy.txt]\n- Cancellation: Subscribers can cancel before the next renewal date. Cancellation takes effect at the end of the current paid billing cycle. Refund requests are reviewed within 7 calendar days; this guide does not promise ... [Source: subscription_billing_policy.txt]\n\n**Suggested Follow-ups:**\n1. Can you provide a more detailed breakdown?\n2. Which specific section covers this topic?\n3. Are there related documents available?",
+        "query_type": "rag",
+        "sources": [
+          {
+            "document_name": "solar_wholesale_policy.txt",
+            "page_number": 1,
+            "content_type": "text",
+            "reference_id": null,
+            "snippet": "Reporting definitions: The solar wholesale database contains customers, products, orders, and order_items. total_amount is the full merchandise value of an order. Delivered revenue is the sum of total_amount for delivered orders only. Pending and cancelled orders are excluded from delivered revenue. Products are Solar ",
+            "score": 0.707,
+            "grounding_score": 0.707,
+            "is_grounded": true,
+            "retrieval_similarity": 0.047,
+            "claim_support_score": 0.707,
+            "document_id": 4,
+            "chunk_id": 2671,
+            "document_version": 1,
+            "grounding_status": "supported"
+          },
+          {
+            "document_name": "coffee_retail_policy.txt",
+            "page_number": 1,
+            "content_type": "text",
+            "reference_id": null,
+            "snippet": "HARBOR COFFEE RETAIL \u2014 CUSTOMER AND REVENUE POLICY\nSynthetic demo document. Effective 1 September 2026. Currency: USD.\n\nReturns: Unopened coffee equipment may be returned within 30 calendar days of delivery. Opened coffee beans are non-returnable unless defective. Refunds are issued to the original payment method withi",
+            "score": 0.698,
+            "grounding_score": 0.698,
+            "is_grounded": true,
+            "retrieval_similarity": 0.065,
+            "claim_support_score": 0.698,
+            "document_id": 3,
+            "chunk_id": 2667,
+            "document_version": 1,
+            "grounding_status": "supported"
+          },
+          {
+            "document_name": "subscription_billing_policy.txt",
+            "page_number": 1,
+            "content_type": "text",
+            "reference_id": null,
+            "snippet": "Cancellation: Subscribers can cancel before the next renewal date. Cancellation takes effect at the end of the current paid billing cycle. Refund requests are reviewed within 7 calendar days; this guide does not promise an automatic refund.\n\nData structure: The MongoDB database contains invoices, customers, and support",
+            "score": 0.677,
+            "grounding_score": 0.677,
+            "is_grounded": true,
+            "retrieval_similarity": 0.046,
+            "claim_support_score": 0.677,
+            "document_id": 5,
+            "chunk_id": 2674,
+            "document_version": 1,
+            "grounding_status": "supported"
+          }
+        ],
+        "sql_data": null,
+        "grounding": {
+          "status": "partially_supported",
+          "confidence": 0.397,
+          "has_low_confidence": true,
+          "disclaimer": "Notice: Some claims in this response have low grounding confidence against the indexed source documents. Please verify details with original sources.",
+          "unverified_reason": null,
+          "claim_coverage_ratio": 0.25,
+          "total_claims_count": 12,
+          "verified_claims_count": 3,
+          "skipped_claims_count": 4,
+          "verified_claims": [
+            {
+              "claim": "Key Findings\nFound relevant information across **3** document chunk(s):\n\n- HARBOR COFFEE RETAIL \u2014 CUSTOMER AND REVENUE POLICY\nSynthetic demo document.",
+              "is_grounded": false,
+              "score": 0.544,
+              "raw_similarity": 0.544,
+              "source": "coffee_retail_policy.txt",
+              "page_number": 1,
+              "reason": null
+            },
+            {
+              "claim": "Effective 1 September 2026.",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.189,
+              "source": "subscription_billing_policy.txt",
+              "page_number": 1,
+              "reason": "Numerical/date token mismatch: ['2026', 'september 2026', '1'] not found in source evidence"
+            },
+            {
+              "claim": "Returns: Unopened coffee equipment may be returned within 30 calendar days of delivery.",
+              "is_grounded": true,
+              "score": 0.698,
+              "raw_similarity": 0.698,
+              "source": "coffee_retail_policy.txt",
+              "page_number": 1,
+              "reason": null
+            },
+            {
+              "claim": "[Source: coffee_retail_policy.txt]\n- Reporting definitions: The solar wholesale database contains customers, products, orders, and order_items.",
+              "is_grounded": true,
+              "score": 0.707,
+              "raw_similarity": 0.707,
+              "source": "solar_wholesale_policy.txt",
+              "page_number": 1,
+              "reason": null
+            },
+            {
+              "claim": "total_amount is the full merchandise value of an order.",
+              "is_grounded": false,
+              "score": 0.532,
+              "raw_similarity": 0.532,
+              "source": "solar_wholesale_policy.txt",
+              "page_number": 1,
+              "reason": null
+            },
+            {
+              "claim": "Delivered revenue is the sum of total_amount for delivere...",
+              "is_grounded": false,
+              "score": 0.57,
+              "raw_similarity": 0.57,
+              "source": "solar_wholesale_policy.txt",
+              "page_number": 1,
+              "reason": null
+            },
+            {
+              "claim": "[Source: solar_wholesale_policy.txt]\n- Cancellation: Subscribers can cancel before the next renewal date.",
+              "is_grounded": false,
+              "score": 0.546,
+              "raw_similarity": 0.546,
+              "source": "subscription_billing_policy.txt",
+              "page_number": 1,
+              "reason": null
+            },
+            {
+              "claim": "Cancellation takes effect at the end of the current paid billing cycle.",
+              "is_grounded": true,
+              "score": 0.677,
+              "raw_similarity": 0.677,
+              "source": "subscription_billing_policy.txt",
+              "page_number": 1,
+              "reason": null
+            },
+            {
+              "claim": "Refund requests are reviewed within 7 calendar days; this guide does not promise ...",
+              "is_grounded": false,
+              "score": 0.495,
+              "raw_similarity": 0.495,
+              "source": "subscription_billing_policy.txt",
+              "page_number": 1,
+              "reason": null
+            },
+            {
+              "claim": "[Source: subscription_billing_policy.txt]\n\n**Suggested Follow-ups:**\n1.",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.356,
+              "source": "subscription_billing_policy.txt",
+              "page_number": 1,
+              "reason": "Numerical/date token mismatch: ['1'] not found in source evidence"
+            },
+            {
+              "claim": "Can you provide a more detailed breakdown?",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.219,
+              "source": "solar_wholesale_policy.txt",
+              "page_number": 1,
+              "reason": "Negation polarity mismatch (claim negation=False, source negation=True)"
+            },
+            {
+              "claim": "Which specific section covers this topic?",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.006,
+              "source": "solar_wholesale_policy.txt",
+              "page_number": 1,
+              "reason": "Negation polarity mismatch (claim negation=False, source negation=True)"
+            }
+          ]
+        },
+        "grounding_status": "partially_supported",
+        "unverified_reason": null,
+        "claim_coverage_ratio": 0.25,
+        "total_claims_count": 12,
+        "verified_claims_count": 3,
+        "skipped_claims_count": 4,
+        "sql_agent": null,
+        "suggestions": [
+          "Can you provide a more detailed breakdown?",
+          "Which specific section covers this topic?",
+          "Are there related documents available?"
+        ],
+        "suggested_questions": [
+          "Can you provide a more detailed breakdown?",
+          "Which specific section covers this topic?",
+          "Are there related documents available?"
+        ],
+        "created_at": "2026-10-21T18:35:46.182362"
+      }
+    }
+  ],
+  "insights": [
+    {
+      "dialect": "postgresql",
+      "window": "all",
+      "seconds": 3.55,
+      "metrics": [
+        {
+          "id": "total_revenue",
+          "label": "Gross Revenue (all statuses)",
+          "value": "$30,200.00",
+          "raw_value": 30200.0,
+          "table": "orders",
+          "format": "currency",
+          "format_type": "currency",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": null,
+          "trend_reason": "no_rows",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "net_revenue_delivered",
+          "label": "Net Revenue (delivered only)",
+          "value": "$23,695.00",
+          "raw_value": 23695.0,
+          "table": "orders",
+          "format": "currency",
+          "format_type": "currency",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "delivered transactions only",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "total_orders",
+          "label": "Total Order Volume",
+          "value": "240",
+          "raw_value": 240,
+          "table": "orders",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "185 delivered (55 other)",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "average_order_value",
+          "label": "Average Order Value (AOV)",
+          "value": "$125.83",
+          "raw_value": 125.83,
+          "table": "orders",
+          "format": "currency",
+          "format_type": "currency",
+          "recipe_type": "ratio",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "revenue / order",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "active_customers",
+          "label": "Active Customers",
+          "value": "24",
+          "raw_value": 24,
+          "table": "customers",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "unique buyer accounts",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "customer_lifetime_value",
+          "label": "Customer Lifetime Value (CLV)",
+          "value": "$1,258.33",
+          "raw_value": 1258.33,
+          "table": "customers",
+          "format": "currency",
+          "format_type": "currency",
+          "recipe_type": "ratio",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "spend per account",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "units_sold",
+          "label": "Total Units Sold",
+          "value": "600",
+          "raw_value": 600,
+          "table": "order_items",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "items sold",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "catalog_size",
+          "label": "Active Catalog Size",
+          "value": "6",
+          "raw_value": 6,
+          "table": "products",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "catalog entities",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "top_market",
+          "label": "Top Market",
+          "value": "East ($12,400.00)",
+          "raw_value": 12400.0,
+          "table": "orders",
+          "format": "text",
+          "format_type": "text",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": 41.1,
+          "trend_text": "of total sales",
+          "status": "available",
+          "reason": null
+        }
+      ],
+      "summary": {
+        "business_domain": "Unknown",
+        "executive_summary": "Insufficient data to generate a reliable business summary.",
+        "strategic_insights": [],
+        "tactical_recommendations": [],
+        "source": "deterministic_fallback",
+        "llm_error": "InvalidResponse"
+      }
+    },
+    {
+      "dialect": "postgresql",
+      "window": "october",
+      "seconds": 2.47,
+      "metrics": [
+        {
+          "id": "total_revenue",
+          "label": "Gross Revenue (all statuses)",
+          "value": "$11,255.00",
+          "raw_value": 11255.0,
+          "table": "orders",
+          "format": "currency",
+          "format_type": "currency",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": null,
+          "trend_reason": "no_rows",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "net_revenue_delivered",
+          "label": "Net Revenue (delivered only)",
+          "value": "$8,490.00",
+          "raw_value": 8490.0,
+          "table": "orders",
+          "format": "currency",
+          "format_type": "currency",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "delivered transactions only",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "total_orders",
+          "label": "Total Order Volume",
+          "value": "90",
+          "raw_value": 90,
+          "table": "orders",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "68 delivered (22 other)",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "average_order_value",
+          "label": "Average Order Value (AOV)",
+          "value": "$125.06",
+          "raw_value": 125.06,
+          "table": "orders",
+          "format": "currency",
+          "format_type": "currency",
+          "recipe_type": "ratio",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "revenue / order",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "active_customers",
+          "label": "Active Customers",
+          "value": null,
+          "raw_value": null,
+          "table": "customers",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": null,
+          "status": "unavailable",
+          "reason": "unsupported_with_filter"
+        },
+        {
+          "id": "customer_lifetime_value",
+          "label": "Customer Lifetime Value (CLV)",
+          "value": null,
+          "raw_value": null,
+          "table": "customers",
+          "format": "currency",
+          "format_type": "currency",
+          "recipe_type": "ratio",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": null,
+          "status": "unavailable",
+          "reason": "unsupported_with_filter"
+        },
+        {
+          "id": "units_sold",
+          "label": "Total Units Sold",
+          "value": null,
+          "raw_value": null,
+          "table": "order_items",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": null,
+          "status": "unavailable",
+          "reason": "unsupported_with_filter"
+        },
+        {
+          "id": "catalog_size",
+          "label": "Active Catalog Size",
+          "value": null,
+          "raw_value": null,
+          "table": "products",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": null,
+          "status": "unavailable",
+          "reason": "unsupported_with_filter"
+        },
+        {
+          "id": "top_market",
+          "label": "Top Market",
+          "value": "East ($4,480.00)",
+          "raw_value": 4480.0,
+          "table": "orders",
+          "format": "text",
+          "format_type": "text",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": 39.8,
+          "trend_text": "of total sales",
+          "status": "available",
+          "reason": null
+        }
+      ],
+      "summary": {
+        "business_domain": "Enterprise Database Operations",
+        "executive_summary": "Key metrics recorded are 8490.0, 90, and 4480.0. Chart aggregate counts are 68, 13, and 9.",
+        "strategic_insights": [],
+        "tactical_recommendations": [],
+        "source": "llm"
+      }
+    },
+    {
+      "dialect": "mysql",
+      "window": "all",
+      "seconds": 5.2,
+      "metrics": [
+        {
+          "id": "total_revenue",
+          "label": "Gross Revenue (all statuses)",
+          "value": "$116,550.00",
+          "raw_value": 116550.0,
+          "table": "orders",
+          "format": "currency",
+          "format_type": "currency",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": null,
+          "trend_reason": "no_rows",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "net_revenue_delivered",
+          "label": "Net Revenue (delivered only)",
+          "value": "$94,125.00",
+          "raw_value": 94125.0,
+          "table": "orders",
+          "format": "currency",
+          "format_type": "currency",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "delivered transactions only",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "total_orders",
+          "label": "Total Order Volume",
+          "value": "180",
+          "raw_value": 180,
+          "table": "orders",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "139 delivered (41 other)",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "average_order_value",
+          "label": "Average Order Value (AOV)",
+          "value": "$647.50",
+          "raw_value": 647.5,
+          "table": "orders",
+          "format": "currency",
+          "format_type": "currency",
+          "recipe_type": "ratio",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "revenue / order",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "active_customers",
+          "label": "Active Customers",
+          "value": "24",
+          "raw_value": 24,
+          "table": "customers",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "unique buyer accounts",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "customer_lifetime_value",
+          "label": "Customer Lifetime Value (CLV)",
+          "value": "$4,856.25",
+          "raw_value": 4856.25,
+          "table": "customers",
+          "format": "currency",
+          "format_type": "currency",
+          "recipe_type": "ratio",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "spend per account",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "units_sold",
+          "label": "Total Units Sold",
+          "value": "450",
+          "raw_value": 450,
+          "table": "order_items",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "items sold",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "catalog_size",
+          "label": "Active Catalog Size",
+          "value": "6",
+          "raw_value": 6,
+          "table": "products",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "catalog entities",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "top_market",
+          "label": "Top Market",
+          "value": "East ($55,500.00)",
+          "raw_value": 55500.0,
+          "table": "orders",
+          "format": "text",
+          "format_type": "text",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": 47.6,
+          "trend_text": "of total sales",
+          "status": "available",
+          "reason": null
+        }
+      ],
+      "summary": {
+        "business_domain": "Unknown",
+        "executive_summary": "Insufficient data to generate a reliable business summary.",
+        "strategic_insights": [],
+        "tactical_recommendations": [],
+        "source": "deterministic_fallback",
+        "llm_error": "Quota"
+      }
+    },
+    {
+      "dialect": "mysql",
+      "window": "october",
+      "seconds": 3.14,
+      "metrics": [
+        {
+          "id": "total_revenue",
+          "label": "Gross Revenue (all statuses)",
+          "value": "$39,240.00",
+          "raw_value": 39240.0,
+          "table": "orders",
+          "format": "currency",
+          "format_type": "currency",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": null,
+          "trend_reason": "no_rows",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "net_revenue_delivered",
+          "label": "Net Revenue (delivered only)",
+          "value": "$31,190.00",
+          "raw_value": 31190.0,
+          "table": "orders",
+          "format": "currency",
+          "format_type": "currency",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "delivered transactions only",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "total_orders",
+          "label": "Total Order Volume",
+          "value": "60",
+          "raw_value": 60,
+          "table": "orders",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "46 delivered (14 other)",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "average_order_value",
+          "label": "Average Order Value (AOV)",
+          "value": "$654.00",
+          "raw_value": 654.0,
+          "table": "orders",
+          "format": "currency",
+          "format_type": "currency",
+          "recipe_type": "ratio",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "revenue / order",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "active_customers",
+          "label": "Active Customers",
+          "value": null,
+          "raw_value": null,
+          "table": "customers",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": null,
+          "status": "unavailable",
+          "reason": "unsupported_with_filter"
+        },
+        {
+          "id": "customer_lifetime_value",
+          "label": "Customer Lifetime Value (CLV)",
+          "value": null,
+          "raw_value": null,
+          "table": "customers",
+          "format": "currency",
+          "format_type": "currency",
+          "recipe_type": "ratio",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": null,
+          "status": "unavailable",
+          "reason": "unsupported_with_filter"
+        },
+        {
+          "id": "units_sold",
+          "label": "Total Units Sold",
+          "value": null,
+          "raw_value": null,
+          "table": "order_items",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": null,
+          "status": "unavailable",
+          "reason": "unsupported_with_filter"
+        },
+        {
+          "id": "catalog_size",
+          "label": "Active Catalog Size",
+          "value": null,
+          "raw_value": null,
+          "table": "products",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": null,
+          "status": "unavailable",
+          "reason": "unsupported_with_filter"
+        },
+        {
+          "id": "top_market",
+          "label": "Top Market",
+          "value": "East ($17,800.00)",
+          "raw_value": 17800.0,
+          "table": "orders",
+          "format": "text",
+          "format_type": "text",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": 45.4,
+          "trend_text": "of total sales",
+          "status": "available",
+          "reason": null
+        }
+      ],
+      "summary": {
+        "business_domain": "Unknown",
+        "executive_summary": "Insufficient data to generate a reliable business summary.",
+        "strategic_insights": [],
+        "tactical_recommendations": [],
+        "source": "deterministic_fallback",
+        "llm_error": "InvalidResponse"
+      }
+    },
+    {
+      "dialect": "mongodb",
+      "window": "all",
+      "seconds": 3.98,
+      "metrics": [
+        {
+          "id": "invoices_total_rows",
+          "label": "Total Invoices Documents",
+          "value": "160",
+          "raw_value": 160,
+          "table": "invoices",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "160 verified documents",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "invoices_amount_sum",
+          "label": "Total Amount",
+          "value": "$16,300.00",
+          "raw_value": 16300.0,
+          "table": "invoices",
+          "format": "currency",
+          "format_type": "currency",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "cumulative sum",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "invoices_amount_avg",
+          "label": "Average Amount",
+          "value": "$101.88",
+          "raw_value": 101.875,
+          "table": "invoices",
+          "format": "currency",
+          "format_type": "currency",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "160 records evaluated",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "invoices_plan_distinct",
+          "label": "Distinct Plan",
+          "value": "3",
+          "raw_value": 3,
+          "table": "invoices",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "unique segments",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "invoices_status_distinct",
+          "label": "Distinct Status",
+          "value": "2",
+          "raw_value": 2,
+          "table": "invoices",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "unique segments",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "support_tickets_total_rows",
+          "label": "Total Support Tickets Documents",
+          "value": "80",
+          "raw_value": 80,
+          "table": "support_tickets",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "80 verified documents",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "support_tickets_resolution_hours_sum",
+          "label": "Total Resolution Hours",
+          "value": "512.0",
+          "raw_value": 512.0,
+          "table": "support_tickets",
+          "format": "number",
+          "format_type": "number",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "cumulative sum",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "support_tickets_resolution_hours_avg",
+          "label": "Average Resolution Hours",
+          "value": "6.4",
+          "raw_value": 6.4,
+          "table": "support_tickets",
+          "format": "number",
+          "format_type": "number",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "80 records evaluated",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "support_tickets_priority_distinct",
+          "label": "Distinct Priority",
+          "value": "2",
+          "raw_value": 2,
+          "table": "support_tickets",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "unique segments",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "support_tickets_status_distinct",
+          "label": "Distinct Status",
+          "value": "2",
+          "raw_value": 2,
+          "table": "support_tickets",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "unique segments",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "customers_total_rows",
+          "label": "Total Customers Documents",
+          "value": "32",
+          "raw_value": 32,
+          "table": "customers",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "32 verified documents",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "customers_company_name_distinct",
+          "label": "Distinct Company Name",
+          "value": "32",
+          "raw_value": 32,
+          "table": "customers",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "unique segments",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "customers_segment_distinct",
+          "label": "Distinct Segment",
+          "value": "2",
+          "raw_value": 2,
+          "table": "customers",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "unique segments",
+          "status": "available",
+          "reason": null
+        }
+      ],
+      "summary": {
+        "business_domain": "Unknown",
+        "executive_summary": "Computed monetary sum is $16,300.00 across 160 records.",
+        "strategic_insights": [
+          {
+            "title": "Computed monetary aggregate",
+            "finding": "Computed monetary sum is $16,300.00 across 160 records.",
+            "impact": "Medium",
+            "category": "Aggregate"
+          }
+        ],
+        "tactical_recommendations": [],
+        "source": "deterministic_fallback",
+        "llm_error": "InvalidResponse"
+      }
+    },
+    {
+      "dialect": "mongodb",
+      "window": "october",
+      "seconds": 5.41,
+      "metrics": [
+        {
+          "id": "invoices_total_rows",
+          "label": "Total Invoices Documents",
+          "value": "60",
+          "raw_value": 60,
+          "table": "invoices",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "60 documents in filtered horizon",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "invoices_amount_sum",
+          "label": "Total Amount",
+          "value": "$6,140.00",
+          "raw_value": 6140.0,
+          "table": "invoices",
+          "format": "currency",
+          "format_type": "currency",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "cumulative sum",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "invoices_amount_avg",
+          "label": "Average Amount",
+          "value": "$102.33",
+          "raw_value": 102.33333333333333,
+          "table": "invoices",
+          "format": "currency",
+          "format_type": "currency",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "60 records evaluated",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "invoices_plan_distinct",
+          "label": "Distinct Plan",
+          "value": "3",
+          "raw_value": 3,
+          "table": "invoices",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "unique segments",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "invoices_status_distinct",
+          "label": "Distinct Status",
+          "value": "2",
+          "raw_value": 2,
+          "table": "invoices",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "unique segments",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "support_tickets_total_rows",
+          "label": "Total Support Tickets Documents",
+          "value": "80",
+          "raw_value": 80,
+          "table": "support_tickets",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "80 documents in filtered horizon",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "support_tickets_resolution_hours_sum",
+          "label": "Total Resolution Hours",
+          "value": "512.0",
+          "raw_value": 512.0,
+          "table": "support_tickets",
+          "format": "number",
+          "format_type": "number",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "cumulative sum",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "support_tickets_resolution_hours_avg",
+          "label": "Average Resolution Hours",
+          "value": "6.4",
+          "raw_value": 6.4,
+          "table": "support_tickets",
+          "format": "number",
+          "format_type": "number",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "80 records evaluated",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "support_tickets_priority_distinct",
+          "label": "Distinct Priority",
+          "value": "2",
+          "raw_value": 2,
+          "table": "support_tickets",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "unique segments",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "support_tickets_status_distinct",
+          "label": "Distinct Status",
+          "value": "2",
+          "raw_value": 2,
+          "table": "support_tickets",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "unique segments",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "customers_total_rows",
+          "label": "Total Customers Documents",
+          "value": null,
+          "raw_value": null,
+          "table": "customers",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": null,
+          "status": "unavailable",
+          "reason": "missing_role"
+        }
+      ],
+      "summary": {
+        "business_domain": "Unknown",
+        "executive_summary": "Computed monetary sum is $6,140.00 across 60 records.",
+        "strategic_insights": [
+          {
+            "title": "Computed monetary aggregate",
+            "finding": "Computed monetary sum is $6,140.00 across 60 records.",
+            "impact": "Medium",
+            "category": "Aggregate"
+          }
+        ],
+        "tactical_recommendations": [],
+        "source": "deterministic_fallback",
+        "llm_error": "Quota"
+      }
+    }
+  ],
+  "streams": [
+    {
+      "name": "sql",
+      "first_event_seconds": 4.266,
+      "completion_seconds": 4.578,
+      "chunk_count": 113,
+      "done": {
+        "chunk": "",
+        "done": true,
+        "conversation_id": 42,
+        "sources": [],
+        "message_id": 115,
+        "sql_data": {
+          "query": "What is the total_amount sum for delivered orders only?",
+          "generated_sql": "SELECT SUM(total_amount) AS delivered_total\nFROM orders\nWHERE status = 'delivered'",
+          "explanation": "This query aggregates the `total_amount` column of the `orders` table, summing only rows whose `status` is `'delivered'`.",
+          "columns": [
+            "delivered_total"
+          ],
+          "rows": [
+            {
+              "delivered_total": "23695.00"
+            }
+          ],
+          "row_count": 1,
+          "execution_time_ms": 6.87,
+          "status": "success",
+          "error_detail": null
+        },
+        "sql_agent": {
+          "attempts": 1,
+          "corrections_made": false,
+          "database_id": 61
+        },
+        "suggestions": [
+          "How does the delivered\u2011order revenue compare to other order statuses (e.g., pending, cancelled)?",
+          "What is the average order value for delivered orders?",
+          "Can we break down the delivered\u2011order revenue by month or product category?"
+        ]
+      }
+    },
+    {
+      "name": "rag",
+      "first_event_seconds": 2.641,
+      "completion_seconds": 4.406,
+      "chunk_count": 93,
+      "done": {
+        "chunk": "",
+        "done": true,
+        "conversation_id": 43,
+        "sources": [
+          {
+            "document_name": "coffee_retail_policy.txt",
+            "page_number": 1,
+            "content_type": "text",
+            "reference_id": null,
+            "snippet": "Reporting definitions: Gross revenue is the sum of orders.total_amount across all order statuses. Delivered revenue includes only orders whose status is delivered. Pending and cancelled orders must not be called realized revenue. order_items.line_total is the extended line amount; do not multiply it by quantity again. ",
+            "score": 0.065,
+            "grounding_score": 0.0,
+            "is_grounded": false,
+            "retrieval_similarity": 0.065,
+            "claim_support_score": 0.0,
+            "document_id": 3,
+            "chunk_id": 2668,
+            "document_version": 1,
+            "grounding_status": "unsupported"
+          },
+          {
+            "document_name": "solar_wholesale_policy.txt",
+            "page_number": 1,
+            "content_type": "text",
+            "reference_id": null,
+            "snippet": "Reporting definitions: The solar wholesale database contains customers, products, orders, and order_items. total_amount is the full merchandise value of an order. Delivered revenue is the sum of total_amount for delivered orders only. Pending and cancelled orders are excluded from delivered revenue. Products are Solar ",
+            "score": 0.063,
+            "grounding_score": 0.0,
+            "is_grounded": false,
+            "retrieval_similarity": 0.063,
+            "claim_support_score": 0.0,
+            "document_id": 4,
+            "chunk_id": 2671,
+            "document_version": 1,
+            "grounding_status": "unsupported"
+          },
+          {
+            "document_name": "subscription_billing_policy.txt",
+            "page_number": 1,
+            "content_type": "text",
+            "reference_id": null,
+            "snippet": "ORBIT SUBSCRIPTIONS \u2014 BILLING AND SUPPORT GUIDE\nSynthetic demo document. Effective 1 September 2026. Currency: USD.\n\nPlans: Starter is $29 per billing cycle, Growth is $79 per billing cycle, and Enterprise is $199 per billing cycle. One invoice represents one billed subscription cycle. Do not assume that an invoice is ",
+            "score": 0.061,
+            "grounding_score": 0.0,
+            "is_grounded": false,
+            "retrieval_similarity": 0.061,
+            "claim_support_score": 0.0,
+            "document_id": 5,
+            "chunk_id": 2673,
+            "document_version": 1,
+            "grounding_status": "unsupported"
+          }
+        ],
+        "message_id": 117,
+        "grounding": {
+          "status": "unsupported",
+          "confidence": 0.043,
+          "has_low_confidence": true,
+          "disclaimer": "Notice: Some claims in this response have low grounding confidence against the indexed source documents. Please verify details with original sources.",
+          "unverified_reason": null,
+          "claim_coverage_ratio": 0.0,
+          "total_claims_count": 5,
+          "verified_claims_count": 0,
+          "skipped_claims_count": 2,
+          "verified_claims": [
+            {
+              "claim": "Harbor Coffee Retail equipment return window**\n\n- Unopened coffee equipment can be returned **within\u202f30\u202fcalendar days of delivery**.",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.299,
+              "source": "coffee_retail_policy.txt",
+              "page_number": 1,
+              "reason": "Numerical/date token mismatch: ['30'] not found in source evidence"
+            },
+            {
+              "claim": "Citation: [Source: coffee_retail_policy.txt]*\n\n**Suggested Follow-ups:**\n1.",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.24,
+              "source": "coffee_retail_policy.txt",
+              "page_number": 1,
+              "reason": "Numerical/date token mismatch: ['1'] not found in source evidence"
+            },
+            {
+              "claim": "What is the process for obtaining a return authorization code for equipment returns?",
+              "is_grounded": false,
+              "score": 0.216,
+              "raw_similarity": 0.216,
+              "source": "subscription_billing_policy.txt",
+              "page_number": 1,
+              "reason": null
+            },
+            {
+              "claim": "Are there any fees or restocking charges associated with equipment returns?",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.324,
+              "source": "subscription_billing_policy.txt",
+              "page_number": 1,
+              "reason": "Negation polarity mismatch (claim negation=False, source negation=True)"
+            },
+            {
+              "claim": "How are refunds processed after the equipment return is inspected?",
+              "is_grounded": false,
+              "score": 0.0,
+              "raw_similarity": 0.25,
+              "source": "solar_wholesale_policy.txt",
+              "page_number": 1,
+              "reason": "Negation polarity mismatch (claim negation=False, source negation=True)"
+            }
+          ]
+        },
+        "suggestions": [
+          "What is the process for obtaining a return authorization code for equipment returns?",
+          "Are there any fees or restocking charges associated with equipment returns?",
+          "How are refunds processed after the equipment return is inspected?"
+        ]
+      }
+    }
+  ],
+  "widget": {
+    "handshake_status": 200,
+    "unapproved_origin_status": 403,
+    "published_documents": {
+      "widget_key_id": 3,
+      "published_document_ids": [
+        3,
+        4,
+        5
+      ]
+    },
+    "key_id": 3,
+    "coffee": {
+      "status": 200,
+      "seconds": 2.94,
+      "body": {
+        "conversation_id": 44,
+        "message_id": 119,
+        "query": "What is the Harbor Coffee Retail equipment return window and the minimum for free shipping?",
+        "answer": "I\u2019m sorry, but the documents you provided don\u2019t include any information about the Harbor Coffee Retail equipment return window or the minimum purchase amount required for free shipping. If you have another source that contains those details, I\u2019d be happy to help interpret it.",
+        "query_type": "rag",
+        "sources": [
+          {
+            "document_name": "coffee_retail_policy.txt",
+            "page_number": 1,
+            "content_type": "text",
+            "reference_id": null,
+            "snippet": "Reporting definitions: Gross revenue is the sum of orders.total_amount across all order statuses. Delivered revenue includes only orders whose status is delivered. Pending and cancelled orders must not be called realized revenue. order_items.line_total is the extended line amount; do not multiply it by quantity again. ",
+            "score": 0.065,
+            "grounding_score": 0.0,
+            "is_grounded": false,
+            "retrieval_similarity": 0.065,
+            "claim_support_score": 0.0,
+            "document_id": 3,
+            "chunk_id": 2668,
+            "document_version": 1,
+            "grounding_status": "unsupported"
+          },
+          {
+            "document_name": "subscription_billing_policy.txt",
+            "page_number": 1,
+            "content_type": "text",
+            "reference_id": null,
+            "snippet": "ORBIT SUBSCRIPTIONS \u2014 BILLING AND SUPPORT GUIDE\nSynthetic demo document. Effective 1 September 2026. Currency: USD.\n\nPlans: Starter is $29 per billing cycle, Growth is $79 per billing cycle, and Enterprise is $199 per billing cycle. One invoice represents one billed subscription cycle. Do not assume that an invoice is ",
+            "score": 0.061,
+            "grounding_score": 0.0,
+            "is_grounded": false,
+            "retrieval_similarity": 0.061,
+            "claim_support_score": 0.0,
+            "document_id": 5,
+            "chunk_id": 2673,
+            "document_version": 1,
+            "grounding_status": "unsupported"
+          },
+          {
+            "document_name": "solar_wholesale_policy.txt",
+            "page_number": 1,
+            "content_type": "text",
+            "reference_id": null,
+            "snippet": "Reporting definitions: The solar wholesale database contains customers, products, orders, and order_items. total_amount is the full merchandise value of an order. Delivered revenue is the sum of total_amount for delivered orders only. Pending and cancelled orders are excluded from delivered revenue. Products are Solar ",
+            "score": 0.063,
+            "grounding_score": 0.0,
+            "is_grounded": false,
+            "retrieval_similarity": 0.063,
+            "claim_support_score": 0.0,
+            "document_id": 4,
+            "chunk_id": 2671,
+            "document_version": 1,
+            "grounding_status": "unsupported"
+          }
+        ],
+        "grounding": {
+          "status": "unsupported",
+          "confidence": 0.294,
+          "has_low_confidence": true,
+          "disclaimer": "Notice: Some claims in this response have low grounding confidence against the indexed source documents. Please verify details with original sources.",
+          "unverified_reason": null,
+          "claim_coverage_ratio": 0.0,
+          "total_claims_count": 2,
+          "verified_claims_count": 0,
+          "skipped_claims_count": 0,
+          "verified_claims": [
+            {
+              "claim": "I\u2019m sorry, but the documents you provided don\u2019t include any information about the Harbor Coffee Retail equipment return window or the minimum purchase amount required for free shipping.",
+              "is_grounded": false,
+              "score": 0.414,
+              "raw_similarity": 0.414,
+              "source": "coffee_retail_policy.txt",
+              "page_number": 1,
+              "reason": null
+            },
+            {
+              "claim": "If you have another source that contains those details, I\u2019d be happy to help interpret it.",
+              "is_grounded": false,
+              "score": 0.174,
+              "raw_similarity": 0.174,
+              "source": "coffee_retail_policy.txt",
+              "page_number": 1,
+              "reason": null
+            }
+          ]
+        },
+        "grounding_status": "unsupported",
+        "suggestions": [
+          "Can you tell me more about this?",
+          "Where can I find more details?",
+          "How can I contact support?"
+        ],
+        "created_at": "2026-10-21T18:41:52.936740"
+      }
+    },
+    "orbit": {
+      "status": 200,
+      "seconds": 2.44,
+      "body": {
+        "conversation_id": 44,
+        "message_id": 121,
+        "query": "What is the Orbit Subscriptions high-priority response target?",
+        "answer": "I\u2019m sorry, but the provided documents do not contain any information about an \u201cOrbit Subscriptions\u201d high\u2011priority response target. Therefore I can\u2019t answer that question based on the available evidence. If you can share a source that includes those details, I\u2019d be happy to help interpret it.",
+        "query_type": "rag",
+        "sources": [
+          {
+            "document_name": "subscription_billing_policy.txt",
+            "page_number": 1,
+            "content_type": "text",
+            "reference_id": null,
+            "snippet": "Cancellation: Subscribers can cancel before the next renewal date. Cancellation takes effect at the end of the current paid billing cycle. Refund requests are reviewed within 7 calendar days; this guide does not promise an automatic refund.\n\nData structure: The MongoDB database contains invoices, customers, and support",
+            "score": 0.064,
+            "grounding_score": 0.0,
+            "is_grounded": false,
+            "retrieval_similarity": 0.064,
+            "claim_support_score": 0.0,
+            "document_id": 5,
+            "chunk_id": 2674,
+            "document_version": 1,
+            "grounding_status": "unsupported"
+          },
+          {
+            "document_name": "solar_wholesale_policy.txt",
+            "page_number": 1,
+            "content_type": "text",
+            "reference_id": null,
+            "snippet": "Reporting definitions: The solar wholesale database contains customers, products, orders, and order_items. total_amount is the full merchandise value of an order. Delivered revenue is the sum of total_amount for delivered orders only. Pending and cancelled orders are excluded from delivered revenue. Products are Solar ",
+            "score": 0.062,
+            "grounding_score": 0.0,
+            "is_grounded": false,
+            "retrieval_similarity": 0.062,
+            "claim_support_score": 0.0,
+            "document_id": 4,
+            "chunk_id": 2671,
+            "document_version": 1,
+            "grounding_status": "unsupported"
+          },
+          {
+            "document_name": "coffee_retail_policy.txt",
+            "page_number": 1,
+            "content_type": "text",
+            "reference_id": null,
+            "snippet": "Reporting definitions: Gross revenue is the sum of orders.total_amount across all order statuses. Delivered revenue includes only orders whose status is delivered. Pending and cancelled orders must not be called realized revenue. order_items.line_total is the extended line amount; do not multiply it by quantity again. ",
+            "score": 0.063,
+            "grounding_score": 0.0,
+            "is_grounded": false,
+            "retrieval_similarity": 0.063,
+            "claim_support_score": 0.0,
+            "document_id": 3,
+            "chunk_id": 2668,
+            "document_version": 1,
+            "grounding_status": "unsupported"
+          }
+        ],
+        "grounding": {
+          "status": "unsupported",
+          "confidence": 0.176,
+          "has_low_confidence": true,
+          "disclaimer": "Notice: Some claims in this response have low grounding confidence against the indexed source documents. Please verify details with original sources.",
+          "unverified_reason": null,
+          "claim_coverage_ratio": 0.0,
+          "total_claims_count": 3,
+          "verified_claims_count": 0,
+          "skipped_claims_count": 0,
+          "verified_claims": [
+            {
+              "claim": "I\u2019m sorry, but the provided documents do not contain any information about an \u201cOrbit Subscriptions\u201d high\u2011priority response target.",
+              "is_grounded": false,
+              "score": 0.267,
+              "raw_similarity": 0.267,
+              "source": "subscription_billing_policy.txt",
+              "page_number": 1,
+              "reason": null
+            },
+            {
+              "claim": "Therefore I can\u2019t answer that question based on the available evidence.",
+              "is_grounded": false,
+              "score": 0.075,
+              "raw_similarity": 0.075,
+              "source": "subscription_billing_policy.txt",
+              "page_number": 1,
+              "reason": null
+            },
+            {
+              "claim": "If you can share a source that includes those details, I\u2019d be happy to help interpret it.",
+              "is_grounded": false,
+              "score": 0.185,
+              "raw_similarity": 0.185,
+              "source": "coffee_retail_policy.txt",
+              "page_number": 1,
+              "reason": null
+            }
+          ]
+        },
+        "grounding_status": "unsupported",
+        "suggestions": [
+          "Can you tell me more about this?",
+          "Where can I find more details?",
+          "How can I contact support?"
+        ],
+        "created_at": "2026-10-21T18:41:55.388899"
+      }
+    }
+  },
+  "filter_probe": {
+    "insights_version": 4,
+    "connection_cache_version": 6,
+    "success": true,
+    "status": "success",
+    "connection_id": 61,
+    "db_name": "Demo | Coffee Retail | PostgreSQL",
+    "name": "Demo | Coffee Retail | PostgreSQL",
+    "db_type": "postgresql",
+    "available_tables": [
+      "customers",
+      "orders",
+      "order_items",
+      "products"
+    ],
+    "selected_table": "All Tables",
+    "key_metrics": [
+      {
+        "id": "total_revenue",
+        "label": "Gross Revenue (all statuses)",
+        "value": "$12,400.00",
+        "raw_value": 12400.0,
+        "table": "orders",
+        "format": "currency",
+        "format_type": "currency",
+        "recipe_type": "atomic",
+        "trend_direction": "neutral",
+        "trend_pct": null,
+        "trend_text": null,
+        "trend_reason": "no_rows",
+        "status": "available",
+        "reason": null
+      },
+      {
+        "id": "net_revenue_delivered",
+        "label": "Net Revenue (delivered only)",
+        "value": "$10,540.00",
+        "raw_value": 10540.0,
+        "table": "orders",
+        "format": "currency",
+        "format_type": "currency",
+        "recipe_type": "atomic",
+        "trend_direction": "neutral",
+        "trend_pct": null,
+        "trend_text": "delivered transactions only",
+        "status": "available",
+        "reason": null
+      },
+      {
+        "id": "total_orders",
+        "label": "Total Order Volume",
+        "value": "60",
+        "raw_value": 60,
+        "table": "orders",
+        "format": "integer",
+        "format_type": "integer",
+        "recipe_type": "atomic",
+        "trend_direction": "neutral",
+        "trend_pct": null,
+        "trend_text": "51 delivered (9 other)",
+        "status": "available",
+        "reason": null
+      },
+      {
+        "id": "average_order_value",
+        "label": "Average Order Value (AOV)",
+        "value": "$206.67",
+        "raw_value": 206.67,
+        "table": "orders",
+        "format": "currency",
+        "format_type": "currency",
+        "recipe_type": "ratio",
+        "trend_direction": "neutral",
+        "trend_pct": null,
+        "trend_text": "revenue / order",
+        "status": "available",
+        "reason": null
+      },
+      {
+        "id": "active_customers",
+        "label": "Active Customers",
+        "value": "24",
+        "raw_value": 24,
+        "table": "customers",
+        "format": "integer",
+        "format_type": "integer",
+        "recipe_type": "atomic",
+        "trend_direction": "neutral",
+        "trend_pct": null,
+        "trend_text": "unique buyer accounts",
+        "status": "available",
+        "reason": null
+      },
+      {
+        "id": "customer_lifetime_value",
+        "label": "Customer Lifetime Value (CLV)",
+        "value": "$516.67",
+        "raw_value": 516.67,
+        "table": "customers",
+        "format": "currency",
+        "format_type": "currency",
+        "recipe_type": "ratio",
+        "trend_direction": "neutral",
+        "trend_pct": null,
+        "trend_text": "spend per account",
+        "status": "available",
+        "reason": null
+      },
+      {
+        "id": "units_sold",
+        "label": "Total Units Sold",
+        "value": "600",
+        "raw_value": 600,
+        "table": "order_items",
+        "format": "integer",
+        "format_type": "integer",
+        "recipe_type": "atomic",
+        "trend_direction": "neutral",
+        "trend_pct": null,
+        "trend_text": "items sold",
+        "status": "available",
+        "reason": null
+      },
+      {
+        "id": "catalog_size",
+        "label": "Active Catalog Size",
+        "value": "6",
+        "raw_value": 6,
+        "table": "products",
+        "format": "integer",
+        "format_type": "integer",
+        "recipe_type": "atomic",
+        "trend_direction": "neutral",
+        "trend_pct": null,
+        "trend_text": "catalog entities",
+        "status": "available",
+        "reason": null
+      },
+      {
+        "id": "top_market",
+        "label": "Top Market",
+        "value": "East ($12,400.00)",
+        "raw_value": 12400.0,
+        "table": "orders",
+        "format": "text",
+        "format_type": "text",
+        "recipe_type": "atomic",
+        "trend_direction": "neutral",
+        "trend_pct": 100.0,
+        "trend_text": "of total sales",
+        "status": "available",
+        "reason": null
+      }
+    ],
+    "charts": [
+      {
+        "id": "monthly_revenue_velocity",
+        "title": "Monthly Revenue Velocity",
+        "subtitle": "Deterministic monthly sales trajectory over time",
+        "type": "area",
+        "table": "orders",
+        "x_column": "Month",
+        "y_column": "Revenue ($)",
+        "xKey": "period",
+        "yKey": "value",
+        "data": [
+          {
+            "period": "2026-09",
+            "value": 7920.0
+          },
+          {
+            "period": "2026-10",
+            "value": 4480.0
+          }
+        ],
+        "color": "#6c47ff",
+        "status": "available",
+        "reason": null
+      },
+      {
+        "id": "revenue_by_market",
+        "title": "Revenue by Region",
+        "subtitle": "Top revenue-generating segments across buyer base",
+        "type": "bar",
+        "table": "orders",
+        "x_column": "Region",
+        "y_column": "Total Revenue ($)",
+        "xKey": "name",
+        "yKey": "val",
+        "data": [
+          {
+            "name": "East",
+            "val": 12400.0
+          }
+        ],
+        "color": "#00c2cb",
+        "status": "available",
+        "reason": null
+      },
+      {
+        "id": "order_status_distribution",
+        "title": "Order Lifecycle & Status Distribution",
+        "subtitle": "Breakdown across completed, delivered, and cancelled records",
+        "type": "donut",
+        "table": "orders",
+        "x_column": "Status",
+        "y_column": "Volume",
+        "xKey": "name",
+        "yKey": "value",
+        "data": [
+          {
+            "name": "Delivered",
+            "value": 51,
+            "revenue": 10540.0
+          },
+          {
+            "name": "Pending",
+            "value": 9,
+            "revenue": 1860.0
+          }
+        ],
+        "color": "#10b981",
+        "status": "available",
+        "reason": null
+      },
+      {
+        "id": "top_customers_spend",
+        "title": "Top High-Value Buyers by Spend",
+        "subtitle": "Leading customer accounts by cumulative lifetime spend",
+        "type": "bar",
+        "table": "orders",
+        "x_column": "Customer",
+        "y_column": "Cumulative Spend ($)",
+        "xKey": "name",
+        "yKey": "value",
+        "data": [
+          {
+            "name": "19",
+            "value": 4800.0
+          },
+          {
+            "name": "7",
+            "value": 4800.0
+          },
+          {
+            "name": "3",
+            "value": 800.0
+          },
+          {
+            "name": "15",
+            "value": 800.0
+          },
+          {
+            "name": "11",
+            "value": 600.0
+          },
+          {
+            "name": "23",
+            "value": 600.0
+          }
+        ],
+        "color": "#f59e0b",
+        "status": "available",
+        "reason": null
+      },
+      {
+        "id": "catalog_category_distribution",
+        "title": "Catalog Distribution by Category",
+        "subtitle": "Product diversity across inventory taxonomy",
+        "type": "bar",
+        "table": "products",
+        "x_column": "Category",
+        "y_column": "Products",
+        "xKey": "name",
+        "yKey": "value",
+        "data": [
+          {
+            "name": "Accessories",
+            "value": 3
+          },
+          {
+            "name": "Equipment",
+            "value": 3
+          }
+        ],
+        "color": "#ec4899",
+        "status": "available",
+        "reason": null
+      }
+    ],
+    "auto_charts": [
+      {
+        "id": "monthly_revenue_velocity",
+        "title": "Monthly Revenue Velocity",
+        "subtitle": "Deterministic monthly sales trajectory over time",
+        "type": "area",
+        "table": "orders",
+        "x_column": "Month",
+        "y_column": "Revenue ($)",
+        "xKey": "period",
+        "yKey": "value",
+        "data": [
+          {
+            "period": "2026-09",
+            "value": 7920.0
+          },
+          {
+            "period": "2026-10",
+            "value": 4480.0
+          }
+        ],
+        "color": "#6c47ff",
+        "status": "available",
+        "reason": null
+      },
+      {
+        "id": "revenue_by_market",
+        "title": "Revenue by Region",
+        "subtitle": "Top revenue-generating segments across buyer base",
+        "type": "bar",
+        "table": "orders",
+        "x_column": "Region",
+        "y_column": "Total Revenue ($)",
+        "xKey": "name",
+        "yKey": "val",
+        "data": [
+          {
+            "name": "East",
+            "val": 12400.0
+          }
+        ],
+        "color": "#00c2cb",
+        "status": "available",
+        "reason": null
+      },
+      {
+        "id": "order_status_distribution",
+        "title": "Order Lifecycle & Status Distribution",
+        "subtitle": "Breakdown across completed, delivered, and cancelled records",
+        "type": "donut",
+        "table": "orders",
+        "x_column": "Status",
+        "y_column": "Volume",
+        "xKey": "name",
+        "yKey": "value",
+        "data": [
+          {
+            "name": "Delivered",
+            "value": 51,
+            "revenue": 10540.0
+          },
+          {
+            "name": "Pending",
+            "value": 9,
+            "revenue": 1860.0
+          }
+        ],
+        "color": "#10b981",
+        "status": "available",
+        "reason": null
+      },
+      {
+        "id": "top_customers_spend",
+        "title": "Top High-Value Buyers by Spend",
+        "subtitle": "Leading customer accounts by cumulative lifetime spend",
+        "type": "bar",
+        "table": "orders",
+        "x_column": "Customer",
+        "y_column": "Cumulative Spend ($)",
+        "xKey": "name",
+        "yKey": "value",
+        "data": [
+          {
+            "name": "19",
+            "value": 4800.0
+          },
+          {
+            "name": "7",
+            "value": 4800.0
+          },
+          {
+            "name": "3",
+            "value": 800.0
+          },
+          {
+            "name": "15",
+            "value": 800.0
+          },
+          {
+            "name": "11",
+            "value": 600.0
+          },
+          {
+            "name": "23",
+            "value": 600.0
+          }
+        ],
+        "color": "#f59e0b",
+        "status": "available",
+        "reason": null
+      },
+      {
+        "id": "catalog_category_distribution",
+        "title": "Catalog Distribution by Category",
+        "subtitle": "Product diversity across inventory taxonomy",
+        "type": "bar",
+        "table": "products",
+        "x_column": "Category",
+        "y_column": "Products",
+        "xKey": "name",
+        "yKey": "value",
+        "data": [
+          {
+            "name": "Accessories",
+            "value": 3
+          },
+          {
+            "name": "Equipment",
+            "value": 3
+          }
+        ],
+        "color": "#ec4899",
+        "status": "available",
+        "reason": null
+      }
+    ],
+    "filters": [
+      {
+        "column": "orders.region",
+        "label": "Region",
+        "filter_type": "multiselect",
+        "options": [
+          "East"
+        ]
+      },
+      {
+        "column": "orders.order_date",
+        "label": "Date Range",
+        "filter_type": "date_range",
+        "options": []
+      }
+    ],
+    "executive_summary": {
+      "business_domain": "Database Operations",
+      "executive_summary": "The dataset contains seven primary metrics (10540.0, 60, 24, 516.67, 600, 6, 12400.0) and two chart aggregate groups: the first with values 51 and 9, the second with values 3 and 3.",
+      "strategic_insights": [],
+      "tactical_recommendations": [],
+      "source": "llm"
+    },
+    "business_summary": {
+      "business_domain": "Database Operations",
+      "executive_summary": "The dataset contains seven primary metrics (10540.0, 60, 24, 516.67, 600, 6, 12400.0) and two chart aggregate groups: the first with values 51 and 9, the second with values 3 and 3.",
+      "key_metrics": [
+        {
+          "id": "total_revenue",
+          "label": "Gross Revenue (all statuses)",
+          "value": "$12,400.00",
+          "raw_value": 12400.0,
+          "table": "orders",
+          "format": "currency",
+          "format_type": "currency",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": null,
+          "trend_reason": "no_rows",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "net_revenue_delivered",
+          "label": "Net Revenue (delivered only)",
+          "value": "$10,540.00",
+          "raw_value": 10540.0,
+          "table": "orders",
+          "format": "currency",
+          "format_type": "currency",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "delivered transactions only",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "total_orders",
+          "label": "Total Order Volume",
+          "value": "60",
+          "raw_value": 60,
+          "table": "orders",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "51 delivered (9 other)",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "average_order_value",
+          "label": "Average Order Value (AOV)",
+          "value": "$206.67",
+          "raw_value": 206.67,
+          "table": "orders",
+          "format": "currency",
+          "format_type": "currency",
+          "recipe_type": "ratio",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "revenue / order",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "active_customers",
+          "label": "Active Customers",
+          "value": "24",
+          "raw_value": 24,
+          "table": "customers",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "unique buyer accounts",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "customer_lifetime_value",
+          "label": "Customer Lifetime Value (CLV)",
+          "value": "$516.67",
+          "raw_value": 516.67,
+          "table": "customers",
+          "format": "currency",
+          "format_type": "currency",
+          "recipe_type": "ratio",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "spend per account",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "units_sold",
+          "label": "Total Units Sold",
+          "value": "600",
+          "raw_value": 600,
+          "table": "order_items",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "items sold",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "catalog_size",
+          "label": "Active Catalog Size",
+          "value": "6",
+          "raw_value": 6,
+          "table": "products",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "catalog entities",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "top_market",
+          "label": "Top Market",
+          "value": "East ($12,400.00)",
+          "raw_value": 12400.0,
+          "table": "orders",
+          "format": "text",
+          "format_type": "text",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": 100.0,
+          "trend_text": "of total sales",
+          "status": "available",
+          "reason": null
+        }
+      ]
+    },
+    "insights": [],
+    "anomalies": [],
+    "data_quality": {
+      "warnings": []
+    },
+    "applied_date_from": null,
+    "applied_date_to": null,
+    "layout_plan": {
+      "table_name": "All Tables",
+      "kpi_cards": [
+        {
+          "id": "total_revenue",
+          "label": "Gross Revenue (all statuses)",
+          "value": "$12,400.00",
+          "raw_value": 12400.0,
+          "table": "orders",
+          "format": "currency",
+          "format_type": "currency",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": null,
+          "trend_reason": "no_rows",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "net_revenue_delivered",
+          "label": "Net Revenue (delivered only)",
+          "value": "$10,540.00",
+          "raw_value": 10540.0,
+          "table": "orders",
+          "format": "currency",
+          "format_type": "currency",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "delivered transactions only",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "total_orders",
+          "label": "Total Order Volume",
+          "value": "60",
+          "raw_value": 60,
+          "table": "orders",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "51 delivered (9 other)",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "average_order_value",
+          "label": "Average Order Value (AOV)",
+          "value": "$206.67",
+          "raw_value": 206.67,
+          "table": "orders",
+          "format": "currency",
+          "format_type": "currency",
+          "recipe_type": "ratio",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "revenue / order",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "active_customers",
+          "label": "Active Customers",
+          "value": "24",
+          "raw_value": 24,
+          "table": "customers",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "unique buyer accounts",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "customer_lifetime_value",
+          "label": "Customer Lifetime Value (CLV)",
+          "value": "$516.67",
+          "raw_value": 516.67,
+          "table": "customers",
+          "format": "currency",
+          "format_type": "currency",
+          "recipe_type": "ratio",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "spend per account",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "units_sold",
+          "label": "Total Units Sold",
+          "value": "600",
+          "raw_value": 600,
+          "table": "order_items",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "items sold",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "catalog_size",
+          "label": "Active Catalog Size",
+          "value": "6",
+          "raw_value": 6,
+          "table": "products",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "catalog entities",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "top_market",
+          "label": "Top Market",
+          "value": "East ($12,400.00)",
+          "raw_value": 12400.0,
+          "table": "orders",
+          "format": "text",
+          "format_type": "text",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": 100.0,
+          "trend_text": "of total sales",
+          "status": "available",
+          "reason": null
+        }
+      ],
+      "charts": [
+        {
+          "id": "monthly_revenue_velocity",
+          "title": "Monthly Revenue Velocity",
+          "subtitle": "Deterministic monthly sales trajectory over time",
+          "type": "area",
+          "table": "orders",
+          "x_column": "Month",
+          "y_column": "Revenue ($)",
+          "xKey": "period",
+          "yKey": "value",
+          "data": [
+            {
+              "period": "2026-09",
+              "value": 7920.0
+            },
+            {
+              "period": "2026-10",
+              "value": 4480.0
+            }
+          ],
+          "color": "#6c47ff",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "revenue_by_market",
+          "title": "Revenue by Region",
+          "subtitle": "Top revenue-generating segments across buyer base",
+          "type": "bar",
+          "table": "orders",
+          "x_column": "Region",
+          "y_column": "Total Revenue ($)",
+          "xKey": "name",
+          "yKey": "val",
+          "data": [
+            {
+              "name": "East",
+              "val": 12400.0
+            }
+          ],
+          "color": "#00c2cb",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "order_status_distribution",
+          "title": "Order Lifecycle & Status Distribution",
+          "subtitle": "Breakdown across completed, delivered, and cancelled records",
+          "type": "donut",
+          "table": "orders",
+          "x_column": "Status",
+          "y_column": "Volume",
+          "xKey": "name",
+          "yKey": "value",
+          "data": [
+            {
+              "name": "Delivered",
+              "value": 51,
+              "revenue": 10540.0
+            },
+            {
+              "name": "Pending",
+              "value": 9,
+              "revenue": 1860.0
+            }
+          ],
+          "color": "#10b981",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "top_customers_spend",
+          "title": "Top High-Value Buyers by Spend",
+          "subtitle": "Leading customer accounts by cumulative lifetime spend",
+          "type": "bar",
+          "table": "orders",
+          "x_column": "Customer",
+          "y_column": "Cumulative Spend ($)",
+          "xKey": "name",
+          "yKey": "value",
+          "data": [
+            {
+              "name": "19",
+              "value": 4800.0
+            },
+            {
+              "name": "7",
+              "value": 4800.0
+            },
+            {
+              "name": "3",
+              "value": 800.0
+            },
+            {
+              "name": "15",
+              "value": 800.0
+            },
+            {
+              "name": "11",
+              "value": 600.0
+            },
+            {
+              "name": "23",
+              "value": 600.0
+            }
+          ],
+          "color": "#f59e0b",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "catalog_category_distribution",
+          "title": "Catalog Distribution by Category",
+          "subtitle": "Product diversity across inventory taxonomy",
+          "type": "bar",
+          "table": "products",
+          "x_column": "Category",
+          "y_column": "Products",
+          "xKey": "name",
+          "yKey": "value",
+          "data": [
+            {
+              "name": "Accessories",
+              "value": 3
+            },
+            {
+              "name": "Equipment",
+              "value": 3
+            }
+          ],
+          "color": "#ec4899",
+          "status": "available",
+          "reason": null
+        }
+      ],
+      "filters": [
+        {
+          "column": "orders.region",
+          "label": "Region",
+          "filter_type": "multiselect",
+          "options": [
+            "East"
+          ]
+        },
+        {
+          "column": "orders.order_date",
+          "label": "Date Range",
+          "filter_type": "date_range",
+          "options": []
+        }
+      ],
+      "strategic_insights": [],
+      "anomalies": [],
+      "executive_summary": {
+        "business_domain": "Database Operations",
+        "executive_summary": "The dataset contains seven primary metrics (10540.0, 60, 24, 516.67, 600, 6, 12400.0) and two chart aggregate groups: the first with values 51 and 9, the second with values 3 and 3.",
+        "strategic_insights": [],
+        "tactical_recommendations": [],
+        "source": "llm"
+      },
+      "metadata": {
+        "composed": true,
+        "engine_version": "2.0-deterministic"
+      }
+    },
+    "pipeline_layers": [
+      {
+        "layer": 1,
+        "name": "Schema Discovery & Multi-Table Statistical Profiling",
+        "status": "completed"
+      },
+      {
+        "layer": 2,
+        "name": "Metric Recipes Formulation (Phase 2C Deterministic)",
+        "status": "completed"
+      },
+      {
+        "layer": 3,
+        "name": "Chart & Filter Planning (Phase 2D/2E)",
+        "status": "completed"
+      },
+      {
+        "layer": 4,
+        "name": "High-Speed Aggregation & Data Computation",
+        "status": "completed"
+      },
+      {
+        "layer": 5,
+        "name": "Dual-Engine AI Executive Playbook",
+        "status": "completed"
+      },
+      {
+        "layer": 6,
+        "name": "Statistical Anomaly & Outlier Engine",
+        "status": "completed"
+      }
+    ],
+    "cached": false,
+    "cached_at": "2026-10-21T18:37:26.651704+00:00"
+  },
+  "invalid_table_probe": {
+    "status": 200,
+    "seconds": 3.84,
+    "body": {
+      "insights_version": 4,
+      "connection_cache_version": 5,
+      "success": true,
+      "status": "success",
+      "connection_id": 61,
+      "db_name": "Demo | Coffee Retail | PostgreSQL",
+      "name": "Demo | Coffee Retail | PostgreSQL",
+      "db_type": "postgresql",
+      "available_tables": [
+        "customers",
+        "orders",
+        "order_items",
+        "products"
+      ],
+      "selected_table": "missing_table",
+      "key_metrics": [
+        {
+          "id": "customers_total_rows",
+          "label": "Total customers Records",
+          "value": "24",
+          "raw_value": 24,
+          "table": "customers",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "24 verified rows",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "customers_customer_name_distinct",
+          "label": "Distinct Customer Name",
+          "value": "24",
+          "raw_value": 24,
+          "table": "customers",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "unique segments",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "customers_region_distinct",
+          "label": "Distinct Region",
+          "value": "4",
+          "raw_value": 4,
+          "table": "customers",
+          "format": "integer",
+          "format_type": "integer",
+          "recipe_type": "atomic",
+          "trend_direction": "neutral",
+          "trend_pct": null,
+          "trend_text": "unique segments",
+          "status": "available",
+          "reason": null
+        }
+      ],
+      "charts": [
+        {
+          "id": "customers_customer_name_breakdown",
+          "title": "customers Distribution by Customer Name",
+          "subtitle": "Segment breakdown by customer_name",
+          "type": "bar",
+          "table": "customers",
+          "x_column": "Customer Name",
+          "y_column": "Volume",
+          "xKey": "name",
+          "yKey": "value",
+          "data": [
+            {
+              "name": "Demo Customer 01",
+              "value": 1
+            },
+            {
+              "name": "Demo Customer 24",
+              "value": 1
+            },
+            {
+              "name": "Demo Customer 03",
+              "value": 1
+            },
+            {
+              "name": "Demo Customer 08",
+              "value": 1
+            },
+            {
+              "name": "Demo Customer 15",
+              "value": 1
+            },
+            {
+              "name": "Demo Customer 19",
+              "value": 1
+            },
+            {
+              "name": "Demo Customer 06",
+              "value": 1
+            },
+            {
+              "name": "Demo Customer 14",
+              "value": 1
+            }
+          ],
+          "color": "#00c2cb",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "customers_region_breakdown",
+          "title": "customers Distribution by Region",
+          "subtitle": "Segment breakdown by region",
+          "type": "donut",
+          "table": "customers",
+          "x_column": "Region",
+          "y_column": "Volume",
+          "xKey": "name",
+          "yKey": "value",
+          "data": [
+            {
+              "name": "East",
+              "value": 6
+            },
+            {
+              "name": "South",
+              "value": 6
+            },
+            {
+              "name": "West",
+              "value": 6
+            },
+            {
+              "name": "North",
+              "value": 6
+            }
+          ],
+          "color": "#8b5cf6",
+          "status": "available",
+          "reason": null
+        }
+      ],
+      "auto_charts": [
+        {
+          "id": "customers_customer_name_breakdown",
+          "title": "customers Distribution by Customer Name",
+          "subtitle": "Segment breakdown by customer_name",
+          "type": "bar",
+          "table": "customers",
+          "x_column": "Customer Name",
+          "y_column": "Volume",
+          "xKey": "name",
+          "yKey": "value",
+          "data": [
+            {
+              "name": "Demo Customer 01",
+              "value": 1
+            },
+            {
+              "name": "Demo Customer 24",
+              "value": 1
+            },
+            {
+              "name": "Demo Customer 03",
+              "value": 1
+            },
+            {
+              "name": "Demo Customer 08",
+              "value": 1
+            },
+            {
+              "name": "Demo Customer 15",
+              "value": 1
+            },
+            {
+              "name": "Demo Customer 19",
+              "value": 1
+            },
+            {
+              "name": "Demo Customer 06",
+              "value": 1
+            },
+            {
+              "name": "Demo Customer 14",
+              "value": 1
+            }
+          ],
+          "color": "#00c2cb",
+          "status": "available",
+          "reason": null
+        },
+        {
+          "id": "customers_region_breakdown",
+          "title": "customers Distribution by Region",
+          "subtitle": "Segment breakdown by region",
+          "type": "donut",
+          "table": "customers",
+          "x_column": "Region",
+          "y_column": "Volume",
+          "xKey": "name",
+          "yKey": "value",
+          "data": [
+            {
+              "name": "East",
+              "value": 6
+            },
+            {
+              "name": "South",
+              "value": 6
+            },
+            {
+              "name": "West",
+              "value": 6
+            },
+            {
+              "name": "North",
+              "value": 6
+            }
+          ],
+          "color": "#8b5cf6",
+          "status": "available",
+          "reason": null
+        }
+      ],
+      "filters": [
+        {
+          "column": "customers.customer_name",
+          "label": "Customer Name",
+          "filter_type": "multiselect",
+          "options": []
+        },
+        {
+          "column": "customers.region",
+          "label": "Region",
+          "filter_type": "multiselect",
+          "options": []
+        }
+      ],
+      "executive_summary": {
+        "business_domain": "Unknown",
+        "executive_summary": "Insufficient data to generate a reliable business summary.",
+        "strategic_insights": [],
+        "tactical_recommendations": [],
+        "source": "deterministic_fallback",
+        "llm_error": "InvalidResponse"
+      },
+      "business_summary": {
+        "business_domain": "Unknown",
+        "executive_summary": "Insufficient data to generate a reliable business summary.",
+        "key_metrics": [
+          {
+            "id": "customers_total_rows",
+            "label": "Total customers Records",
+            "value": "24",
+            "raw_value": 24,
+            "table": "customers",
+            "format": "integer",
+            "format_type": "integer",
+            "recipe_type": "atomic",
+            "trend_direction": "neutral",
+            "trend_pct": null,
+            "trend_text": "24 verified rows",
+            "status": "available",
+            "reason": null
+          },
+          {
+            "id": "customers_customer_name_distinct",
+            "label": "Distinct Customer Name",
+            "value": "24",
+            "raw_value": 24,
+            "table": "customers",
+            "format": "integer",
+            "format_type": "integer",
+            "recipe_type": "atomic",
+            "trend_direction": "neutral",
+            "trend_pct": null,
+            "trend_text": "unique segments",
+            "status": "available",
+            "reason": null
+          },
+          {
+            "id": "customers_region_distinct",
+            "label": "Distinct Region",
+            "value": "4",
+            "raw_value": 4,
+            "table": "customers",
+            "format": "integer",
+            "format_type": "integer",
+            "recipe_type": "atomic",
+            "trend_direction": "neutral",
+            "trend_pct": null,
+            "trend_text": "unique segments",
+            "status": "available",
+            "reason": null
+          }
+        ]
+      },
+      "insights": [],
+      "anomalies": [],
+      "data_quality": {
+        "warnings": []
+      },
+      "applied_date_from": null,
+      "applied_date_to": null,
+      "layout_plan": {
+        "table_name": "missing_table",
+        "kpi_cards": [
+          {
+            "id": "customers_total_rows",
+            "label": "Total customers Records",
+            "value": "24",
+            "raw_value": 24,
+            "table": "customers",
+            "format": "integer",
+            "format_type": "integer",
+            "recipe_type": "atomic",
+            "trend_direction": "neutral",
+            "trend_pct": null,
+            "trend_text": "24 verified rows",
+            "status": "available",
+            "reason": null
+          },
+          {
+            "id": "customers_customer_name_distinct",
+            "label": "Distinct Customer Name",
+            "value": "24",
+            "raw_value": 24,
+            "table": "customers",
+            "format": "integer",
+            "format_type": "integer",
+            "recipe_type": "atomic",
+            "trend_direction": "neutral",
+            "trend_pct": null,
+            "trend_text": "unique segments",
+            "status": "available",
+            "reason": null
+          },
+          {
+            "id": "customers_region_distinct",
+            "label": "Distinct Region",
+            "value": "4",
+            "raw_value": 4,
+            "table": "customers",
+            "format": "integer",
+            "format_type": "integer",
+            "recipe_type": "atomic",
+            "trend_direction": "neutral",
+            "trend_pct": null,
+            "trend_text": "unique segments",
+            "status": "available",
+            "reason": null
+          }
+        ],
+        "charts": [
+          {
+            "id": "customers_customer_name_breakdown",
+            "title": "customers Distribution by Customer Name",
+            "subtitle": "Segment breakdown by customer_name",
+            "type": "bar",
+            "table": "customers",
+            "x_column": "Customer Name",
+            "y_column": "Volume",
+            "xKey": "name",
+            "yKey": "value",
+            "data": [
+              {
+                "name": "Demo Customer 01",
+                "value": 1
+              },
+              {
+                "name": "Demo Customer 24",
+                "value": 1
+              },
+              {
+                "name": "Demo Customer 03",
+                "value": 1
+              },
+              {
+                "name": "Demo Customer 08",
+                "value": 1
+              },
+              {
+                "name": "Demo Customer 15",
+                "value": 1
+              },
+              {
+                "name": "Demo Customer 19",
+                "value": 1
+              },
+              {
+                "name": "Demo Customer 06",
+                "value": 1
+              },
+              {
+                "name": "Demo Customer 14",
+                "value": 1
+              }
+            ],
+            "color": "#00c2cb",
+            "status": "available",
+            "reason": null
+          },
+          {
+            "id": "customers_region_breakdown",
+            "title": "customers Distribution by Region",
+            "subtitle": "Segment breakdown by region",
+            "type": "donut",
+            "table": "customers",
+            "x_column": "Region",
+            "y_column": "Volume",
+            "xKey": "name",
+            "yKey": "value",
+            "data": [
+              {
+                "name": "East",
+                "value": 6
+              },
+              {
+                "name": "South",
+                "value": 6
+              },
+              {
+                "name": "West",
+                "value": 6
+              },
+              {
+                "name": "North",
+                "value": 6
+              }
+            ],
+            "color": "#8b5cf6",
+            "status": "available",
+            "reason": null
+          }
+        ],
+        "filters": [
+          {
+            "column": "customers.customer_name",
+            "label": "Customer Name",
+            "filter_type": "multiselect",
+            "options": []
+          },
+          {
+            "column": "customers.region",
+            "label": "Region",
+            "filter_type": "multiselect",
+            "options": []
+          }
+        ],
+        "strategic_insights": [],
+        "anomalies": [],
+        "executive_summary": {
+          "business_domain": "Unknown",
+          "executive_summary": "Insufficient data to generate a reliable business summary.",
+          "strategic_insights": [],
+          "tactical_recommendations": [],
+          "source": "deterministic_fallback",
+          "llm_error": "InvalidResponse"
+        },
+        "metadata": {
+          "composed": true,
+          "engine_version": "2.0-deterministic"
+        }
+      },
+      "pipeline_layers": [
+        {
+          "layer": 1,
+          "name": "Schema Discovery & Multi-Table Statistical Profiling",
+          "status": "completed"
+        },
+        {
+          "layer": 2,
+          "name": "Metric Recipes Formulation (Phase 2C Deterministic)",
+          "status": "completed"
+        },
+        {
+          "layer": 3,
+          "name": "Chart & Filter Planning (Phase 2D/2E)",
+          "status": "completed"
+        },
+        {
+          "layer": 4,
+          "name": "High-Speed Aggregation & Data Computation",
+          "status": "completed"
+        },
+        {
+          "layer": 5,
+          "name": "Dual-Engine AI Executive Playbook",
+          "status": "completed"
+        },
+        {
+          "layer": 6,
+          "name": "Statistical Anomaly & Outlier Engine",
+          "status": "completed"
+        }
+      ],
+      "cached": false,
+      "cached_at": "2026-10-21T18:37:23.859769+00:00"
+    }
+  },
+  "mongo_retry": {
+    "status": 200,
+    "seconds": 8.53,
+    "body": {
+      "conversation_id": 46,
+      "message_id": 125,
+      "user_message_id": 124,
+      "query": "What is the total invoice amount in the subscription billing MongoDB database?",
+      "answer": "I wasn't able to complete the SQL query for your request.\n\n**What happened:** Can't load plugin: sqlalchemy.dialects:mongodb\n\n\n**Tip:** You can ask about specific tables or columns listed above, or check the Databases tab to view the full schema.\n\n**Suggested Follow-ups:**\n1. Check database connection status\n2. Switch to Knowledge Base search",
+      "query_type": "sql",
+      "sources": [],
+      "sql_data": {
+        "query": "What is the total invoice amount in the subscription billing MongoDB database?",
+        "generated_sql": "",
+        "explanation": "Note: Agent could not resolve a fully verified query after 3 attempts. Generated safe fallback preview query on table 'users'.",
+        "columns": [],
+        "rows": [],
+        "row_count": 0,
+        "execution_time_ms": 0.0,
+        "status": "failed",
+        "error_detail": "Can't load plugin: sqlalchemy.dialects:mongodb"
+      },
+      "grounding": {},
+      "grounding_status": null,
+      "unverified_reason": null,
+      "claim_coverage_ratio": null,
+      "total_claims_count": null,
+      "verified_claims_count": null,
+      "skipped_claims_count": null,
+      "sql_agent": {
+        "attempts": 3,
+        "corrections_made": true,
+        "database_id": 63
+      },
+      "suggestions": [
+        "Check database connection status",
+        "Switch to Knowledge Base search"
+      ],
+      "suggested_questions": [
+        "Check database connection status",
+        "Switch to Knowledge Base search"
+      ],
+      "created_at": "2026-10-21T18:43:07.107748"
+    }
+  },
+  "auto_database_selection": {
+    "status": 200,
+    "seconds": 5.25,
+    "body": {
+      "conversation_id": 45,
+      "message_id": 123,
+      "user_message_id": 122,
+      "query": "For the coffee retail PostgreSQL database, how many orders are there and what is total_amount across all statuses?",
+      "answer": "## Executive Takeaway\n- The coffee retail database contains **240 orders** in total.  \n- Across **all order statuses**, the cumulative **total amount is $30,200.00**.\n\n### Summary Table\n| Metric | Value |\n|--------|-------|\n| **Order Count** | **240** |\n| **Total Amount (USD)** | **$30,200.00** |\n\n**Suggested Follow-ups:**\n1. How does the order volume and revenue break down by individual order status (e.g., *completed*, *pending*, *canceled*)?  \n2. What is the average order value and its distribution across different product categories?  \n3. Can we identify the top\u2011selling products or locations contributing most to the $30,200 revenue?",
+      "query_type": "sql",
+      "sources": [],
+      "sql_data": {
+        "query": "For the coffee retail PostgreSQL database, how many orders are there and what is total_amount across all statuses?",
+        "generated_sql": "SELECT \n    COUNT(*) AS order_count,\n    SUM(total_amount) AS total_amount_sum\nFROM orders",
+        "explanation": "This query counts all rows in the **orders** table to get the number of orders and sums the **total_amount** column to compute the total sales across every order status.",
+        "columns": [
+          "order_count",
+          "total_amount_sum"
+        ],
+        "rows": [
+          {
+            "order_count": 240,
+            "total_amount_sum": "30200.00"
+          }
+        ],
+        "row_count": 1,
+        "execution_time_ms": 9.92,
+        "status": "success",
+        "error_detail": null
+      },
+      "grounding": {},
+      "grounding_status": null,
+      "unverified_reason": null,
+      "claim_coverage_ratio": null,
+      "total_claims_count": null,
+      "verified_claims_count": null,
+      "skipped_claims_count": null,
+      "sql_agent": {
+        "attempts": 1,
+        "corrections_made": false,
+        "database_id": 61
+      },
+      "suggestions": [
+        "How does the order volume and revenue break down by individual order status (e.g., *completed*, *pending*, *canceled*)?",
+        "What is the average order value and its distribution across different product categories?",
+        "Can we identify the top\u2011selling products or locations contributing most to the $30,200 revenue?"
+      ],
+      "suggested_questions": [
+        "How does the order volume and revenue break down by individual order status (e.g., *completed*, *pending*, *canceled*)?",
+        "What is the average order value and its distribution across different product categories?",
+        "Can we identify the top\u2011selling products or locations contributing most to the $30,200 revenue?"
+      ],
+      "created_at": "2026-10-21T18:42:58.534827"
+    }
+  },
+  "checks": [
+    {
+      "name": "postgresql/all/total_revenue",
+      "passed": true,
+      "expected": 30200,
+      "actual": 30200.0
+    },
+    {
+      "name": "postgresql/all/net_revenue_delivered",
+      "passed": true,
+      "expected": 23695,
+      "actual": 23695.0
+    },
+    {
+      "name": "postgresql/all/total_orders",
+      "passed": true,
+      "expected": 240,
+      "actual": 240
+    },
+    {
+      "name": "postgresql/october/total_revenue",
+      "passed": true,
+      "expected": 11255,
+      "actual": 11255.0
+    },
+    {
+      "name": "postgresql/october/net_revenue_delivered",
+      "passed": true,
+      "expected": 8490,
+      "actual": 8490.0
+    },
+    {
+      "name": "postgresql/october/total_orders",
+      "passed": true,
+      "expected": 90,
+      "actual": 90
+    },
+    {
+      "name": "mysql/all/total_revenue",
+      "passed": true,
+      "expected": 116550,
+      "actual": 116550.0
+    },
+    {
+      "name": "mysql/all/net_revenue_delivered",
+      "passed": true,
+      "expected": 94125,
+      "actual": 94125.0
+    },
+    {
+      "name": "mysql/all/total_orders",
+      "passed": true,
+      "expected": 180,
+      "actual": 180
+    },
+    {
+      "name": "mysql/october/total_revenue",
+      "passed": true,
+      "expected": 39240,
+      "actual": 39240.0
+    },
+    {
+      "name": "mysql/october/net_revenue_delivered",
+      "passed": true,
+      "expected": 31190,
+      "actual": 31190.0
+    },
+    {
+      "name": "mysql/october/total_orders",
+      "passed": true,
+      "expected": 60,
+      "actual": 60
+    },
+    {
+      "name": "mongodb/all/invoices",
+      "passed": true,
+      "expected": 160,
+      "actual": 160
+    },
+    {
+      "name": "mongodb/all/gross_billed",
+      "passed": true,
+      "expected": 16300,
+      "actual": 16300.0
+    },
+    {
+      "name": "mongodb/october/invoices",
+      "passed": true,
+      "expected": 60,
+      "actual": 60
+    },
+    {
+      "name": "mongodb/october/gross_billed",
+      "passed": true,
+      "expected": 6140,
+      "actual": 6140.0
+    },
+    {
+      "name": "postgresql/empty/count",
+      "passed": true,
+      "expected": 0,
+      "actual": 0
+    },
+    {
+      "name": "mysql/empty/count",
+      "passed": true,
+      "expected": 0,
+      "actual": 0
+    },
+    {
+      "name": "mongodb/empty/count",
+      "passed": true,
+      "expected": 0,
+      "actual": 0
+    },
+    {
+      "name": "chat/pg_delivered",
+      "passed": true,
+      "expected": 23695,
+      "actual": 23695.0
+    },
+    {
+      "name": "chat/pg_october",
+      "passed": true,
+      "expected": 11255,
+      "actual": 11255.0
+    },
+    {
+      "name": "chat/pg_join",
+      "passed": true,
+      "expected": 14400,
+      "actual": 14400.0
+    },
+    {
+      "name": "chat/mysql_delivered",
+      "passed": true,
+      "expected": 94125,
+      "actual": 94125.0
+    },
+    {
+      "name": "chat/pg_total",
+      "passed": true,
+      "expected": 30200,
+      "actual": 30200.0
+    },
+    {
+      "name": "chat/mysql_total",
+      "passed": true,
+      "expected": 116550,
+      "actual": 116550.0
+    },
+    {
+      "name": "grounding/coffee",
+      "passed": false,
+      "expected": "supported",
+      "actual": "unsupported"
+    },
+    {
+      "name": "grounding/solar",
+      "passed": false,
+      "expected": "supported",
+      "actual": "unsupported"
+    },
+    {
+      "name": "grounding/orbit",
+      "passed": false,
+      "expected": "supported",
+      "actual": "unsupported"
+    },
+    {
+      "name": "region/East/revenue",
+      "passed": true,
+      "expected": 12400,
+      "actual": 12400.0
+    },
+    {
+      "name": "region/East/customers",
+      "passed": false,
+      "expected": 6,
+      "actual": 24
+    },
+    {
+      "name": "region/East/units",
+      "passed": false,
+      "expected": 240,
+      "actual": 600
+    },
+    {
+      "name": "invalid_table/rejected",
+      "passed": false,
+      "expected": true,
+      "actual": false
+    },
+    {
+      "name": "stream/sql/done",
+      "passed": true,
+      "expected": true,
+      "actual": true
+    },
+    {
+      "name": "stream/rag/done",
+      "passed": true,
+      "expected": true,
+      "actual": true
+    },
+    {
+      "name": "widget/handshake",
+      "passed": true,
+      "expected": 200,
+      "actual": 200
+    },
+    {
+      "name": "widget/unapproved_origin",
+      "passed": true,
+      "expected": 403,
+      "actual": 403
+    },
+    {
+      "name": "widget/coffee_facts",
+      "passed": false,
+      "expected": true,
+      "actual": false
+    },
+    {
+      "name": "widget/orbit_fact",
+      "passed": false,
+      "expected": true,
+      "actual": false
+    },
+    {
+      "name": "chat/mongo_billing/execution",
+      "passed": false,
+      "expected": "success",
+      "actual": "failed"
+    },
+    {
+      "name": "chat/mongo_paid/execution",
+      "passed": false,
+      "expected": "success",
+      "actual": "failed"
+    }
+  ],
+  "check_summary": {
+    "passed": 30,
+    "failed": 10,
+    "total": 40
+  }
+}

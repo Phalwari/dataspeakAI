@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { API_BASE_URL } from "../../config/api";
-import { Plus, CheckCircle, XCircle, Settings, Trash2, Database, Table, Search, Loader2, Sparkles, Network } from "lucide-react";
+import { Plus, CheckCircle, XCircle, Trash2, Database, Table, Search, Loader2, Sparkles, Network } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { QueryChatPanel } from "../../components/QueryChatPanel";
 
@@ -124,7 +124,7 @@ export function DatabasesPage() {
             if (statsRes.ok) {
               const stats = await statsRes.json();
               setDatabases(currentDbs => 
-                currentDbs.map(d => d.id === db.id ? { ...d, stats } : d)
+                currentDbs.map(d => d.id === db.id ? { ...d, stats, status: "connected" } : d)
               );
             }
           } catch (e) {
@@ -541,9 +541,6 @@ export function DatabasesPage() {
                   >
                     <Network className="w-3.5 h-3.5" />
                     View ERD
-                  </Button>
-                  <Button variant="ghost" size="icon">
-                    <Settings className="w-4 h-4" />
                   </Button>
                   <Button variant="ghost" size="icon" onClick={() => handleDeleteDatabase(db.id)}>
                     <Trash2 className="w-4 h-4 text-red-500" />
