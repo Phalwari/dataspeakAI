@@ -646,7 +646,8 @@ def execute_safe_sql(
     if str(db_conn.db_type).lower() == "mongodb":
         from services.mongo_query import execute_mongo_query
         return execute_mongo_query(db_conn, actual_query, max_rows, timeout_ceiling)
-    is_valid, reason = validate_read_only_sql(actual_query)
+    dialect_val = getattr(db_conn, "db_type", None)
+    is_valid, reason = validate_read_only_sql(actual_query, dialect=dialect_val)
     if not is_valid:
         raise ValueError(f"SQL Guardrail Violation: {reason}")
 

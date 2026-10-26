@@ -363,7 +363,7 @@ class SQLAgent:
             last_explanation = candidate_exp
 
             # 1. Security Check (Fail-closed)
-            is_valid, sec_reason = validate_read_only_sql(candidate_sql)
+            is_valid, sec_reason = validate_read_only_sql(candidate_sql, dialect=dialect)
             if not is_valid:
                 logger.warning(f"[SQLAgent] Security check failed on attempt {attempt}: {sec_reason}")
                 return {
