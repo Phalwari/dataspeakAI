@@ -1330,8 +1330,21 @@ def chat_endpoint(
         context_text, citations = build_grounded_rag_context(retrieved_chunks, db)
 
         # 2. SQL Execution
-        db_conn = auto_select_database(user_query, tenant_id, db, fallback_database_id=prior_database_id)
+        multi_source_route = route_decision.database_id is None and route_decision.reasoning.startswith(
+            "Multiple explicit database sources"
+        )
+        # Honor the database selected during route classification. Re-running
+        # auto-selection here can choose a different source for mixed queries
+        # when the question mentions both a table and a document policy.
+        if not multi_source_route and route_decision.database_id:
+            db_conn = db.query(models.DatabaseConnection).filter(
+                models.DatabaseConnection.id == route_decision.database_id,
+                models.DatabaseConnection.tenant_id == tenant_id
+            ).first()
+        if not multi_source_route and not db_conn:
+            db_conn = auto_select_database(user_query, tenant_id, db, fallback_database_id=prior_database_id)
         sql_rows_text = "None"
+        sql_error = "Multiple explicit database sources require separate source-specific queries" if multi_source_route else None
         if db_conn:
             msg_metadata["database_id"] = db_conn.id
             msg_metadata["database_name"] = db_conn.name
@@ -1356,7 +1369,10 @@ def chat_endpoint(
                     )
                     sql_rows_text = json.dumps(exec_res["rows"][:10], indent=2)
                 except Exception as ex:
+                    sql_error = "Internal query execution error"
                     print(f"Hybrid SQL execution note: {ex}")
+            else:
+                sql_error = "AI SQL generation is temporarily unavailable"
 
         # 3. Unified Synthesis
         try:
@@ -1377,7 +1393,7 @@ def chat_endpoint(
                 "2. [Second follow-up question]\n"
                 "3. [Third follow-up question]"
             )
-            if not is_stream:
+            if not is_stream and not multi_source_route:
                 raw_answer = llm_gateway.generate_sync(
                     prompt=synthesis_prompt,
                     tenant_id=tenant_id,
@@ -1388,15 +1404,58 @@ def chat_endpoint(
         except Exception as err:
             print(f"Hybrid synthesis error: {err}")
 
+        # Do not let the streaming LLM synthesize a comparison when multiple
+        # databases were explicitly named but no single-source execution was
+        # performed. This prevents prior conversation context from producing
+        # plausible-looking cross-database figures.
+        if multi_source_route:
+            synthesis_prompt = ""
+            assistant_answer = ""
+
         if not assistant_answer:
-            assistant_answer = (
-                "### Hybrid Insights\n"
-                "Synthesized findings from your knowledge base documents and database tables.\n\n"
-                "**Suggested Follow-ups:**\n"
+            fallback_parts = ["### Hybrid Insights"]
+            if multi_source_route:
+                fallback_parts.append(
+                    "This question names multiple databases. To avoid mixing sources, run one source-specific query at a time before comparing the verified results."
+                )
+            elif sql_response_obj and sql_response_obj.status == "success":
+                cols = sql_response_obj.columns[:6]
+                fallback_parts.append(
+                    f"Database evidence from **{db_conn.name}** returned **{sql_response_obj.row_count}** matching record(s)."
+                )
+                if cols and sql_response_obj.rows:
+                    header = "| " + " | ".join(cols) + " |"
+                    separator = "| " + " | ".join(["---"] * len(cols)) + " |"
+                    rows = [
+                        "| " + " | ".join(str(row.get(col, "")) for col in cols) + " |"
+                        for row in sql_response_obj.rows[:5]
+                    ]
+                    fallback_parts.append("\n" + header + "\n" + separator + "\n" + "\n".join(rows))
+            elif db_conn and sql_error:
+                fallback_parts.append(
+                    f"Database evidence from **{db_conn.name}** could not be verified because {sql_error.lower()}."
+                )
+
+            if retrieved_chunks:
+                source_names = []
+                for citation in citations[:3]:
+                    source_name = getattr(citation, "source_name", None) or getattr(citation, "document_name", None)
+                    if source_name and source_name not in source_names:
+                        source_names.append(source_name)
+                source_text = ", ".join(f"**{name}**" for name in source_names) if source_names else "the indexed documents"
+                fallback_parts.append(
+                    f"Document evidence was retrieved from {source_text}; the AI synthesis provider is temporarily unavailable, so the document claims are not paraphrased here."
+                )
+            else:
+                fallback_parts.append("No matching document evidence was retrieved for this question.")
+
+            fallback_parts.append(
+                "\n**Suggested Follow-ups:**\n"
                 "1. Show the detailed database rows\n"
-                "2. What specific document sections support these metrics?\n"
+                "2. Which document sections support these metrics?\n"
                 "3. Drill down into top contributors"
             )
+            assistant_answer = "\n\n".join(fallback_parts)
 
         # Grounding Verification (Task 7.2.3 / NR-2.2)
         if not is_stream and retrieved_chunks:

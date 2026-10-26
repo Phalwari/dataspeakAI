@@ -17,6 +17,17 @@ To maintain seamless multi-developer and AI agent collaboration:
 
 ## [Unreleased]
 
+### Fixed — Chatbot routing and provider outage handling (2026-10-22)
+
+- Added provider-independent SQL and hybrid route guardrails so operational and mixed data/document questions do not default to RAG when the LLM classifier is unavailable.
+- Added MongoDB collection-aware database selection and a catalog-grounded deterministic fallback for simple count/sum/status questions.
+- Bounded the complete streaming provider failover chain and added masked provider status diagnostics so chat returns a safe fallback instead of hanging indefinitely.
+- Fixed dashboard SSE parsing so a final chat completion frame is flushed and rendered even when the server closes the stream without a trailing blank line.
+- Prioritized explicit PostgreSQL/MySQL/MongoDB and connection-label references over prior-conversation database continuity, preserving source provenance across multi-turn chats.
+- Routed mixed database/policy questions through hybrid retrieval and made ambiguous multi-database comparisons fail safely instead of executing cross-source constants against one database.
+- Prioritized explicit PostgreSQL/MySQL/MongoDB and connection-label references over prior-conversation database continuity, preserving source provenance across multi-turn chats.
+- Routed mixed database/policy questions through hybrid retrieval and made ambiguous multi-database comparisons fail safely instead of executing cross-source constants against one database.
+
 ### Fixed
 
 - **NR-2 independent readiness remediation (2026-10-19):** Repaired the seven reproduced correctness and reliability findings, including explicit KPI comparison windows, bounded AutoML execution, chronological/grouped validation, winner-only holdout scoring, typed grounding failures, durable ingestion retries, immutable dense/sparse generation publication, explicit upstream stream cleanup, and SQL-disabled widget RAG consistency.

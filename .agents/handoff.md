@@ -1,5 +1,39 @@
 # Handoff Report: Phase 7 Sprint 7.1 Stage 1 — AI Infrastructure & Query Safety Guards
 
+## Current chatbot reliability fix — 2026-10-22
+
+### Observation
+Live chatbot tests stalled on provider failures, auto-routed operational questions to RAG, and selected the wrong relational database for MongoDB questions.
+
+### Logic Chain
+The router depended on an LLM classifier for mixed intent and used SQLAlchemy-only introspection when selecting among connections. Provider failure therefore caused RAG fallback, while MongoDB collection matching could not participate. Streaming also allowed the full provider/model chain to exceed the useful browser wait time.
+
+### Caveats
+The provider keys and quotas are external dependencies. The deterministic fallback is intentionally limited to catalog-proven count/sum/status MongoDB questions; unsupported questions remain explicitly unavailable rather than fabricated.
+
+### Conclusion
+Deterministic SQL/hybrid guardrails, MongoDB-aware selection, catalog-grounded Mongo fallback, bounded streaming failover, and frontend SSE final-frame handling are implemented. Live checks returned correct PostgreSQL, MySQL, MongoDB, and mixed database/document results. The mixed response correctly showed 240 orders/$30,200 and the $100 policy threshold, with partial grounding confidence surfaced.
+
+### Verification Method
+`cmd.exe /c "C:\\Users\\Umer\\AppData\\Local\\Programs\\Python\\Python311\\python.exe -m compileall -q backend"` passed. `cmd.exe /c "npm run build"` passed with 2,894 modules transformed. Live chatbot checks returned PostgreSQL 240 orders, MySQL 185 delivered orders/$23,695, MongoDB 144 paid invoices/$14,736, and mixed PostgreSQL/document evidence of 240 orders/$30,200 plus the $100 threshold. A fresh post-fix SQL query completed in the browser without requiring a reload.
+
+## Follow-up routing correction — 2026-10-22
+
+### Observation
+The 10-turn regression showed prior PostgreSQL continuity overriding explicit MySQL/MongoDB references. MySQL values were previously attributed to PostgreSQL, and MongoDB questions returned PostgreSQL `orders` results.
+
+### Logic Chain
+`classify_query_route` now scores explicit dialect and connection-label tokens before continuity, skips prior-database inheritance when a source is named, and routes mixed policy/data questions to hybrid. Multiple explicit database sources produce a hybrid decision without a single `database_id`; the streaming path uses a safe static fallback rather than synthesizing with prior conversation context.
+
+### Caveats
+The current MySQL fixture ground truth is 139 delivered orders, $94,125 revenue, and $677.158273 average; earlier 185/$23,695 values were from the wrong PostgreSQL source. True multi-database comparison execution is not yet implemented. Provider quota errors remain external and can trigger safe fallback text.
+
+### Conclusion
+The source-provenance regression is fixed for explicit PostgreSQL, MySQL, and MongoDB questions. MongoDB returned 144/$14,736 and 160/$16,300 with database ID 3; MySQL returned current live values with database ID 2; policy/database hybrid returned 80 qualifying orders with citations; ambiguous cross-source comparison no longer executes fabricated cross-source SQL.
+
+### Verification Method
+Backend compileall and frontend production build passed. Live browser retests were performed after backend restart. Saved message metadata was inspected for route type, database ID/name, generated query, result rows, and grounding status. `git diff --check` remains required before handoff completion.
+
 ## 1. Observation
 Following the Phase 7 architectural plan established in [`docs/architecture/ai_features_phase7_implementation_plan.md`](file:///d:/dataspeak/docs/architecture/ai_features_phase7_implementation_plan.md) and approved via `/grill-me`, Stage 1 focused on building high-leverage foundational AI resilience: a unified async LLM gateway with multi-key harvesting, round-robin quota rotation, and 429 quarantine cooldowns (Task 7.1.1), alongside engine-level query execution timeouts and an execution watchdog ceiling (Task 7.1.3).
 

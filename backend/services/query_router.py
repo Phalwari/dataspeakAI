@@ -79,6 +79,38 @@ class QueryRouteDecision:
         }
 
 
+_GENERIC_CONNECTION_TOKENS = {"demo", "data", "database", "db"}
+
+
+def _connection_match_score(conn: models.DatabaseConnection, query: str) -> int:
+    """Score explicit source references without relying on the full display name."""
+    q_lower = query.lower()
+    q_tokens = set(re.findall(r"[a-z0-9]+", q_lower))
+    name_tokens = [t for t in re.findall(r"[a-z0-9]+", (conn.name or "").lower()) if t not in _GENERIC_CONNECTION_TOKENS]
+    db_tokens = re.findall(r"[a-z0-9]+", (conn.database or "").lower())
+    db_type = str(conn.db_type or "").lower()
+
+    score = sum(3 for token in set(name_tokens + db_tokens) if len(token) > 2 and token in q_tokens)
+    type_aliases = {
+        "postgresql": {"postgresql", "postgres", "pgsql"},
+        "mysql": {"mysql", "mariadb"},
+        "mariadb": {"mysql", "mariadb"},
+        "mongodb": {"mongodb", "mongo"},
+        "sqlite": {"sqlite"},
+    }
+    if q_tokens.intersection(type_aliases.get(db_type, {db_type})):
+        score += 6
+    return score
+
+
+def find_explicit_database_matches(
+    query: str,
+    connections: List[models.DatabaseConnection]
+) -> List[models.DatabaseConnection]:
+    scored = [(conn, _connection_match_score(conn, query)) for conn in connections]
+    return [conn for conn, score in sorted(scored, key=lambda item: item[1], reverse=True) if score > 0]
+
+
 def auto_select_database(
     query: str,
     tenant_id: int,
@@ -102,11 +134,12 @@ def auto_select_database(
 
     q_lower = query.lower()
 
-    # 1. Match by DB name
-    for conn in connections:
-        if (len(conn.name) > 2 and re.search(r'\b' + re.escape(conn.name.lower()) + r'\b', q_lower)) or \
-           (conn.database and len(conn.database) > 2 and re.search(r'\b' + re.escape(conn.database.lower()) + r'\b', q_lower)):
-            return conn
+    # 1. Match explicit connection labels and dialect aliases. Display names
+    # contain separators such as "Demo | ... | MySQL", so matching the full
+    # string misses valid source references in natural-language questions.
+    explicit_matches = find_explicit_database_matches(query, connections)
+    if explicit_matches:
+        return explicit_matches[0]
 
     # 2. Match by introspected table names
     best_conn = None
@@ -117,6 +150,21 @@ def auto_select_database(
         if not conn_url:
             continue
         try:
+            if str(conn.db_type or "").lower() == "mongodb":
+                # SQLAlchemy cannot introspect MongoDB. Use the bounded Mongo
+                # catalog path so collection names can select the right source
+                # instead of falling back to the previous relational database.
+                from services.mongo_query import open_database
+                client, mongo_db = open_database(conn)
+                try:
+                    collections = mongo_db.list_collection_names()
+                    score = sum(1 for name in collections if name.lower() in q_lower)
+                finally:
+                    client.close()
+                if score > best_score:
+                    best_score = score
+                    best_conn = conn
+                continue
             engine = create_engine(conn_url, poolclass=NullPool)
             inspector = inspect(engine)
             tables = inspector.get_table_names()
@@ -205,7 +253,12 @@ def classify_query_route(
     # 2.5 Multi-Turn Anaphora & Context Continuity (R2)
     # If the user is in an active database conversation turn and follows up with anaphoric
     # references or filter/drilldown keywords without explicit document keywords, maintain SQL route.
-    if prior_database_id and not (is_greeting or is_platform_help):
+    explicit_source_reference = bool(re.search(
+        r"\b(postgresql|postgres|pgsql|mysql|mariadb|mongodb|mongo|coffee\s+retail|solar\s+wholesale|"
+        r"subscription\s+billing|invoice|invoices|collection)\b",
+        q_lower
+    ))
+    if prior_database_id and not (is_greeting or is_platform_help) and not explicit_source_reference:
         has_explicit_doc_keyword = any(k in q_lower for k in ("document", "documents", "pdf", "file", "contract", "manual", "handbook"))
         if not has_explicit_doc_keyword:
             if ANAPHORA_PATTERNS.search(q_lower) or (sql_score >= 1 and rag_score <= 1):
@@ -245,6 +298,15 @@ def classify_query_route(
         if is_greeting or is_platform_help or conv_score >= 1:
             return QueryRouteDecision("conversational", 0.95, "Conversational intent matched.")
         selected_db = auto_select_database(query, tenant_id, db, fallback_database_id=prior_database_id)
+        has_document_intent = rag_score > 0 or any(
+            marker in q_lower for marker in ("policy", "manual", "document", "according to", "shipping", "sla")
+        )
+        if selected_db and has_operational_data_intent and has_document_intent:
+            return QueryRouteDecision(
+                "hybrid", 0.92,
+                "Deterministic mixed data and document intent",
+                database_id=selected_db.id
+            )
         return QueryRouteDecision(
             "sql", 0.95, "Tenant has only connected databases available.",
             database_id=selected_db.id if selected_db else None
@@ -252,6 +314,15 @@ def classify_query_route(
 
     # Check if query matches table names in tenant databases
     selected_db = auto_select_database(query, tenant_id, db, fallback_database_id=prior_database_id)
+    explicit_matches = find_explicit_database_matches(query, db_connections)
+    is_comparison_intent = bool(re.search(r"\b(compare|comparison|versus|vs\.?|between)\b", q_lower))
+    if len(explicit_matches) > 1 and (has_operational_data_intent or is_comparison_intent):
+        return QueryRouteDecision(
+            "hybrid",
+            0.95,
+            "Multiple explicit database sources require source-specific execution",
+            database_id=None
+        )
     if selected_db:
         conn_url = DatabaseConnectionFactory.get_connection_url(selected_db)
         if conn_url:
@@ -265,6 +336,25 @@ def classify_query_route(
                         sql_score += 2
             except Exception:
                 pass
+
+    # Provider-independent routing guardrails. A provider outage must not turn
+    # an operational database question into a document-only search.
+    has_document_intent = rag_score > 0 or any(
+        marker in q_lower for marker in ("policy", "manual", "document", "according to", "shipping", "sla")
+    )
+    if selected_db and has_operational_data_intent and has_document_intent:
+        return QueryRouteDecision(
+            "hybrid", 0.92,
+            "Deterministic mixed data and document intent",
+            database_id=selected_db.id
+        )
+
+    if selected_db and has_operational_data_intent and not has_document_intent:
+        return QueryRouteDecision(
+            "sql", 0.92,
+            "Deterministic operational database intent",
+            database_id=selected_db.id
+        )
 
     if sql_score >= 2 and rag_score == 0:
         return QueryRouteDecision("sql", 0.85, f"SQL heuristic matched (score: {sql_score})", database_id=selected_db.id if selected_db else None)

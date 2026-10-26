@@ -481,6 +481,13 @@ class LLMGateway:
         prompt_tokens_est = max(1, len(prompt) // 4)
         total_text_yielded = []
         last_err: Optional[Exception] = None
+        # Bound the complete provider failover chain. Without an overall
+        # deadline, several keys multiplied by several models can leave the
+        # browser spinner running long after the deterministic fallback is
+        # already available to the caller.
+        stream_deadline = time.monotonic() + _configured_seconds(
+            "LLM_STREAM_TOTAL_TIMEOUT_SECONDS", 18.0
+        )
 
         prov = (provider or "auto").lower()
         try_gemini_first = prov in ("gemini", "auto")
@@ -491,19 +498,27 @@ class LLMGateway:
             has_active_gemini = any(_key_cooldowns.get(k, 0) <= time.time() for k in gemini_keys)
             async with httpx.AsyncClient(timeout=self.request_timeout) as client:
                 for key in gemini_keys:
+                    if time.monotonic() >= stream_deadline:
+                        break
                     masked = _mask_key(key)
                     now = time.time()
                     if has_active_gemini and _key_cooldowns.get(key, 0) > now:
                         continue
 
                     for m in gemini_models:
+                        remaining = stream_deadline - time.monotonic()
+                        if remaining <= 0:
+                            break
                         url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:streamGenerateContent?alt=sse&key={key}"
                         payload = {
                             "contents": [{"parts": [{"text": prompt}]}],
                             "generationConfig": {"temperature": temperature},
                         }
                         try:
-                            async with client.stream("POST", url, json=payload) as resp:
+                            async with client.stream(
+                                "POST", url, json=payload,
+                                timeout=min(self.request_timeout, max(1.0, remaining))
+                            ) as resp:
                                 if resp.status_code == 200:
                                     _key_cooldowns.pop(key, None)
                                     async for line in resp.aiter_lines():
@@ -563,6 +578,10 @@ class LLMGateway:
                                     break
 
                                 else:
+                                    logger.warning(
+                                        "provider=gemini stream_status=%d model=%s key=%s",
+                                        resp.status_code, m, masked
+                                    )
                                     last_err = RuntimeError(f"Gemini stream returned {resp.status_code}")
                                     continue
 
@@ -577,12 +596,17 @@ class LLMGateway:
             has_active_groq = any(_key_cooldowns.get(k, 0) <= time.time() for k in groq_keys)
             async with httpx.AsyncClient(timeout=self.request_timeout) as client:
                 for key in groq_keys:
+                    if time.monotonic() >= stream_deadline:
+                        break
                     masked = _mask_key(key)
                     now = time.time()
                     if has_active_groq and _key_cooldowns.get(key, 0) > now:
                         continue
 
                     for m in groq_models:
+                        remaining = stream_deadline - time.monotonic()
+                        if remaining <= 0:
+                            break
                         url = "https://api.groq.com/openai/v1/chat/completions"
                         payload = {
                             "model": m,
@@ -595,7 +619,10 @@ class LLMGateway:
                             "Content-Type": "application/json",
                         }
                         try:
-                            async with client.stream("POST", url, json=payload, headers=headers) as resp:
+                            async with client.stream(
+                                "POST", url, json=payload, headers=headers,
+                                timeout=min(self.request_timeout, max(1.0, remaining))
+                            ) as resp:
                                 if resp.status_code == 200:
                                     _key_cooldowns.pop(key, None)
                                     async for line in resp.aiter_lines():
@@ -653,6 +680,10 @@ class LLMGateway:
                                     break
 
                                 else:
+                                    logger.warning(
+                                        "provider=groq stream_status=%d model=%s key=%s",
+                                        resp.status_code, m, masked
+                                    )
                                     last_err = RuntimeError(f"Groq stream returned {resp.status_code}")
                                     continue
 

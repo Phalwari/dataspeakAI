@@ -130,6 +130,48 @@ def discover_catalog(database):
             for c in catalog.collections if not c.name.startswith("system.")}
 
 
+def _deterministic_fallback_plan(question: str, catalog: dict) -> MongoReadPlan | None:
+    """Build a narrow read plan for common count/sum/status questions.
+
+    This is intentionally conservative: it only uses collection and field
+    names already present in the live catalog and returns no plan when the
+    requested operation cannot be proven from that catalog.
+    """
+    q = question.lower()
+    if not catalog or not any(token in q for token in ("count", "how many", "total", "sum", "revenue", "amount", "paid")):
+        return None
+
+    collection = None
+    best_score = 0
+    for name, info in catalog.items():
+        score = sum(1 for token in re.findall(r"[a-z0-9_]+", name.lower()) if token in q)
+        if name.lower() in q:
+            score += 2
+        if score > best_score:
+            best_score = score
+            collection = name
+    if not collection:
+        return None
+
+    fields = catalog[collection].get("columns", {})
+    field_names = {str(key).lower(): key for key in fields}
+    status_field = next((field_names[k] for k in ("status", "state") if k in field_names), None)
+    amount_field = next((field_names[k] for k in ("amount", "total_amount", "revenue", "price") if k in field_names), None)
+    pipeline = []
+    if status_field and "paid" in q:
+        pipeline.append({"$match": {status_field: "paid"}})
+
+    group = {"_id": None, "count": {"$sum": 1}}
+    if amount_field and any(token in q for token in ("sum", "total", "revenue", "amount")):
+        group["total_amount"] = {"$sum": f"${amount_field}"}
+    pipeline.append({"$group": group})
+    pipeline.append({"$project": {"_id": 0, **{key: 1 for key in group if key != "_id"}}})
+    try:
+        return validate_plan({"collection": collection, "pipeline": pipeline}, catalog)
+    except (ValueError, TypeError):
+        return None
+
+
 def bind_date_filters(pipeline, columns):
     """Convert ISO query bounds only for catalog fields with BSON date types."""
     def convert(value):
@@ -180,6 +222,27 @@ def generate_mongo_query(connection, question, *, allowed_tables=None, conversat
         plan = validate_plan(raw, catalog, allowed_tables)
         return {"sql":plan.model_dump_json(), "explanation":"Read-only MongoDB aggregation for the requested collection and filters.","attempts":1,"corrections_made":False}
     except Exception:
+        # Preserve correctness during provider outages for simple catalog-
+        # grounded aggregates; never invent a collection or field name.
+        try:
+            client, database = open_database(connection)
+            fallback_catalog = discover_catalog(database)
+            fallback_plan = _deterministic_fallback_plan(question, fallback_catalog)
+            if fallback_plan is not None:
+                return {
+                    "sql": fallback_plan.model_dump_json(),
+                    "explanation": "Deterministic MongoDB aggregation generated from the verified catalog.",
+                    "attempts": 1,
+                    "corrections_made": False,
+                }
+        except Exception:
+            pass
+        finally:
+            try:
+                if 'client' in locals() and client is not None:
+                    client.close()
+            except Exception:
+                pass
         return {"error":"A safe MongoDB query could not be generated. The provider may be unavailable or the request may require unsupported fields or operations.", "sql":"", "explanation":"No query was executed.","attempts":1,"corrections_made":False}
     finally:
         if client is not None:

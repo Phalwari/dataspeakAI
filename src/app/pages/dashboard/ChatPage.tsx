@@ -394,9 +394,16 @@ export function ChatPage() {
         }
 
         const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
+        if (done) {
+          // The final SSE frame is not required to end with a blank line.
+          // Flush the decoder and give the existing frame parser one last
+          // delimiter so the UI receives the persisted completion metadata.
+          buffer += decoder.decode();
+          if (!buffer.trim()) break;
+          buffer += "\n\n";
+        } else {
+          buffer += decoder.decode(value, { stream: true });
+        }
         const parts = buffer.split("\n\n");
         buffer = parts.pop() || "";
 
@@ -469,6 +476,8 @@ export function ChatPage() {
             // Incomplete JSON chunk in buffer, will be completed in next frame
           }
         }
+
+        if (done) break;
       }
     } catch (err: any) {
       if (err.name === "AbortError" || abortCtrl.signal.aborted || activeRequestIdRef.current !== currentRequestId) {
