@@ -1,568 +1,96 @@
-import { Link, useNavigate } from "react-router";
-import { useEffect, useState } from "react";
-import { API_BASE_URL } from "../config/api";
-import {
-  MessageSquare,
-  Database,
-  Shield,
-  Code2,
-  ArrowRight,
-  Check,
-  Sparkles,
-  Zap,
-  Lock,
-  Github,
-  Twitter,
-  Linkedin,
-  FileText,
-  Brain,
-  Building2,
-  MessageSquareCode,
-} from "lucide-react";
-import { Button } from "../components/ui/button";
-import { Card, CardContent } from "../components/ui/card";
+import { Link, useNavigate } from 'react-router';
+import { useEffect, useRef, useState } from 'react';
+import { motion, MotionConfig, useReducedMotion, useScroll, useTransform } from 'motion/react';
+import { ArrowDown, ArrowRight, ArrowUpRight, Check, ChevronDown, Database, FileText, Globe2, Menu, MessageSquareCode, Pause, Play, ShieldCheck, Sparkles, X } from 'lucide-react';
+import { toast } from 'sonner';
+import { API_BASE_URL } from '../config/api';
+import { ChatScene, RevenueChart, WidgetScene } from '../components/landing/ProductScenes';
+import { IntegrationCards } from '../components/landing/IntegrationCards';
+import './LandingPage.css';
 
-const features = [
-  {
-    icon: Brain,
-    title: "AI Intelligence",
-    description:
-      "Advanced AI that generates insights, reports, and answers from your structured and unstructured data",
-  },
-  {
-    icon: Database,
-    title: "Multi-Database Support",
-    description:
-      "Connect MySQL, PostgreSQL, MongoDB, Firebase and more. Seamless integration with all major databases",
-  },
-  {
-    icon: FileText,
-    title: "RAG Document Search",
-    description:
-      "Upload documents for AI-powered semantic search. Query PDFs, DOCX, and more using natural language",
-  },
-  {
-    icon: Shield,
-    title: "Secure Infrastructure",
-    description:
-      "Enterprise-grade security with encrypted connections, role-based access, and SOC 2 compliance",
-  },
-  {
-    icon: Code2,
-    title: "Easy Integration",
-    description:
-      "RESTful APIs and embeddable widgets. Integrate AI capabilities into your apps in minutes",
-  },
+const faqs = [
+  ['What can I connect?', 'Connect PostgreSQL, MySQL, SQLite, MongoDB or Firebase, and upload CSV/Excel datasets or documents. Analysis capabilities depend on the selected source.'],
+  ['Does DataSpeakAI generate a whole dashboard?', 'Business Insights analyzes a selected database and table scope to produce available KPIs, charts, comparisons and summaries. Missing metrics are marked unavailable rather than invented. The walkthrough above uses sample data.'],
+  ['How is the chatbot different from a general AI chat?', 'DataSpeakAI answers using selected database and document context. SQL mode queries supported data sources, RAG searches documents, and Hybrid brings both together. You can inspect results and supporting sources.'],
+  ['Can I use it on my own website?', 'Yes. Configure your widget title, greeting, color and selected sources, then embed it using the script and publishable key from your dashboard. Approved website origins and verified visitor sessions control access.'],
+  ['Can I verify the AI’s answers?', 'Review the underlying data, generated queries and document citations where available. Grounding information helps you inspect evidence; important decisions still need your review.'],
 ];
 
-const steps = [
-  {
-    number: "01",
-    title: "Connect Your Data Sources",
-    description:
-      "Securely connect databases and upload documents. Our AI automatically indexes and prepares your data",
-  },
-  {
-    number: "02",
-    title: "AI Processes & Learns",
-    description:
-      "Machine learning models analyze patterns, relationships, and generate embeddings for semantic search",
-  },
-  {
-    number: "03",
-    title: "Get Insights & Deploy",
-    description:
-      "Receive AI-powered recommendations, deploy chatbots, and access your data through natural language",
-  },
-  {
-    number: "04",
-    title: "Monitor & Optimize",
-    description:
-      "Track usage analytics, monitor performance, and continuously improve with AI-driven suggestions",
-  },
-];
-
-const pricingPlans = [
-  {
-    name: "Free",
-    price: "$0",
-    period: "/month",
-    description: "Perfect for testing and small projects",
-    features: [
-      "1,000 AI queries/month",
-      "1 database connection",
-      "100 MB document storage",
-      "Basic analytics",
-      "Community support",
-      "7-day logs retention",
-    ],
-    cta: "Get Started",
-    highlighted: false,
-  },
-  {
-    name: "Starter",
-    price: "$49",
-    period: "/month",
-    description: "Great for growing businesses",
-    features: [
-      "25,000 AI queries/month",
-      "5 database connections",
-      "5 GB document storage",
-      "Advanced analytics",
-      "Email support",
-      "30-day logs retention",
-      "Custom branding",
-      "API access",
-    ],
-    cta: "Start Free Trial",
-    highlighted: true,
-  },
-  {
-    name: "Pro",
-    price: "$199",
-    period: "/month",
-    description: "For data-driven enterprises",
-    features: [
-      "Unlimited AI queries",
-      "Unlimited databases",
-      "50 GB document storage",
-      "Real-time analytics",
-      "Priority support",
-      "Unlimited logs",
-      "White-label solution",
-      "Dedicated account manager",
-      "Custom AI models",
-    ],
-    cta: "Contact Sales",
-    highlighted: false,
-  },
-  {
-    name: "Enterprise",
-    price: "Custom",
-    period: "",
-    description: "For large-scale operations",
-    features: [
-      "Everything in Pro",
-      "On-premise deployment",
-      "SSO & SAML",
-      "Dedicated infrastructure",
-      "SLA guarantees",
-      "Custom integrations",
-      "Advanced security",
-      "24/7 phone support",
-    ],
-    cta: "Contact Sales",
-    highlighted: false,
-  },
-];
+function Hero({ paused }: { paused: boolean }) {
+  const ref = useRef<HTMLElement>(null);
+  const reduced = useReducedMotion();
+  const { scrollYProgress } = useScroll({ target: ref, offset: ['start start', 'end start'] });
+  const y = useTransform(scrollYProgress, [0, 1], [0, 140]);
+  const rotate = useTransform(scrollYProgress, [0, .7], [-13, 0]);
+  const scale = useTransform(scrollYProgress, [0, .7], [1, 1.12]);
+  const disabled = paused || reduced;
+  return <section ref={ref} className="lp-hero">
+    <div className="lp-hero-atmosphere" aria-hidden="true"><div /><div /><div /></div>
+    <div className="lp-hero-copy"><span className="lp-overline"><span className="lp-dot" /> INTELLIGENCE, IN YOUR ELEMENT.</span><h1>Your data.<br /><span>Beyond limits.</span></h1><p>Ask bigger questions. See the whole picture.<br />One AI workspace for your databases, documents<br className="lp-desktop" /> and every decision that comes next.</p><div className="lp-actions"><Link className="lp-button" to="/signup">Get started <ArrowUpRight size={18} /></Link><a className="lp-text-link" href="#insights">Explore the experience <ArrowDown size={17} /></a></div></div>
+    <motion.div className="lp-hero-art" style={{ y: disabled ? 0 : y }}>
+      <div className="lp-metal-ring" aria-hidden="true" /><div className="lp-orbit-path" aria-hidden="true" />
+      <motion.div className="lp-hero-card lp-hero-card-main" style={{ rotate: disabled ? -6 : rotate, scale: disabled ? 1 : scale }}><div><span><Sparkles size={17} /> DataSpeakAI</span><span className="lp-overline">INSIGHTS</span></div><small>Clarity. On demand.</small><strong>$35,600</strong><span className="lp-hero-card-sub">Revenue · illustrative dataset</span><RevenueChart compact /><div className="lp-hero-card-bottom"><span>240 orders</span><span>6 months of possibilities ↗</span></div></motion.div>
+      <div className="lp-hero-card lp-hero-chat"><div><Sparkles size={16} /><b>Ask your data.</b></div><p>What’s driving our revenue?</p><span><Check size={13} /> Context connected. Ready to explore.</span></div>
+      <div className="lp-hero-source"><Database /><span>DATABASES<br /><b>Connected to possibility.</b></span></div>
+    </motion.div>
+    <div className="lp-hero-bottom"><span>DATABASES. DOCUMENTS. ONE CONVERSATION.</span><a href="#sources" aria-label="Explore data connections"><ArrowDown size={20} /></a><span>SCROLL TO DISCOVER</span></div>
+  </section>;
+}
 
 export function LandingPage() {
   const navigate = useNavigate();
+  const reduced = useReducedMotion();
+  const [paused, setPaused] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const [hasScrolled, setHasScrolled] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
-
+  const exchangeStarted = useRef(false);
+  const stopMotion = paused || !!reduced;
   useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const code = urlParams.get("code");
-    
-    if (code) {
-      const exchangeCode = async () => {
-        setIsLoggingIn(true);
-        try {
-          const response = await fetch(`${API_BASE_URL}/api/auth/github-login`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ code }),
-          });
-
-          if (response.ok) {
-            const data = await response.json();
-            localStorage.setItem("token", data.access_token);
-            window.history.replaceState({}, document.title, window.location.pathname);
-            navigate("/dashboard");
-          }
-        } catch (err) {
-          console.error("GitHub Login failed", err);
-          setIsLoggingIn(false);
-        }
-      };
-      exchangeCode();
-    }
+    const updateHeader = () => setHasScrolled(window.scrollY > 8);
+    updateHeader();
+    window.addEventListener('scroll', updateHeader, { passive: true });
+    return () => window.removeEventListener('scroll', updateHeader);
+  }, []);
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get('code');
+    if (!code || exchangeStarted.current) return;
+    exchangeStarted.current = true;
+    const exchange = async () => {
+      setIsLoggingIn(true);
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/auth/github-login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) });
+        if (!response.ok) throw new Error('Login failed');
+        const data = await response.json();
+        if (!data.access_token) throw new Error('Missing token');
+        localStorage.setItem('token', data.access_token);
+        window.history.replaceState({}, document.title, window.location.pathname);
+        navigate('/dashboard');
+      } catch { toast.error('GitHub sign-in could not be completed. Please try again.'); }
+      finally { setIsLoggingIn(false); }
+    };
+    void exchange();
   }, [navigate]);
-
-  return (
-    <div className="min-h-screen bg-white">
-      {isLoggingIn && (
-        <div className="fixed inset-0 bg-white/80 z-50 flex items-center justify-center backdrop-blur-sm">
-          <div className="text-center">
-            <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-            <p className="text-lg font-semibold text-gray-800">Completing Secure Login...</p>
-          </div>
-        </div>
-      )}
-      {/* Navigation */}
-      <nav className="border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-                <MessageSquareCode className="w-5 h-5 text-white" />
-              </div>
-              <span className="font-semibold text-xl">DataSpeakAI</span>
-            </div>
-
-            <div className="hidden md:flex items-center gap-8">
-              <a href="#features" className="text-sm text-gray-600 hover:text-gray-900">
-                Features
-              </a>
-              <a href="#how-it-works" className="text-sm text-gray-600 hover:text-gray-900">
-                How it Works
-              </a>
-              <a href="#pricing" className="text-sm text-gray-600 hover:text-gray-900">
-                Pricing
-              </a>
-              <Link to="/login">
-                <Button variant="ghost">Login</Button>
-              </Link>
-              <Link to="/signup">
-                <Button>Get Started</Button>
-              </Link>
-            </div>
-          </div>
-        </div>
-      </nav>
-
-      {/* Hero Section */}
-      <section className="py-20 px-6">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center max-w-3xl mx-auto">
-            <div className="inline-flex items-center gap-2 bg-blue-50 text-blue-600 px-4 py-2 rounded-full text-sm mb-6">
-              <Sparkles className="w-4 h-4" />
-              <span>AI-Powered Business Intelligence Platform</span>
-            </div>
-
-            <h1 className="text-5xl md:text-6xl font-bold mb-6 bg-gradient-to-r from-gray-900 via-blue-800 to-purple-800 bg-clip-text text-transparent">
-              Transform Your Business Data Into Actionable Intelligence
-            </h1>
-
-            <p className="text-xl text-gray-600 mb-10">
-              Connect databases, upload documents, and let AI generate insights, reports, and answers instantly. 
-              Empower your team with intelligent data analysis and natural language querying.
-            </p>
-
-            <div className="flex items-center justify-center gap-4">
-              <Link to="/signup">
-                <Button size="lg" className="gap-2">
-                  Get Started
-                  <ArrowRight className="w-4 h-4" />
-                </Button>
-              </Link>
-              <Link to="/login">
-                <Button size="lg" variant="outline">
-                  Login
-                </Button>
-              </Link>
-            </div>
-
-            <div className="mt-12 rounded-2xl overflow-hidden shadow-2xl border border-gray-200">
-              <div className="bg-gradient-to-br from-blue-50 to-purple-50 p-8">
-                <div className="bg-white rounded-xl shadow-lg p-6">
-                  <div className="flex items-center gap-2 mb-4">
-                    <div className="w-3 h-3 rounded-full bg-red-400" />
-                    <div className="w-3 h-3 rounded-full bg-yellow-400" />
-                    <div className="w-3 h-3 rounded-full bg-green-400" />
-                  </div>
-                  <div className="space-y-4">
-                    <div className="flex gap-3">
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex-shrink-0" />
-                      <div className="flex-1 bg-gray-100 rounded-lg p-3">
-                        <p className="text-sm text-gray-700">
-                          Show me all orders from the last 30 days
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex gap-3 justify-end">
-                      <div className="flex-1 max-w-md bg-blue-500 text-white rounded-lg p-3">
-                        <p className="text-sm">
-                          Found 247 orders. Total revenue: $34,567. Top product:
-                          Premium Plan (89 orders)
-                        </p>
-                      </div>
-                      <div className="w-8 h-8 rounded-full bg-gray-200 flex-shrink-0" />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Features Section */}
-      <section id="features" className="py-20 px-6 bg-gray-50">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-4xl font-bold mb-4">
-              Everything you need to get started
-            </h2>
-            <p className="text-lg text-gray-600">
-              Powerful features to transform your database into an intelligent
-              assistant
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {features.map((feature) => (
-              <Card key={feature.title} className="border-gray-200">
-                <CardContent className="p-6">
-                  <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center mb-4">
-                    <feature.icon className="w-6 h-6 text-white" />
-                  </div>
-                  <h3 className="font-semibold mb-2">{feature.title}</h3>
-                  <p className="text-sm text-gray-600">{feature.description}</p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* How It Works Section */}
-      <section id="how-it-works" className="py-20 px-6">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-4xl font-bold mb-4">
-              How It Works
-            </h2>
-            <p className="text-lg text-gray-600">
-              Get your AI chatbot up and running in three simple steps
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-3 gap-8">
-            {steps.map((step, index) => (
-              <div key={step.number} className="relative">
-                <div className="flex flex-col items-center text-center">
-                  <div className="w-16 h-16 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-2xl font-bold mb-4">
-                    {step.number}
-                  </div>
-                  <h3 className="text-xl font-semibold mb-3">{step.title}</h3>
-                  <p className="text-gray-600">{step.description}</p>
-                </div>
-                {index < steps.length - 1 && (
-                  <div className="hidden md:block absolute top-8 left-1/2 w-full h-0.5 bg-gradient-to-r from-blue-200 to-purple-200" />
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Pricing Section */}
-      <section id="pricing" className="py-20 px-6 bg-gray-50">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-4xl font-bold mb-4">
-              Simple, transparent pricing
-            </h2>
-            <p className="text-lg text-gray-600">
-              Choose the plan that's right for your business
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-3 gap-8 max-w-6xl mx-auto">
-            {pricingPlans.map((plan) => (
-              <Card
-                key={plan.name}
-                className={`relative ${
-                  plan.highlighted
-                    ? "border-blue-500 shadow-xl"
-                    : "border-gray-200"
-                }`}
-              >
-                {plan.highlighted && (
-                  <div className="absolute -top-4 left-1/2 -translate-x-1/2">
-                    <div className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-1 rounded-full text-sm font-medium">
-                      Most Popular
-                    </div>
-                  </div>
-                )}
-                <CardContent className="p-8">
-                  <h3 className="text-xl font-semibold mb-2">{plan.name}</h3>
-                  <p className="text-sm text-gray-600 mb-6">
-                    {plan.description}
-                  </p>
-                  <div className="mb-6">
-                    <span className="text-4xl font-bold">{plan.price}</span>
-                    <span className="text-gray-600">{plan.period}</span>
-                  </div>
-                  <Button
-                    className={`w-full mb-6 ${
-                      plan.highlighted
-                        ? ""
-                        : "bg-gray-900 hover:bg-gray-800"
-                    }`}
-                  >
-                    {plan.cta}
-                  </Button>
-                  <ul className="space-y-3">
-                    {plan.features.map((feature) => (
-                      <li key={feature} className="flex items-start gap-3">
-                        <Check className="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" />
-                        <span className="text-sm text-gray-600">{feature}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* CTA Section */}
-      <section className="py-20 px-6">
-        <div className="max-w-4xl mx-auto">
-          <Card className="bg-gradient-to-br from-blue-500 to-purple-600 border-0">
-            <CardContent className="p-12 text-center text-white">
-              <h2 className="text-3xl md:text-4xl font-bold mb-4">
-                Ready to get started?
-              </h2>
-              <p className="text-lg text-blue-100 mb-8">
-                Join thousands of businesses using DataSpeakAI to transform
-                their data into actionable intelligence
-              </p>
-              <div className="flex items-center justify-center gap-4">
-                <Link to="/signup">
-                  <Button
-                    size="lg"
-                    variant="secondary"
-                    className="gap-2"
-                  >
-                    Start Free Trial
-                    <ArrowRight className="w-4 h-4" />
-                  </Button>
-                </Link>
-                <Button
-                  size="lg"
-                  variant="outline"
-                  className="bg-transparent border-white text-white hover:bg-white/10"
-                >
-                  Schedule Demo
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </section>
-
-      {/* Footer */}
-      <footer className="border-t border-gray-200 py-12 px-6">
-        <div className="max-w-7xl mx-auto">
-          <div className="grid md:grid-cols-4 gap-8 mb-8">
-            <div>
-              <div className="flex items-center gap-2 mb-4">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-                  <MessageSquareCode className="w-4 h-4 text-white" />
-                </div>
-                <span className="font-semibold">DataSpeakAI</span>
-              </div>
-              <p className="text-sm text-gray-600">
-                AI-powered business intelligence platform for data-driven decision making
-              </p>
-            </div>
-
-            <div>
-              <h4 className="font-semibold mb-4">Product</h4>
-              <ul className="space-y-2 text-sm text-gray-600">
-                <li>
-                  <a href="#features" className="hover:text-gray-900">
-                    Features
-                  </a>
-                </li>
-                <li>
-                  <a href="#pricing" className="hover:text-gray-900">
-                    Pricing
-                  </a>
-                </li>
-                <li>
-                  <a href="#" className="hover:text-gray-900">
-                    Documentation
-                  </a>
-                </li>
-                <li>
-                  <a href="#" className="hover:text-gray-900">
-                    API Reference
-                  </a>
-                </li>
-              </ul>
-            </div>
-
-            <div>
-              <h4 className="font-semibold mb-4">Company</h4>
-              <ul className="space-y-2 text-sm text-gray-600">
-                <li>
-                  <a href="#" className="hover:text-gray-900">
-                    About Us
-                  </a>
-                </li>
-                <li>
-                  <a href="#" className="hover:text-gray-900">
-                    Blog
-                  </a>
-                </li>
-                <li>
-                  <a href="#" className="hover:text-gray-900">
-                    Careers
-                  </a>
-                </li>
-                <li>
-                  <a href="#" className="hover:text-gray-900">
-                    Contact
-                  </a>
-                </li>
-              </ul>
-            </div>
-
-            <div>
-              <h4 className="font-semibold mb-4">Legal</h4>
-              <ul className="space-y-2 text-sm text-gray-600">
-                <li>
-                  <a href="#" className="hover:text-gray-900">
-                    Privacy Policy
-                  </a>
-                </li>
-                <li>
-                  <a href="#" className="hover:text-gray-900">
-                    Terms of Service
-                  </a>
-                </li>
-                <li>
-                  <a href="#" className="hover:text-gray-900">
-                    Security
-                  </a>
-                </li>
-              </ul>
-            </div>
-          </div>
-
-          <div className="border-t border-gray-200 pt-8 flex flex-col md:flex-row items-center justify-between gap-4">
-            <p className="text-sm text-gray-600">
-              © 2026 DataSpeakAI. All rights reserved.
-            </p>
-            <div className="flex items-center gap-4">
-              <a href="#" className="text-gray-600 hover:text-gray-900">
-                <Twitter className="w-5 h-5" />
-              </a>
-              <a href="#" className="text-gray-600 hover:text-gray-900">
-                <Github className="w-5 h-5" />
-              </a>
-              <a href="#" className="text-gray-600 hover:text-gray-900">
-                <Linkedin className="w-5 h-5" />
-              </a>
-            </div>
-          </div>
-        </div>
-      </footer>
-    </div>
-  );
+  useEffect(() => {
+    if (!menu) return;
+    const close = (event: KeyboardEvent) => { if (event.key === 'Escape') { setMenu(false); document.getElementById('landing-menu-toggle')?.focus(); } };
+    window.addEventListener('keydown', close);
+    return () => window.removeEventListener('keydown', close);
+  }, [menu]);
+  return <MotionConfig reducedMotion={stopMotion ? 'always' : 'user'}><div className="ds-landing" data-paused={stopMotion}>
+    <a className="lp-skip" href="#main">Skip to content</a>
+    {isLoggingIn && <div className="lp-login-overlay" role="status"><Sparkles /> Completing secure login…</div>}
+    <header className={`lp-nav${hasScrolled ? ' is-scrolled' : ''}`}><Link to="/" className="lp-brand" aria-label="DataSpeakAI home"><MessageSquareCode /><span>DataSpeak<span>AI</span></span></Link><nav id="landing-navigation" className={menu ? 'is-open' : ''} aria-label="Main navigation">{[['Platform', 'sources'], ['AI insights', 'insights'], ['AI chat', 'demo'], ['For your website', 'widget']].map(([label, id]) => <a key={id} href={`#${id}`} onClick={() => setMenu(false)}>{label}</a>)}</nav><div className="lp-nav-actions"><Link to="/login">Log in</Link><Link to="/signup" className="lp-button lp-small">Sign up <ArrowUpRight size={14} /></Link><button id="landing-menu-toggle" className="lp-menu" aria-expanded={menu} aria-controls="landing-navigation" aria-label={menu ? 'Close navigation' : 'Open navigation'} onClick={() => setMenu(!menu)}>{menu ? <X /> : <Menu />}</button></div></header>
+    <button className="lp-motion-toggle" aria-pressed={paused} onClick={() => setPaused(!paused)} aria-label={paused ? 'Resume animations' : 'Pause animations'} disabled={!!reduced}>{stopMotion ? <Play size={14} /> : <Pause size={14} />}<span>{reduced ? 'Reduced motion' : paused ? 'Resume motion' : 'Pause motion'}</span></button>
+    <main id="main"><Hero paused={stopMotion} />
+<section id="sources" className="lp-section lp-connections"><div className="lp-section-heading"><span className="lp-overline">ALL YOUR SOURCES. ALL YOUR POSSIBILITIES.</span><h2>Everything connects.<br /><span>Then everything clicks.</span></h2><p>From your first spreadsheet to your business database.<br />Bring the knowledge. We’ll help you find the answers.</p></div><IntegrationCards paused={stopMotion} /></section>
+      <section id="insights" className="lp-section lp-insights"><div className="lp-section-heading"><span className="lp-overline">FROM CONNECTED DATA TO A COMPLETE PICTURE</span><h2>The dashboard.<br /><span>Already thought through.</span></h2><p>Your KPIs. Your trends. Your next question.<br />Explore the approved Business Insights dashboard.</p></div><iframe className="lp-approved-dashboard" title="DataSpeakAI approved five-domain dashboard" src="/dashboards-5-domains.html" loading="lazy" /></section>
+      <section id="demo" className="lp-section lp-chat-section"><div className="lp-section-heading"><span className="lp-overline">MEET YOUR DATA’S BETTER HALF</span><h2>A conversation.<br /><span>A world of answers.</span></h2><p>Your chatbot already knows where to look.<br />Explore database answers, document evidence and hybrid context.</p></div><ChatScene paused={stopMotion} /><Link className="lp-button" to="/signup">Start your own conversation <ArrowUpRight size={17} /></Link></section>
+      <section id="widget" className="lp-section lp-widget-section"><div className="lp-section-heading"><span className="lp-overline">BUILT BY YOU. POWERED BY YOUR KNOWLEDGE.</span><h2>Your website.<br /><span>Now with answers.</span></h2><p>Make the assistant look at home. Give it your sources.<br />Take your AI from the workspace to your website.</p></div><WidgetScene paused={stopMotion} /></section>
+      <section id="security" className="lp-section lp-security"><div className="lp-security-art" aria-hidden="true"><div /><div /><ShieldCheck size={120} strokeWidth={.8} /><span>YOUR DATA, IN YOUR CONTROL</span></div><div><span className="lp-overline">OPEN POSSIBILITIES. DEFINED BOUNDARIES.</span><h2>Curiosity.<br /><span>With confidence.</span></h2><p>Keep conversations within your organization’s data access. Control roles, database permissions and the sources your website visitors can reach.</p><ul><li><Check size={17} /> Tenant-scoped data access</li><li><Check size={17} /> Safe database query controls</li><li><Check size={17} /> Origin-checked widget sessions</li></ul><a href="#faq" className="lp-text-link">Get to know the details <ArrowRight size={16} /></a></div></section>
+      <section className="lp-section lp-start"><span className="lp-overline">THREE STEPS. ONE BIG LEAP.</span><h2>Make your next move.</h2><div>{[['01', 'Connect.', 'Add a database, dataset or document.'], ['02', 'Explore.', 'Ask a question. Generate insights. Follow the evidence.'], ['03', 'Share.', 'Bring your team in, or put your assistant on your website.']].map(([n, t, p]) => <article key={n}><span>{n}</span><h3>{t}</h3><p>{p}</p></article>)}</div></section>
+      <section id="faq" className="lp-section lp-faq"><div><span className="lp-overline">A LITTLE MORE CLARITY</span><h2>Good questions.</h2></div><div>{faqs.map(([q, a]) => <details key={q}><summary>{q}<ChevronDown size={18} /></summary><p>{a}</p></details>)}</div></section>
+      <section className="lp-final"><div className="lp-final-orb" aria-hidden="true" /><span className="lp-overline">THE POSSIBILITIES ARE IN YOUR DATA</span><h2>Let’s find<br /><span>what’s next.</span></h2><Link to="/signup" className="lp-button">Get started with DataSpeakAI <ArrowUpRight size={18} /></Link></section>
+    </main><footer className="lp-footer"><div><Link className="lp-brand" to="/"><MessageSquareCode />DataSpeakAI</Link><p>A whole new conversation with your business.</p></div><nav aria-label="Footer"><a href="#sources">Connections</a><a href="#insights">Insights</a><a href="#demo">AI Chat</a><a href="#widget">Widget</a><a href="#faq">FAQs</a></nav><div className="lp-footer-bottom"><span>© {new Date().getFullYear()} DataSpeakAI</span><span><Globe2 size={14} /> Built for curious minds.</span></div></footer>
+  </div></MotionConfig>;
 }
