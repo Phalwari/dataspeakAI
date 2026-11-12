@@ -1,0 +1,46 @@
+{
+  "charts": [
+    {
+      "id": "employees_department_breakdown",
+      "reason": null,
+      "status": "available",
+      "type": "bar"
+    },
+    {
+      "id": "employees_trend",
+      "reason": null,
+      "status": "available",
+      "type": "area"
+    }
+  ],
+  "db_type": "sqlite",
+  "metrics": [
+    {
+      "format": "integer",
+      "id": "employees_department_distinct",
+      "reason": null,
+      "status": "available"
+    },
+    {
+      "format": "currency",
+      "id": "employees_salary_avg",
+      "reason": null,
+      "status": "available"
+    },
+    {
+      "format": "currency",
+      "id": "employees_salary_sum",
+      "reason": null,
+      "status": "available"
+    },
+    {
+      "format": "integer",
+      "id": "employees_total_rows",
+      "reason": null,
+      "status": "available"
+    }
+  ],
+  "schema": 1,
+  "success": true,
+  "summary_source": "llm"
+}

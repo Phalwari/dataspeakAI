@@ -1,0 +1,46 @@
+{
+  "charts": [
+    {
+      "id": "orders_customer_segment_breakdown",
+      "reason": "no_rows",
+      "status": "unavailable",
+      "type": "bar"
+    },
+    {
+      "id": "orders_trend",
+      "reason": "no_rows",
+      "status": "unavailable",
+      "type": "area"
+    }
+  ],
+  "db_type": "mongodb",
+  "metrics": [
+    {
+      "format": "number",
+      "id": "orders_amount_avg",
+      "reason": "no_rows",
+      "status": "unavailable"
+    },
+    {
+      "format": "number",
+      "id": "orders_amount_sum",
+      "reason": "no_rows",
+      "status": "unavailable"
+    },
+    {
+      "format": "integer",
+      "id": "orders_customer_segment_distinct",
+      "reason": null,
+      "status": "zero"
+    },
+    {
+      "format": "integer",
+      "id": "orders_total_rows",
+      "reason": null,
+      "status": "available"
+    }
+  ],
+  "schema": 1,
+  "success": true,
+  "summary_source": "llm"
+}

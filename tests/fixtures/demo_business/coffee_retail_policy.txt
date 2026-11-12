@@ -1,0 +1,12 @@
+HARBOR COFFEE RETAIL — CUSTOMER AND REVENUE POLICY
+Synthetic demo document. Effective 1 September 2026. Currency: USD.
+
+Returns: Unopened coffee equipment may be returned within 30 calendar days of delivery. Opened coffee beans are non-returnable unless defective. Refunds are issued to the original payment method within 5 business days after inspection. The return authorization code prefix is HCR-RET.
+
+Shipping: Standard shipping costs $6 per order. Orders with merchandise subtotal of at least $100 qualify for free standard shipping. Express delivery costs $18 and is never included in the free-shipping offer.
+
+Support: Customer support is available Monday through Friday from 09:00 to 17:00 UTC. The support target is a first response within 4 business hours.
+
+Reporting definitions: Gross revenue is the sum of orders.total_amount across all order statuses. Delivered revenue includes only orders whose status is delivered. Pending and cancelled orders must not be called realized revenue. order_items.line_total is the extended line amount; do not multiply it by quantity again. All source dates in the demo database are in September and October 2026.
+
+Membership: The Harbor Club discount is 8 percent on equipment only. Membership does not discount shipping or coffee beans. This policy does not specify a loyalty points conversion rate, a 2027 revenue forecast, or competitor revenue. Do not infer those facts from this document.

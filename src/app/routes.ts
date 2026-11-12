@@ -16,7 +16,6 @@ import { ChatPage } from "./pages/dashboard/ChatPage";
 import { UsagePage } from "./pages/dashboard/UsagePage";
 import { LogsPage } from "./pages/dashboard/LogsPage";
 import { SettingsPage } from "./pages/dashboard/SettingsPage";
-import { AnalyticsPage } from "./pages/dashboard/AnalyticsPage";
 import { BusinessInsightsPage } from "./pages/dashboard/BusinessInsightsPage";
 import { CsvAnalyticsPage } from "./pages/dashboard/CsvAnalyticsPage";
 import { AdminPanel } from "./pages/admin/AdminPanel";
@@ -76,10 +75,6 @@ export const router = createBrowserRouter([
       {
         path: "upload-documents",
         Component: UploadDocumentsPage,
-      },
-      {
-        path: "analytics",
-        Component: AnalyticsPage,
       },
       {
         path: "insights",

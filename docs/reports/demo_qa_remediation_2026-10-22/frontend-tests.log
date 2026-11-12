@@ -1,0 +1,16 @@
+
+> @figma/my-make-file@0.0.1 test
+> vitest run --run
+
+
+ RUN  v3.0.7 C:/Users/waliu/OneDrive - Higher Education Commission/Desktop/dataspeakAI
+
+ ✓ src/app/utils/__tests__/permissions.test.ts (12 tests) 33ms
+ ✓ src/widget/__tests__/sseParser.test.ts (14 tests) 159ms
+ ✓ src/app/components/__tests__/SafeMarkdown.test.tsx (12 tests) 164ms
+ ✓ src/app/utils/__tests__/erdTransformAndLayout.test.ts (9 tests) 182ms
+
+ Test Files  4 passed (4)
+      Tests  47 passed (47)
+   Start at  00:16:41
+   Duration  22.42s (transform 4.62s, setup 0ms, collect 15.52s, tests 538ms, environment 18ms, prepare 10.97s)

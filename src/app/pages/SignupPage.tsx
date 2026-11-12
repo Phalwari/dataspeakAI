@@ -8,6 +8,7 @@ import { Checkbox } from "../components/ui/checkbox";
 import { useState } from "react";
 import { API_BASE_URL } from "../config/api";
 import { Github } from "lucide-react";
+import "./AuthPages.css";
 
 export function SignupPage() {
   const navigate = useNavigate();
@@ -70,18 +71,18 @@ export function SignupPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50 flex items-center justify-center p-6">
+    <div className="auth-page min-h-screen flex items-center justify-center p-6">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <Link to="/" className="inline-flex items-center gap-2 mb-6">
-            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+            <div className="auth-brand-mark w-10 h-10 rounded-lg flex items-center justify-center">
               <MessageSquareCode className="w-6 h-6 text-white" />
             </div>
             <span className="font-semibold text-2xl">DataSpeakAI</span>
           </Link>
         </div>
 
-        <Card className="shadow-xl">
+        <Card className="auth-card shadow-xl">
           <CardHeader className="space-y-1">
             <CardTitle className="text-2xl">Create an account</CardTitle>
             <CardDescription>
@@ -92,7 +93,7 @@ export function SignupPage() {
             <div className="mb-6 flex justify-center">
               <Button 
                 variant="outline" 
-                className="w-full gap-2 py-6 text-base" 
+                className="auth-social w-full gap-2 py-6 text-base"
                 onClick={handleGithubLogin}
                 disabled={isLoading}
                 type="button"
@@ -193,7 +194,7 @@ export function SignupPage() {
                 </label>
               </div>
 
-              <Button type="submit" className="w-full" disabled={isLoading}>
+              <Button type="submit" className="auth-primary w-full" disabled={isLoading}>
                 {isLoading ? "Creating Account..." : "Create Account"}
               </Button>
             </form>

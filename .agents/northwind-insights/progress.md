@@ -1,0 +1,1 @@
+Completed: Northwind joins/date roles, safe period comparisons, bounded summary repair. 70 backend tests, 50 frontend tests, build and FastAPI import passed. Existing backend needs restart/Refresh. See docs/sessions/2026-10-22_northwind_insights.md.

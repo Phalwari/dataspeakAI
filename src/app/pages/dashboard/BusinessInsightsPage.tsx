@@ -9,7 +9,7 @@ import {
   Sparkles, RefreshCw, Download, AlertTriangle, AlertCircle, CheckCircle2, Lightbulb,
   TrendingUp, TrendingDown, Minus, MessageSquare, X, Database, Clock, ArrowLeft,
   Table as TableIcon, Activity, Cpu, Compass, ShieldCheck, Check, Loader2,
-  Server, Plus, Search, Layers, ChevronDown, ChevronUp, Zap, Trash2
+  Server, Plus, Search, Layers, ChevronDown, ChevronUp, Zap, Trash2, Filter
 } from 'lucide-react';
 import {
   BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell,
@@ -17,34 +17,44 @@ import {
 } from 'recharts';
 import { API_BASE_URL } from '../../config/api';
 import { databaseConnectionsAPI } from '../../api/connections';
+import { selectPeriodChart } from '../../utils/insightPeriods';
 const API_URL = `${API_BASE_URL}/api`;
 
 // Curated vibrant enterprise chart palette
 const PALETTE = ['#6c47ff', '#00c2cb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#3b82f6', '#ec4899'];
 const KPI_ACCENTS = ['#6c47ff', '#00c2cb', '#10b981', '#f59e0b', '#8b5cf6', '#3b82f6'];
+const KPI_REASON_LABELS: Record<string, string> = {
+  missing_role: 'Required column missing',
+  missing_table: 'Source table unavailable',
+  query_failed: 'Database query failed',
+  no_rows: 'No rows found',
+  date_filter_unavailable: 'Date-filtered value unavailable',
+  unsupported_with_filter: 'This metric cannot use the selected dates',
+};
 const IMPACT_COLORS = { High: '#dc2626', Medium: '#d97706', Low: '#059669' };
-const PRESETS = [
+const PRESETS: [string, string, number | null][] = [
   ['all', 'All time', null],
   ['90d', 'Last 90 days', 90],
   ['30d', 'Last 30 days', 30],
   ['7d', 'Last 7 days', 7]
 ];
 
-// 6 Enterprise Database Layers
-const DB_PIPELINE_LAYERS = [
-  { step: 1, icon: Database, label: 'Layer 1: Multi-Table Relational Schema & Catalog Discovery' },
-  { step: 2, icon: Cpu, label: 'Layer 2: Deterministic Metric Recipes Formulation (Phase 2C)' },
-  { step: 3, icon: Compass, label: 'Layer 3: Rule-Based Chart & Dimensional Filter Planning (Phase 2D/2E)' },
-  { step: 4, icon: Activity, label: 'Layer 4: High-Speed SQL Aggregation & Query Execution' },
-  { step: 5, icon: Sparkles, label: 'Layer 5: Dual-Engine Strategic AI Executive Playbook' },
-  { step: 6, icon: ShieldCheck, label: 'Layer 6: Statistical Outlier & Anomaly Detection Engine' }
+// The progress view explains the safeguards behind the insight report in
+// business-friendly language.
+const INSIGHT_RUN_STAGES = [
+  { phase: 'A', icon: ShieldCheck, title: 'Secure analysis context', description: 'Scope the request to the selected connection and tenant cache.', detail: 'Access & cache safety' },
+  { phase: 'B', icon: Database, title: 'Discover the data catalog', description: 'Review supported tables, columns and declared relationships.', detail: 'Schema discovery' },
+  { phase: 'C', icon: Cpu, title: 'Classify data roles', description: 'Identify dates, identifiers, measures and excluded sensitive fields.', detail: 'Evidence-based roles' },
+  { phase: 'D', icon: Compass, title: 'Plan safe metrics', description: 'Prepare date-aware, dialect-aware read-only calculations.', detail: 'Filters & query plan' },
+  { phase: 'E', icon: Activity, title: 'Execute and validate', description: 'Run bounded aggregates and separate zero, unavailable and error states.', detail: 'Data quality checks' },
+  { phase: 'F', icon: Sparkles, title: 'Prepare decision-ready insights', description: 'Assemble charts, quality notes and an AI or deterministic summary.', detail: 'Report & fallback' }
 ];
 
 // Smooth count hook for KPI numbers
 function useCount(value: any) {
   const [out, setOut] = useState(String(value ?? '—'));
   useEffect(() => {
-    const str = String(value ?? '');
+    const str = String(value ?? '—');
     const m = str.match(/^([^\d-]*)(-?[\d,]*\.?\d+)(.*)$/);
     if (!m) { setOut(str); return undefined; }
     const [, pre, num, suf] = m;
@@ -117,8 +127,9 @@ export function BusinessInsightsPage() {
   const [pipelineData, setPipelineData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // In-place Date presets ('all', '90d', '30d', '7d')
+  // Calendar date presets ('all', '90d', '30d', '7d')
   const [preset, setPreset] = useState('all');
+  const [selectedDimensionFilter, setSelectedDimensionFilter] = useState<{ column: string; label: string; value: string } | null>(null);
 
   // Interactive Features
   const [expandedKpi, setExpandedKpi] = useState<any>(null);
@@ -241,13 +252,13 @@ export function BusinessInsightsPage() {
       .catch(() => {});
   }, [selectedConnection, connections, headers]);
 
-  // 6-Layer Enterprise Database Pipeline Animation (Only on explicit Run or Refresh)
+  // Insight-run progress animation (only on explicit Run or Refresh).
   const triggerAnalysisAnimation = useCallback((onFinish?: () => void) => {
     setAutoGenerateStep('analyzing');
     setAgAnalysisStep(0);
     const interval = setInterval(() => {
       setAgAnalysisStep((prev) => {
-        if (prev >= 5) {
+        if (prev >= INSIGHT_RUN_STAGES.length - 1) {
           clearInterval(interval);
           setTimeout(() => {
             if (onFinish) onFinish();
@@ -260,8 +271,23 @@ export function BusinessInsightsPage() {
     return interval;
   }, []);
 
-  // Main Pipeline Runner (Only triggered on Launchpad "Run AI Analytics" or "Refresh")
-  const runDatabaseAnalysis = async (connId = selectedConnection, tableChoice = activeTable, forceRefresh = false) => {
+  const dateRangeForPreset = (presetChoice: string) => {
+    const days = PRESETS.find(([id]) => id === presetChoice)?.[2];
+    if (!days) return null;
+    const today = new Date();
+    const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    start.setDate(start.getDate() - days + 1);
+    const formatLocalDate = (value: Date) =>
+      `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+    return { from: formatLocalDate(start), to: formatLocalDate(today) };
+  };
+
+  // The API computes every metric and chart for the same calendar window.
+  const runDatabaseAnalysis = async (
+    connId = selectedConnection, tableChoice = activeTable,
+    forceRefresh = false, requestedPreset = preset,
+    dimensionFilter: { column: string; value: string } | null = selectedDimensionFilter,
+  ) => {
     if (!connId) return;
     setLoading(true);
     setError(null);
@@ -274,6 +300,8 @@ export function BusinessInsightsPage() {
       animationDone = true;
       if (pipelineDone && fetchedData) {
         setPipelineData(fetchedData);
+        setPreset(requestedPreset);
+        setActiveTable(tableChoice);
         setAutoGenerateStep(null);
         setLoading(false);
       }
@@ -283,6 +311,15 @@ export function BusinessInsightsPage() {
       const q = new URLSearchParams();
       if (forceRefresh) q.set('refresh', 'true');
       if (tableChoice) q.set('table', tableChoice);
+      const dateRange = dateRangeForPreset(requestedPreset);
+      if (dateRange) {
+        q.set('date_from', dateRange.from);
+        q.set('date_to', dateRange.to);
+      }
+      if (dimensionFilter?.column && dimensionFilter.value) {
+        q.set('filter_column', dimensionFilter.column);
+        q.set('filter_value', dimensionFilter.value);
+      }
 
       const res = await fetch(`${API_URL}/insights/generate/${connId}${q.toString() ? `?${q}` : ''}`, { headers });
       if (!res.ok) throw new Error(`Could not generate insights (HTTP ${res.status})`);
@@ -292,6 +329,8 @@ export function BusinessInsightsPage() {
 
       if (animationDone) {
         setPipelineData(fetchedData);
+        setPreset(requestedPreset);
+        setActiveTable(tableChoice);
         setAutoGenerateStep(null);
         setLoading(false);
       }
@@ -303,15 +342,16 @@ export function BusinessInsightsPage() {
     }
   };
 
-  // CLIENT-SIDE INSTANT Table Scope Switcher (0ms response, 0 API calls, 0 LLM tokens burned!)
+  // A table switch recomputes the server-side analysis for that scope.
   const handleSelectTableScope = (tbl: string) => {
-    setActiveTable(tbl);
-    // Instant client-side filtering without burning tokens!
+    if (tbl !== activeTable && !loading) {
+      setSelectedDimensionFilter(null);
+      void runDatabaseAnalysis(selectedConnection, tbl, false, preset, null);
+    }
   };
 
-  // CLIENT-SIDE INSTANT Date Presets handler (0ms response, instant smooth rechart animation!)
-  const handleApplyPreset = (id: any) => {
-    setPreset(id);
+  const handleApplyPreset = (id: string) => {
+    if (id !== preset && !loading) void runDatabaseAnalysis(selectedConnection, activeTable, false, id);
   };
 
   // Interactive Drilldown Drawer Opener
@@ -331,7 +371,13 @@ export function BusinessInsightsPage() {
     });
 
     try {
-      const filterBody = label != null && label !== 'All' ? { [field]: label } : {};
+      let filterBody: any = label != null && label !== 'All' ? { [field]: label } : {};
+      if (selectedDimensionFilter && selectedDimensionFilter.column) {
+        const dimCol = selectedDimensionFilter.column.split('.').pop();
+        if (dimCol && dimCol !== field) {
+          filterBody = { ...filterBody, [dimCol]: selectedDimensionFilter.value };
+        }
+      }
       const res = await fetch(`${API_URL}/connections/${selectedConnection}/preview`, {
         method: 'POST',
         headers: {
@@ -428,7 +474,7 @@ export function BusinessInsightsPage() {
     });
   }, [rawCharts]);
 
-  // 1. DYNAMICALLY FILTER CHARTS: Sliced by horizon preset AND scoped by activeTable (CLIENT-SIDE!)
+  // The backend already applies the requested calendar range to chart queries.
   const charts = useMemo(() => {
     let result = rawCharts;
 
@@ -438,28 +484,10 @@ export function BusinessInsightsPage() {
       if (tableMatches.length > 0) result = tableMatches;
     }
 
-    // Filter by date horizon preset if time series exists
-    if (preset !== 'all' && hasTimeSeriesData) {
-      result = result.map((c: any) => {
-        const type = (c.type || '').toLowerCase();
-        if (type === 'line' || type === 'area') {
-          const rawData = c.data || [];
-          if (!rawData.length) return c;
-          // In monthly series: 90d -> last 4 periods, 30d -> last 2 periods, 7d -> last 1 period
-          const count = preset === '7d' ? 2 : preset === '30d' ? 4 : 8;
-          return {
-            ...c,
-            data: rawData.slice(-Math.min(rawData.length, count))
-          };
-        }
-        return c;
-      });
-    }
-
     return result;
-  }, [rawCharts, activeTable, preset, hasTimeSeriesData]);
+  }, [rawCharts, activeTable]);
 
-  // 2. DYNAMICALLY RECALCULATE KPIS: Changes values when Horizon or Table scope changes!
+  // KPI values come from the same server-side calendar range as the charts.
   const kpis = useMemo(() => {
     let result = baseKpis;
 
@@ -469,62 +497,18 @@ export function BusinessInsightsPage() {
       if (tableMatches.length > 0) result = tableMatches;
     }
 
-    // Recalculate KPI numbers when Horizon preset changes!
-    if (preset !== 'all' && hasTimeSeriesData) {
-      const allTimeData = rawCharts.find((c: any) => c.type === 'line' || c.type === 'area')?.data || [];
-      if (allTimeData.length > 0) {
-        const allSum = allTimeData.reduce((acc: number, d: any) => acc + Number(d.value || 0), 0);
-        const count = preset === '7d' ? 1 : preset === '30d' ? 2 : 4;
-        const sliced = allTimeData.slice(-Math.min(allTimeData.length, count));
-        const slicedSum = sliced.reduce((acc: number, d: any) => acc + Number(d.value || 0), 0);
-        const ratio = allSum > 0 ? slicedSum / allSum : (preset === '7d' ? 0.08 : preset === '30d' ? 0.22 : 0.5);
-        const periodText = preset === '7d' ? 'last 7 days' : preset === '30d' ? 'last 30 days' : 'last 90 days';
-
-        result = result.map((k: any) => {
-          const labelLower = (k.label || '').toLowerCase();
-          // Monetary metric (Revenue, Sales, Spend):
-          if (labelLower.includes('revenue') || labelLower.includes('sales') || labelLower.includes('spend')) {
-            const valNum = slicedSum > 0 ? slicedSum : (k.raw_value ? k.raw_value * ratio : 2328.6 * ratio);
-            return {
-              ...k,
-              value: `$${valNum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-              trend_text: `in ${periodText}`
-            };
-          }
-          // Volume metric (Orders, Units, Tracks):
-          if (labelLower.includes('order') || labelLower.includes('volume') || labelLower.includes('track') || labelLower.includes('unit')) {
-            const baseNum = typeof k.raw_value === 'number' ? k.raw_value : parseFloat(String(k.value).replace(/[^0-9.]/g, '')) || 100;
-            const newVol = Math.max(1, Math.round(baseNum * ratio));
-            return {
-              ...k,
-              value: newVol.toLocaleString(),
-              trend_text: `in ${periodText}`
-            };
-          }
-          // Customer metric:
-          if (labelLower.includes('customer') || labelLower.includes('user') || labelLower.includes('account')) {
-            const baseNum = typeof k.raw_value === 'number' ? k.raw_value : parseFloat(String(k.value).replace(/[^0-9.]/g, '')) || 59;
-            const newCust = Math.max(1, Math.round(baseNum * Math.min(1, ratio * 2.2)));
-            return {
-              ...k,
-              value: newCust.toLocaleString(),
-              trend_text: `active in ${periodText}`
-            };
-          }
-          // Default:
-          return {
-            ...k,
-            trend_text: `in ${periodText}`
-          };
-        });
-      }
+    if (selectedDimensionFilter) {
+      result = result.map((k: any) => ({
+        ...k,
+        trend_text: `${k.trend_text || ''} · ${selectedDimensionFilter.label}: ${selectedDimensionFilter.value}`
+      }));
     }
 
     return result;
-  }, [baseKpis, activeTable, preset, hasTimeSeriesData, rawCharts]);
+  }, [baseKpis, activeTable, selectedDimensionFilter]);
 
   // Dynamically derive Period Comparison from Time-Series Chart data & KPIs
-  const timeSeriesChart = charts.find((c: any) => c.type === 'line' || c.type === 'area') || charts[0];
+  const timeSeriesChart = selectPeriodChart(charts);
   const periodComparisonData = useMemo(() => {
     if (pipelineData?.trends && pipelineData.trends.length >= 3) {
       return pipelineData.trends;
@@ -572,24 +556,7 @@ export function BusinessInsightsPage() {
       }
     }
 
-    // Complement with top KPIs to maintain balanced rows
-    if (rows.length < 4 && kpis && kpis.length > 0) {
-      kpis.forEach((k: any) => {
-        if (rows.length < 4 && !rows.find((r: any) => r.metric.toLowerCase().includes(k.label.toLowerCase()))) {
-          const numVal = parseFloat(String(k.value).replace(/[^0-9.-]/g, '')) || 0;
-          const trendPct = typeof k.trend_pct === 'number' ? k.trend_pct : 4.8;
-          const prevVal = trendPct !== -100 ? numVal / (1 + trendPct / 100) : numVal;
-          rows.push({
-            metric: k.label,
-            current: numVal,
-            previous: prevVal,
-            change_pct: trendPct,
-            table: k.table || 'Federated'
-          });
-        }
-      });
-    }
-
+    // A KPI percentage can be a share or ratio, not a historical comparison.
     return rows.length > 0 ? rows : (pipelineData?.trends || []);
   }, [pipelineData, timeSeriesChart, kpis]);
 
@@ -601,13 +568,16 @@ export function BusinessInsightsPage() {
   const activeTopPerformer = topPerformerCharts[activeTopPerformerCategory] || topPerformerCharts[0];
   const topPerformerRows = useMemo(() => {
     if (!activeTopPerformer || !Array.isArray(activeTopPerformer.data)) return [];
-    return activeTopPerformer.data.slice(0, 7);
+    const key = activeTopPerformer.yKey || 'value';
+    return activeTopPerformer.data
+      .filter((row: any) => typeof (row[key] ?? row.value ?? row.val ?? row.count) === 'number')
+      .slice(0, 7);
   }, [activeTopPerformer]);
 
   const maxPerformerVal = useMemo(() => {
     if (!topPerformerRows.length) return 1;
-    return Math.max(1, ...topPerformerRows.map((r: any) => Number(r.value || r.count || 0)));
-  }, [topPerformerRows]);
+    return Math.max(1, ...topPerformerRows.map((r: any) => Number(r[activeTopPerformer?.yKey || 'value'] ?? r.value ?? r.val ?? r.count)));
+  }, [topPerformerRows, activeTopPerformer]);
 
   // Filtered rows inside drilldown drawer
   const filteredDrillRows = useMemo(() => {
@@ -618,6 +588,16 @@ export function BusinessInsightsPage() {
       Object.values(row).some((val) => String(val).toLowerCase().includes(term))
     );
   }, [drilldown, drillSearch]);
+
+  const completedAnalysisStages = Math.min(agAnalysisStep, INSIGHT_RUN_STAGES.length);
+  const activeAnalysisStage = INSIGHT_RUN_STAGES[
+    Math.min(agAnalysisStep, INSIGHT_RUN_STAGES.length - 1)
+  ];
+  const analysisProgress = Math.round(
+    (completedAnalysisStages / INSIGHT_RUN_STAGES.length) * 100
+  );
+  const analysisScopeLabel = activeTable ? `${activeTable} table` : 'All catalog tables';
+  const analysisDateLabel = PRESETS.find(([id]) => id === preset)?.[1] || 'All dates';
 
   return (
     <div style={{ flex: 1, minHeight: '100vh', background: 'var(--bg)', color: 'var(--text-primary)', padding: '20px 28px 80px', transition: 'background-color 0.3s ease, color 0.3s ease' }}>
@@ -981,56 +961,99 @@ export function BusinessInsightsPage() {
         </motion.div>
       )}
 
-      {/* VIEW 2: 6-LAYER ENTERPRISE PIPELINE ANIMATION (Only shown on initial run or explicit Refresh) */}
-      {autoGenerateStep === 'analyzing' && (
-        <div style={{ minHeight: '500px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ width: '100%', maxWidth: '540px', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: '16px', padding: '28px', boxShadow: 'var(--shadow-card)' }}>
-            <div style={{ textAlign: 'center', marginBottom: '22px' }}>
-              <div style={{ width: '48px', height: '48px', background: 'linear-gradient(135deg,#6c47ff,#00c2cb)', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px', boxShadow: '0 6px 20px rgba(108,71,255,0.35)' }}>
-                <Database size={24} color="#fff" />
+      {/* VIEW 2: TRUSTED INSIGHT RUN PROGRESS (Only shown on initial run or explicit Refresh) */}
+      {autoGenerateStep === 'analyzing' && !pipelineData && (
+        <div style={{ minHeight: '500px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px 0' }}>
+          <motion.section
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.28 }}
+            aria-live="polite"
+            aria-label="Insight analysis progress"
+            style={{ width: '100%', maxWidth: '780px', overflow: 'hidden', background: 'var(--card)', border: '1px solid rgba(108, 71, 255, 0.2)', borderRadius: '20px', boxShadow: '0 18px 44px rgba(15, 23, 42, 0.10)' }}
+          >
+            <div style={{ padding: '26px 28px 22px', background: 'linear-gradient(135deg, rgba(108, 71, 255, 0.10), rgba(0, 194, 203, 0.08))', borderBottom: '1px solid rgba(108, 71, 255, 0.14)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: '14px', alignItems: 'flex-start' }}>
+                  <div style={{ width: '48px', height: '48px', background: 'linear-gradient(135deg,#6c47ff,#00c2cb)', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 22px rgba(108,71,255,0.30)', flexShrink: 0 }}>
+                    <Layers size={24} color="#fff" />
+                  </div>
+                  <div>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 8px', borderRadius: '999px', background: 'rgba(108, 71, 255, 0.12)', color: '#6246EA', fontSize: '10px', fontWeight: 800, letterSpacing: '0.08em' }}>
+                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10B981', boxShadow: '0 0 0 4px rgba(16,185,129,0.12)' }} />
+                      PHASE A–F INSIGHT RUN
+                    </div>
+                    <h3 style={{ fontSize: '20px', lineHeight: 1.25, fontWeight: 800, color: 'var(--text-primary)', margin: '9px 0 5px', letterSpacing: '-0.02em' }}>
+                      Building a trusted view of your data
+                    </h3>
+                    <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)', margin: 0 }}>
+                      {activeConnName} · {analysisScopeLabel} · {analysisDateLabel}
+                    </p>
+                  </div>
+                </div>
+                <div style={{ padding: '8px 10px', borderRadius: '10px', background: 'rgba(255,255,255,0.68)', border: '1px solid rgba(108, 71, 255, 0.16)', color: '#6246EA', fontSize: '11px', fontWeight: 800, whiteSpace: 'nowrap' }}>
+                  Phase {activeAnalysisStage.phase} in progress
+                </div>
               </div>
-              <h3 style={{ fontSize: '19px', fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 4px' }}>
-                Enterprise Database Pipeline
-              </h3>
-              <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)', margin: 0 }}>
-                Executing 6-layer deterministic analytics on {activeConnName}...
-              </p>
+
+              <div style={{ marginTop: '20px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '8px', color: 'var(--text-secondary)', fontSize: '11px', fontWeight: 700 }}>
+                  <span>{completedAnalysisStages} of {INSIGHT_RUN_STAGES.length} safeguards prepared</span>
+                  <span>{analysisProgress}%</span>
+                </div>
+                <div style={{ height: '8px', overflow: 'hidden', borderRadius: '999px', background: 'rgba(108, 71, 255, 0.12)' }}>
+                  <motion.div animate={{ width: `${analysisProgress}%` }} transition={{ duration: 0.35, ease: 'easeOut' }} style={{ height: '100%', borderRadius: 'inherit', background: 'linear-gradient(90deg, #6C47FF, #00C2CB)' }} />
+                </div>
+              </div>
             </div>
 
-            {DB_PIPELINE_LAYERS.map((s, idx) => {
+            <div style={{ padding: '18px 20px 14px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
+              {INSIGHT_RUN_STAGES.map((s, idx) => {
               const isDone = agAnalysisStep > idx;
               const isActive = agAnalysisStep === idx;
               const Icon = s.icon;
               return (
                 <div
-                  key={idx}
+                  key={s.phase}
                   style={{
                     display: 'flex',
-                    alignItems: 'center',
+                    alignItems: 'flex-start',
                     gap: '12px',
-                    padding: '11px 14px',
-                    borderRadius: '10px',
-                    background: isActive ? 'rgba(108,71,255,0.09)' : isDone ? 'rgba(16,185,129,0.08)' : 'var(--card-elevated, var(--card))',
-                    border: `1px solid ${isActive ? 'rgba(108,71,255,0.3)' : isDone ? 'rgba(16,185,129,0.2)' : 'var(--border)'}`,
-                    marginBottom: '8px',
+                    minHeight: '92px',
+                    padding: '13px',
+                    borderRadius: '12px',
+                    background: isActive ? 'rgba(108,71,255,0.09)' : isDone ? 'rgba(16,185,129,0.075)' : 'var(--card-elevated, var(--card))',
+                    border: `1px solid ${isActive ? 'rgba(108,71,255,0.34)' : isDone ? 'rgba(16,185,129,0.24)' : 'var(--border)'}`,
                     transition: 'all 0.3s ease'
                   }}
                 >
-                  <div style={{ width: '30px', height: '30px', borderRadius: '8px', background: isActive ? 'rgba(108,71,255,0.18)' : isDone ? 'rgba(16,185,129,0.15)' : 'var(--hover-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <div style={{ width: '32px', height: '32px', borderRadius: '9px', background: isActive ? 'rgba(108,71,255,0.18)' : isDone ? 'rgba(16,185,129,0.15)' : 'var(--hover-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     {isDone ? <Check size={16} color="#10B981" /> : isActive ? <Loader2 size={16} className="animate-spin" color="var(--primary)" /> : <Icon size={16} color="var(--text-secondary)" />}
                   </div>
-                  <span style={{ fontSize: '12.5px', fontWeight: 600, color: isActive ? 'var(--primary)' : isDone ? '#10B981' : 'var(--text-secondary)' }}>
-                    {s.label}
-                  </span>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '7px', flexWrap: 'wrap' }}>
+                      <span style={{ color: isActive ? '#6246EA' : isDone ? '#059669' : 'var(--text-secondary)', fontSize: '10px', fontWeight: 800, letterSpacing: '0.06em' }}>PHASE {s.phase}</span>
+                      <span style={{ color: isActive ? '#6246EA' : isDone ? '#059669' : 'var(--text-secondary)', fontSize: '10px', fontWeight: 700 }}>{isDone ? 'Complete' : isActive ? 'Working' : 'Queued'}</span>
+                    </div>
+                    <div style={{ color: isActive ? 'var(--primary)' : isDone ? '#047857' : 'var(--text-primary)', fontSize: '12.5px', fontWeight: 750, marginTop: '3px' }}>{s.title}</div>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '10.5px', lineHeight: 1.45, margin: '4px 0 0' }}>{s.description}</p>
+                  </div>
                 </div>
               );
             })}
           </div>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', padding: '0 20px 20px' }}>
+              {['Read-only analysis', 'Tenant-scoped context', 'Quality-aware results'].map((item) => (
+                <span key={item} style={{ padding: '5px 8px', borderRadius: '999px', background: 'var(--hover-bg)', color: 'var(--text-secondary)', fontSize: '10.5px', fontWeight: 700 }}>{item}</span>
+              ))}
+              <span style={{ marginLeft: 'auto', alignSelf: 'center', color: 'var(--text-secondary)', fontSize: '10.5px' }}>{activeAnalysisStage.detail}</span>
+            </div>
+          </motion.section>
         </div>
       )}
 
       {/* VIEW 3: FULL ENTERPRISE DASHBOARD WITH DRILLDOWN & SPARKLINES */}
-      {pipelineData && autoGenerateStep !== 'analyzing' && (
+      {pipelineData && (
         <motion.div
           id="bi-dashboard-export-target"
           className="bi-hub"
@@ -1074,6 +1097,12 @@ export function BusinessInsightsPage() {
                   <p style={{ fontSize: '12.5px', color: darkMode ? '#94A3B8' : '#64748B', margin: '3px 0 0' }}>
                     Live Multi-Table Relational Intelligence · {kpis.length} Deterministic Metrics · {charts.length} Analytical Views
                   </p>
+                  <p style={{ fontSize: '12px', color: '#64748B', margin: '3px 0 0' }}>
+                    {pipelineData.applied_date_from || pipelineData.applied_date_to
+                      ? `Applied dates: ${pipelineData.applied_date_from || 'earliest'} to ${pipelineData.applied_date_to || 'latest'}`
+                      : 'All dates'}
+                    {loading ? ' · Updating analysis…' : ''}
+                  </p>
                 </div>
               </div>
             </div>
@@ -1108,48 +1137,121 @@ export function BusinessInsightsPage() {
           </div>
 
           {/* Quick Date Presets & Filter Strip (ONLY shown if time-series data or multi-tables exist!) */}
-          {(hasTimeSeriesData || availableTables.length > 1) && (
-            <div className="glass-card no-export" style={{ padding: '14px 18px', marginBottom: '20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
-              
-              {/* Only show Date Horizon if date/timeline column actually exists in data! */}
-              {hasTimeSeriesData ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginRight: '4px' }}>
-                    <Clock size={13} style={{ verticalAlign: -2 }} /> Horizon:
-                  </span>
-                  {PRESETS.map(([id, label]) => (
-                    <button
-                      key={id}
-                      className={`chip ${preset === id ? 'active' : ''}`}
-                      onClick={() => handleApplyPreset(id)}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              ) : <div />}
+          {(hasTimeSeriesData || preset !== 'all' || availableTables.length > 1 || (pipelineData?.filters && pipelineData.filters.some((f: any) => f.options && f.options.length > 0))) && (
+            <div className="glass-card no-export" style={{ padding: '14px 18px', marginBottom: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+                {/* Only show Date Horizon if date/timeline column actually exists in data! */}
+                {(hasTimeSeriesData || preset !== 'all') ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginRight: '4px' }}>
+                      <Clock size={13} style={{ verticalAlign: -2 }} /> Horizon:
+                    </span>
+                    {PRESETS.map(([id, label]) => (
+                      <button
+                        key={id}
+                        className={`chip ${preset === id ? 'active' : ''}`}
+                        onClick={() => handleApplyPreset(id)}
+                        disabled={loading}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                ) : <div />}
 
-              {/* Table Scope Selector with ZERO-TOKEN Client-side instant filter */}
-              {availableTables.length > 1 && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginLeft: hasTimeSeriesData ? 'auto' : 0 }}>
-                  <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                    <TableIcon size={13} style={{ verticalAlign: -2 }} /> Scope:
-                  </span>
-                  <button
-                    className={`chip ${!activeTable ? 'active' : ''}`}
-                    onClick={() => handleSelectTableScope('')}
-                  >
-                    Federated (All)
-                  </button>
-                  {availableTables.slice(0, 6).map((tbl) => (
+                {/* Table Scope Selector with ZERO-TOKEN Client-side instant filter */}
+                {availableTables.length > 1 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginLeft: hasTimeSeriesData ? 'auto' : 0 }}>
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                      <TableIcon size={13} style={{ verticalAlign: -2 }} /> Scope:
+                    </span>
                     <button
-                      key={tbl}
-                      className={`chip ${activeTable === tbl ? 'active' : ''}`}
-                      onClick={() => handleSelectTableScope(tbl)}
+                      className={`chip ${!activeTable ? 'active' : ''}`}
+                      onClick={() => handleSelectTableScope('')}
+                      disabled={loading}
                     >
-                      {tbl}
+                      Federated (All)
                     </button>
-                  ))}
+                    {availableTables.slice(0, 6).map((tbl) => (
+                      <button
+                        key={tbl}
+                        className={`chip ${activeTable === tbl ? 'active' : ''}`}
+                        onClick={() => handleSelectTableScope(tbl)}
+                        disabled={loading}
+                      >
+                        {tbl}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Dimensional Filters Row (Borough, Cuisine, etc.) */}
+              {pipelineData?.filters && pipelineData.filters.filter((f: any) => f.options && f.options.length > 0 && (!activeTable || f.column.toLowerCase().startsWith(activeTable.toLowerCase()))).length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', paddingTop: '10px', borderTop: '1px solid var(--border-subtle)' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                    <Filter size={13} style={{ verticalAlign: -1 }} /> Filter by:
+                  </span>
+                  {pipelineData.filters
+                    .filter((f: any) => f.options && f.options.length > 0 && (!activeTable || f.column.toLowerCase().startsWith(activeTable.toLowerCase())))
+                    .slice(0, 4)
+                    .map((f: any) => {
+                      const isActive = selectedDimensionFilter?.column === f.column;
+                      return (
+                        <div key={f.column} style={{ display: 'flex', alignItems: 'center' }}>
+                          <select
+                            value={isActive ? selectedDimensionFilter.value : ''}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              const nextFilter = val
+                                ? { column: f.column, label: f.label, value: val }
+                                : null;
+                              setSelectedDimensionFilter(nextFilter);
+                              if (!loading) {
+                                void runDatabaseAnalysis(
+                                  selectedConnection,
+                                  activeTable,
+                                  false,
+                                  preset,
+                                  nextFilter ? { column: nextFilter.column, value: nextFilter.value } : null,
+                                );
+                              }
+                            }}
+                            style={{
+                              padding: '5px 12px',
+                              borderRadius: '20px',
+                              border: isActive ? '1px solid #6c47ff' : '1px solid var(--border)',
+                              background: isActive ? 'rgba(108, 71, 255, 0.08)' : 'var(--card)',
+                              color: isActive ? '#6c47ff' : 'var(--text-primary)',
+                              fontSize: '12px',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              outline: 'none'
+                            }}
+                          >
+                            <option value="">{f.label}: All</option>
+                            {f.options.map((opt: string) => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                        </div>
+                      );
+                    })}
+
+                  {selectedDimensionFilter && (
+                    <button
+                      className="chip"
+                      onClick={() => {
+                        setSelectedDimensionFilter(null);
+                        if (!loading) {
+                          void runDatabaseAnalysis(selectedConnection, activeTable, false, preset, null);
+                        }
+                      }}
+                      style={{ color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)', padding: '4px 10px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                    >
+                      <X size={12} /> Clear ({selectedDimensionFilter.value})
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -1168,7 +1270,11 @@ export function BusinessInsightsPage() {
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
                 <Sparkles size={16} color="#6C63FF" />
                 <span style={{ fontSize: '12.5px', fontWeight: 700, color: '#6C63FF', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-                  Dual-Engine AI Executive Playbook ({aiExecutive.business_domain || 'Enterprise Business'})
+                  {aiExecutive.source === 'deterministic_fallback'
+                    ? 'Auto-generated summary (AI unavailable)'
+                    : aiExecutive.source === 'llm'
+                      ? `Dual-Engine AI Executive Playbook (${aiExecutive.business_domain || 'Enterprise Business'})`
+                      : 'Executive summary'}
                 </span>
               </div>
               <p style={{ fontSize: '14px', color: darkMode ? '#F8FAFC' : '#1E293B', margin: 0, lineHeight: 1.6, fontWeight: 500 }}>
@@ -1195,6 +1301,8 @@ export function BusinessInsightsPage() {
                 const accentColor = KPI_ACCENTS[idx % KPI_ACCENTS.length];
                 const isUp = kpi.trend_direction === 'up';
                 const isDown = kpi.trend_direction === 'down';
+                const unavailable = kpi.status === 'unavailable' || kpi.status === 'error' || kpi.value == null;
+                const reasonLabel = KPI_REASON_LABELS[kpi.reason] || 'Metric unavailable';
 
                 // Find matching sparkline dataset from charts
                 const matchingChart = charts.find((c: any) => c.table === kpi.table && Array.isArray(c.data) && c.data.length > 2) || timeSeriesChart;
@@ -1216,13 +1324,13 @@ export function BusinessInsightsPage() {
                     </div>
 
                     <div style={{ fontSize: '28px', fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--text-primary)', marginBottom: '6px' }}>
-                      <AnimatedCount value={kpi.value} />
+                      <AnimatedCount value={unavailable ? '—' : kpi.value} />
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11.5px' }}>
-                      <span style={{ color: isUp ? '#10b981' : isDown ? '#ef4444' : 'var(--text-secondary)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                        {isUp ? <TrendingUp size={13} /> : isDown ? <TrendingDown size={13} /> : <Minus size={13} />}
-                        {kpi.trend_text || (kpi.trend_pct != null ? `${Math.abs(kpi.trend_pct)}% vs baseline` : 'vs baseline')}
+                      <span style={{ color: unavailable ? '#b45309' : isUp ? '#10b981' : isDown ? '#ef4444' : 'var(--text-secondary)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        {unavailable ? <AlertCircle size={13} /> : isUp ? <TrendingUp size={13} /> : isDown ? <TrendingDown size={13} /> : <Minus size={13} />}
+                        {unavailable ? reasonLabel : kpi.trend_text || (kpi.trend_pct != null ? `${Math.abs(kpi.trend_pct)}% vs baseline` : 'All-time value')}
                       </span>
                       <span style={{ color: 'var(--text-secondary)', fontSize: '11px', fontWeight: 500 }}>
                         {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
@@ -1358,7 +1466,7 @@ export function BusinessInsightsPage() {
               {topPerformerRows.length > 0 ? (
                 <div>
                   {topPerformerRows.map((p: any, idx: number) => {
-                    const pVal = Number(p.value || p.count || 0);
+                    const pVal = Number(p[activeTopPerformer?.yKey || 'value'] ?? p.value ?? p.val ?? p.count);
                     const pName = p.name || p.x || p.category || `Item ${idx + 1}`;
                     const pct = Math.min(100, Math.max(5, (pVal / maxPerformerVal) * 100));
 

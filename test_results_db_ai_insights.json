@@ -1,0 +1,116 @@
+{
+  "timestamp": "2026-10-20T23:48:42.692079",
+  "total": 12,
+  "passed": 12,
+  "failed": 0,
+  "results": [
+    {
+      "no": 1,
+      "test_case": "Check AI insights overview & KPI summary retrieval",
+      "attribute_value": "endpoint: 'GET /api/insights/'",
+      "expected_result": "Returns HTTP 200 with summary KPIs (total_insights, critical_count, pending_actions)",
+      "actual_result": "Pass",
+      "execution_time_ms": 12.47,
+      "error": null
+    },
+    {
+      "no": 2,
+      "test_case": "Check category filtering (Operational insights)",
+      "attribute_value": "category: 'Operational'",
+      "expected_result": "Filters insight stream strictly to Operational domain items",
+      "actual_result": "Pass",
+      "execution_time_ms": 10.3,
+      "error": null
+    },
+    {
+      "no": 3,
+      "test_case": "Check severity level filtering (warning severity)",
+      "attribute_value": "severity: 'warning'",
+      "expected_result": "Returns insights matching the specified warning severity threshold",
+      "actual_result": "Pass",
+      "execution_time_ms": 10.26,
+      "error": null
+    },
+    {
+      "no": 4,
+      "test_case": "Check cross-tenant database isolation & authorization",
+      "attribute_value": "database_id: 999999 (unowned)",
+      "expected_result": "Blocks cross-tenant enumeration and returns HTTP 404 Not Found",
+      "actual_result": "Pass",
+      "execution_time_ms": 10.26,
+      "error": null
+    },
+    {
+      "no": 5,
+      "test_case": "Check telemetry collection engine & query anomaly triggers",
+      "attribute_value": "tenant_id: 1, database_id: 58 (Neon E-Commerce DB)",
+      "expected_result": "Collects operational telemetry, query volume, and error rate metrics without leaks",
+      "actual_result": "Pass",
+      "execution_time_ms": 147.93,
+      "error": null
+    },
+    {
+      "no": 6,
+      "test_case": "Check dual-engine deterministic fallback synthesis",
+      "attribute_value": "telemetry: Neon E-Commerce DB metrics",
+      "expected_result": "Formulates factual structured insights and recommendations without LLM hallucinations",
+      "actual_result": "Pass",
+      "execution_time_ms": 0.08,
+      "error": null
+    },
+    {
+      "no": 7,
+      "test_case": "Check insight dismissal and status toggling workflow",
+      "attribute_value": "insight_id: Active Insight, status: 'dismissed' -> 'active'",
+      "expected_result": "Updates insight status in database and toggles visibility between active and dismissed",
+      "actual_result": "Pass",
+      "execution_time_ms": 33.29,
+      "error": null
+    },
+    {
+      "no": 8,
+      "test_case": "Check recommendation action status update workflow",
+      "attribute_value": "recommendation_id: Active Rec, status: 'completed'",
+      "expected_result": "Marks tactical recommendation as completed with verified audit persistence",
+      "actual_result": "Pass",
+      "execution_time_ms": 10.58,
+      "error": null
+    },
+    {
+      "no": 9,
+      "test_case": "Check Layer 2 deterministic metric recipes & zero-division guards",
+      "attribute_value": "recipes: Atomic (SUM) & Ratio (AOV) formulas",
+      "expected_result": "Constructs valid SQL formula definitions with safe divide-by-zero guards",
+      "actual_result": "Pass",
+      "execution_time_ms": 1.46,
+      "error": null
+    },
+    {
+      "no": 10,
+      "test_case": "Check Layer 3 dimensional chart planning & layout composition",
+      "attribute_value": "table: 'orders', charts: ['Monthly Revenue Velocity']",
+      "expected_result": "Generates validated DashboardLayoutPlan with recommended chart types and schemas",
+      "actual_result": "Pass",
+      "execution_time_ms": 0.09,
+      "error": null
+    },
+    {
+      "no": 11,
+      "test_case": "Check Layer 6 statistical outlier & anomaly boundary evaluation",
+      "attribute_value": "metric: 'Failure Rate' & 'Latency', expected: Normal, actual: 30% error / 1650ms",
+      "expected_result": "Flags 30% failure rate as critical anomaly and 1650ms latency as bottleneck",
+      "actual_result": "Pass",
+      "execution_time_ms": 0.03,
+      "error": null
+    },
+    {
+      "no": 12,
+      "test_case": "Check cache invalidation & atomic re-generation lifecycle",
+      "attribute_value": "connection_id: 58 (Neon E-Commerce DB)",
+      "expected_result": "Clears stale insights cache and guarantees fresh analytical processing on next request",
+      "actual_result": "Pass",
+      "execution_time_ms": 11.66,
+      "error": null
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+ORBIT SUBSCRIPTIONS — BILLING AND SUPPORT GUIDE
+Synthetic demo document. Effective 1 September 2026. Currency: USD.
+
+Plans: Starter is $29 per billing cycle, Growth is $79 per billing cycle, and Enterprise is $199 per billing cycle. One invoice represents one billed subscription cycle. Do not assume that an invoice is a new customer or that total invoice count equals active subscriptions.
+
+Billing: Paid revenue includes invoices with status paid only. Gross billed value includes paid and cancelled invoices. Cancelled invoice values are not collected revenue. No credit-card details or other payment credentials are stored in the demo data.
+
+Support SLA: High-priority support tickets have a first-response target of 1 business hour. Normal-priority tickets have a first-response target of 8 business hours. Resolution hours measure time to resolution, not time to first response, and cannot alone prove SLA compliance. The support escalation code is ORBIT-SLA-81.
+
+Cancellation: Subscribers can cancel before the next renewal date. Cancellation takes effect at the end of the current paid billing cycle. Refund requests are reviewed within 7 calendar days; this guide does not promise an automatic refund.
+
+Data structure: The MongoDB database contains invoices, customers, and support_tickets. Region is nested at customer.region inside invoices. Plan is a top-level invoice field. created_at is a BSON datetime. A cancelled invoice is retained for audit and must be explicitly excluded from paid revenue.
+
+The dataset contains no subscription start/end dates or usage events, so active MRR, customer churn, annual recurring revenue, and net revenue retention cannot be established reliably from invoice sums alone.

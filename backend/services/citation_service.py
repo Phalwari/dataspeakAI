@@ -25,7 +25,8 @@ LOW_CONFIDENCE_THRESHOLD = 0.60
 NEGATION_TOKENS = {
     "not", "never", "no", "none", "neither", "nor", "without",
     "hardly", "scarcely", "barely", "failed", "fails", "cannot", "can't",
-    "won't", "didn't", "doesn't", "isn't", "aren't", "wasn't", "weren't"
+    "won't", "didn't", "doesn't", "isn't", "aren't", "wasn't", "weren't",
+    "unspecified", "undocumented", "unavailable", "unknown"
 }
 
 
@@ -190,6 +191,13 @@ class CitationService:
 
         # Remove code blocks
         cleaned = re.sub(r'```.*?```', ' ', response_text, flags=re.DOTALL)
+        cleaned = re.sub(r'(?m)^\s*\*{0,2}(?:Source|Sources|Citation):.*$', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'(?m)^\s*\*\*([^*\n]+)\*\*\s*$',
+                         lambda m: m.group(0) if re.search(r'\d|\b(?:is|are|was|were|has|have|requires|allows|must|can)\b', m.group(1), re.I) else '', cleaned)
+        cleaned = re.split(r'(?im)^\s*(?:#{1,6}\s*)?\*{0,2}(?:suggested follow-ups|suggested questions|suggestions)\s*:\*{0,2}', cleaned)[0]
+        cleaned = re.sub(r'[\[【]Source:[^\]】]+[\]】]', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'(?m)^\s*#{1,6}\s+.*$', '', cleaned)
+        cleaned = cleaned.replace('**', '')
         
         table_claims: List[str] = []
         skipped_count = 0
@@ -217,6 +225,11 @@ class CitationService:
             for row in table_rows:
                 # Pair headers with row cells if lengths match
                 if headers and len(row) == len(headers):
+                    facts = [(header, value) for header, value in zip(headers, row)
+                             if value and header.casefold() not in {"source", "sources", "citation"}]
+                    if len(facts) == 2 and facts[0][0].casefold() in {"item", "policy item", "metric", "policy", "topic", "feature", "question"}:
+                        table_claims.append(f"{facts[0][1]}: {facts[1][1]}.")
+                        continue
                     row_facts = [f"{headers[i]} is {row[i]}" for i in range(len(row)) if row[i] and headers[i]]
                     if row_facts:
                         table_claims.append(", ".join(row_facts) + ".")
@@ -231,7 +244,7 @@ class CitationService:
             cleaned = "\n".join(table_cleaned_lines)
 
         # Split into sentence candidates
-        raw_sentences = re.split(r'(?<=[.!?])\s+', cleaned)
+        raw_sentences = re.split(r'(?<=[.!?])\s+|\n+', cleaned)
         claims: List[str] = []
 
         # Filter patterns for non-factual conversational fluff and polite abstentions
@@ -240,12 +253,17 @@ class CitationService:
             r'^(hello|hi|hey|greetings|thank you|thanks|sure|certainly|here is|here are|hope this helps)',
             r'^(in summary|in conclusion|to conclude|let me know)',
             r'^(note:|disclaimer:|warning:)',
+            r'^(ai synthesis is temporarily unavailable|please review the cited documents)',
+            r"^i couldn.t verify an answer",
             r'(?i)^(i searched|the indexed documents do not contain|there is no\b|no records or documents exist|i could not find|i couldn\'t find|no information is available|the provided context does not contain)',
         ]
 
         for s in raw_sentences:
             s_clean = s.strip().lstrip("-*#0123456789. ")
             if len(s_clean) < 15 or len(s_clean.split()) < 3:
+                skipped_count += 1
+                continue
+            if s_clean.endswith('?'):
                 skipped_count += 1
                 continue
 
@@ -292,6 +310,21 @@ class CitationService:
         """
         actual_text = answer or response_text or ""
         chunks = retrieved_chunks or []
+        # Match atomic claims to passages, not a long chapter embedding. Keep
+        # whole contexts too for claims that legitimately span several sentences.
+        candidates = []
+        for chunk in chunks:
+            evidence = chunk.get("evidence_content") or chunk.get("content", "")
+            candidates.append({**chunk, "content": evidence})
+            passages = [*re.split(r'\n\s*\n', evidence), *re.split(r'(?<=[.!?])\s+|\n+', evidence)]
+            for passage in dict.fromkeys(p.strip() for p in passages if len(p.strip()) > 12):
+                if len(candidates) >= 256:
+                    break
+                meta = dict(chunk.get("metadata") or {})
+                if chunk.get("evidence_parent_id") and passage not in chunk.get("content", ""):
+                    meta["chunk_id"] = chunk["evidence_parent_id"]
+                candidates.append({**chunk, "content":passage, "metadata":meta, "evidence_content":passage})
+        chunks = candidates
 
         if not actual_text or not chunks:
             return {
@@ -349,7 +382,7 @@ class CitationService:
             if embedding_model is None:
                 from routers.documents import _load_hf_embeddings
                 embedding_model = _load_hf_embeddings("all-MiniLM-L6-v2")
-            chunk_texts = [c.get("content", "") for c in chunks]
+            chunk_texts = [c.get("evidence_content") or c.get("content", "") for c in chunks]
             chunk_embeddings = embedding_model.embed_documents(chunk_texts)
             claim_embeddings = embedding_model.embed_documents(claims)
         except Exception as embed_err:
@@ -396,15 +429,24 @@ class CitationService:
             claim_text = claims[c_idx]
             best_score = -1.0
             best_chunk_idx = -1
+            best_valid_score = -1.0
+            best_valid_idx = -1
 
             for ch_idx, chunk_vec in enumerate(chunk_embeddings):
                 sim = self._cosine_similarity(np.array(claim_vec), np.array(chunk_vec))
                 if sim > best_score:
                     best_score = sim
                     best_chunk_idx = ch_idx
+                evidence = chunks[ch_idx].get("evidence_content") or chunks[ch_idx].get("content", "")
+                valid, _ = verify_numerical_and_negation(claim_text, evidence)
+                if valid and sim > best_valid_score:
+                    best_valid_score, best_valid_idx = sim, ch_idx
+
+            if best_valid_idx >= 0 and best_valid_score >= self.threshold:
+                best_score, best_chunk_idx = best_valid_score, best_valid_idx
 
             matched_chunk = chunks[best_chunk_idx] if best_chunk_idx >= 0 else {}
-            chunk_content = matched_chunk.get("content", "")
+            chunk_content = matched_chunk.get("evidence_content") or matched_chunk.get("content", "")
             meta = matched_chunk.get("metadata", {}) or {}
 
             # Perform deterministic numerical and negation checks

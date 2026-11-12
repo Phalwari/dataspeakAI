@@ -1,8 +1,8 @@
 """
 tests/test_phase1_dashboard_wiring_regression.py
 ------------------------------------------------
-Comprehensive automated regression tests for Phase 1 endpoints:
-1. GET /api/analytics/overview:
+Comprehensive automated regression tests for shared dashboard endpoints:
+1. GET /api/overview:
    - Returns real counts (queries, databases, documents, api_calls_today).
    - Generates 7-day query timeline.
    - Summarizes database activity.
@@ -212,7 +212,7 @@ def test_environment():
 
 
 def test_analytics_overview_endpoint(test_environment):
-    """Verify GET /api/analytics/overview returns live tenant metrics and 7-day timeline."""
+    """Verify GET /api/overview returns live tenant metrics and 7-day timeline."""
     env = test_environment
     db = env["db"]
     user = env["user1_admin"]
@@ -222,7 +222,7 @@ def test_analytics_overview_endpoint(test_environment):
     client = TestClient(app)
 
     try:
-        response = client.get("/api/analytics/overview")
+        response = client.get("/api/overview")
         assert response.status_code == 200, response.text
         data = response.json()
 
@@ -416,7 +416,7 @@ def test_tenant_data_isolation(test_environment):
 
     try:
         # Tenant 2 overview
-        res_overview = client.get("/api/analytics/overview")
+        res_overview = client.get("/api/overview")
         assert res_overview.status_code == 200
         overview_data = res_overview.json()
         assert overview_data["total_queries"] == 1  # Only 1 query for Tenant 2
@@ -472,7 +472,7 @@ def test_query_logs_csv_export_formula_injection_defense(test_environment):
 
 
 def test_api_overview_alias_route(test_environment):
-    """Verify /api/overview functions as a clean alias to /api/analytics/overview."""
+    """Verify /api/overview is the shared dashboard overview endpoint."""
     env = test_environment
     db = env["db"]
     user = env["user1_admin"]
@@ -486,7 +486,7 @@ def test_api_overview_alias_route(test_environment):
         assert res_alias.status_code == 200
         data_alias = res_alias.json()
 
-        res_full = client.get("/api/analytics/overview")
+        res_full = client.get("/api/overview")
         assert res_full.status_code == 200
         data_full = res_full.json()
 

@@ -207,7 +207,8 @@ app.include_router(chatbot_config.router)
 app.include_router(documents.router)
 app.include_router(query.router)
 app.include_router(chat.router)
-app.include_router(analytics.router)
+# Analytics & Visualization has been retired.  Its feature router is intentionally
+# not mounted; core overview, logs, usage and admin endpoints remain available.
 app.include_router(analytics.core_router)
 app.include_router(connections.router)
 app.include_router(insights.router)

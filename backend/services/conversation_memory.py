@@ -14,6 +14,7 @@ Conversation Memory Management for Phase 7 Task 7.1.4:
 
 import logging
 import asyncio
+import json
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 
@@ -100,6 +101,47 @@ class ConversationMemoryManager:
                 if len(snippet) > 600:
                     snippet = snippet[:600] + "..."
                 context_blocks.append(f"{role_label}: {snippet}")
+
+                # Inject prior execution metadata into multi-turn context (R2: Multi-Turn Anaphora & Context Continuity)
+                if msg.sender_role == "assistant" and getattr(msg, "metadata_json", None):
+                    raw_meta = msg.metadata_json
+                    if isinstance(raw_meta, str):
+                        try:
+                            meta = json.loads(raw_meta)
+                        except Exception:
+                            meta = {}
+                    elif isinstance(raw_meta, dict):
+                        meta = raw_meta
+                    else:
+                        meta = {}
+
+                    sql_data = meta.get("sql_data")
+                    if sql_data and isinstance(sql_data, dict):
+                        prev_sql = sql_data.get("generated_sql")
+                        row_count = sql_data.get("row_count")
+                        cols = sql_data.get("columns", [])
+                        if prev_sql:
+                            try:
+                                from services.sql_engine import extract_sql_referenced_tables
+                                tables = extract_sql_referenced_tables(prev_sql)
+                            except Exception:
+                                tables = []
+                            db_name = meta.get("database_name") or sql_data.get("database_name")
+                            db_str = f"Database=`{db_name}` | " if db_name else ""
+                            tbl_str = ", ".join(tables) if tables else "none"
+                            col_str = ", ".join(cols[:6]) if cols else "none"
+                            context_blocks.append(
+                                f"[Prior Execution: {db_str}SQL=`{prev_sql}` | Tables=[{tbl_str}] | Columns=[{col_str}] | Rows Returned={row_count}]"
+                            )
+                    sources = meta.get("sources")
+                    if sources and isinstance(sources, list):
+                        doc_names = list(dict.fromkeys(
+                            s.get("document_name") for s in sources if isinstance(s, dict) and s.get("document_name")
+                        ))
+                        if doc_names:
+                            context_blocks.append(
+                                f"[Prior Execution: Knowledge Base Sources=[{', '.join(doc_names[:4])}]]"
+                            )
 
         return "\n".join(context_blocks)
 

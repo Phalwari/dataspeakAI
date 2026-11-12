@@ -1,4 +1,16 @@
 from typing import List, Dict, Any, Optional
+import hashlib
+
+
+def _chunk_key(doc: Dict[str, Any]) -> str:
+    """Identify a passage, never collapse all passages of a document."""
+    meta = doc.get("metadata") or {}
+    if meta.get("chunk_id") is not None:
+        return f"chunk:{meta['document_id'] if 'document_id' in meta else ''}:{meta['chunk_id']}"
+    if meta.get("chunk_index") is not None:
+        return f"index:{meta.get('document_id')}:{meta['chunk_index']}"
+    digest = hashlib.sha256(doc.get("content", "").encode("utf-8")).hexdigest()
+    return f"content:{meta.get('document_id')}:{digest}"
 
 def reciprocal_rank_fusion(
     dense_results: List[Dict[str, Any]], 
@@ -14,20 +26,14 @@ def reciprocal_rank_fusion(
 
     # Process Dense Results
     for rank, doc in enumerate(dense_results, 1):
-        content = doc.get("content", "")
-        doc_key = f"{doc.get('metadata', {}).get('document_id')}_{doc.get('metadata', {}).get('chunk_index')}"
-        if not doc_key or doc_key == "None_None":
-            doc_key = str(hash(content))
+        doc_key = _chunk_key(doc)
             
         doc_map[doc_key] = doc
         rrf_scores[doc_key] = rrf_scores.get(doc_key, 0.0) + (1.0 / (k + rank))
 
     # Process Sparse BM25 Results
     for rank, doc in enumerate(sparse_results, 1):
-        content = doc.get("content", "")
-        doc_key = f"{doc.get('metadata', {}).get('document_id')}_{doc.get('metadata', {}).get('chunk_index')}"
-        if not doc_key or doc_key == "None_None":
-            doc_key = str(hash(content))
+        doc_key = _chunk_key(doc)
             
         doc_map[doc_key] = doc
         rrf_scores[doc_key] = rrf_scores.get(doc_key, 0.0) + (1.0 / (k + rank))

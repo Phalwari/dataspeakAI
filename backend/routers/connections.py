@@ -9,6 +9,7 @@ from sqlalchemy import inspect
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 import re
+import logging
 from urllib.parse import urlparse, unquote
 
 import models, schemas
@@ -16,10 +17,11 @@ from database import get_db, SessionLocal
 from dependencies import get_current_user
 from services.db_utils import encrypt_password, decrypt_password, get_connection_url
 from services.connection_factory import DatabaseConnectionFactory
-from services.db_pool import get_engine
+from services.db_pool import get_engine, invalidate_engine
 from services.database_connection_service import db_connection_service
 
 router = APIRouter(prefix="/api/connections", tags=["Database Connections"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("/list")
@@ -135,6 +137,19 @@ def get_connection_tables(
     if not c:
         raise HTTPException(status_code=404, detail="Database connection not found.")
 
+    if (c.db_type or "").lower() == "mongodb":
+        try:
+            from routers.databases import _get_mongo_client_and_db
+
+            client, mongo_db = _get_mongo_client_and_db(c)
+            try:
+                return sorted(name for name in mongo_db.list_collection_names() if not name.startswith("system."))
+            finally:
+                client.close()
+        except Exception as exc:
+            logger.error("MongoDB collection listing failed (%s)", type(exc).__name__)
+            raise HTTPException(status_code=400, detail="Failed to fetch database collections.") from None
+
     # Check cached tables_metadata first
     if c.tables_metadata:
         try:
@@ -156,7 +171,8 @@ def get_connection_tables(
         inspector = inspect(engine)
         return inspector.get_table_names()
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to inspect tables: {str(e)}")
+        logger.error("Database table inspection failed (%s)", type(e).__name__)
+        raise HTTPException(status_code=400, detail="Failed to inspect database tables") from None
 
 
 @router.post("/{connection_id}/retest")
@@ -178,6 +194,9 @@ def retest_connection(
         raise HTTPException(status_code=404, detail="Database connection not found.")
 
     pwd = decrypt_password(c.password) if c.password else ""
+    raw_conn = c.connection_string or (c.host if c.host and ("://" in str(c.host) or "mongodb" in str(c.host)) else None)
+    decrypted_conn = (decrypt_password(raw_conn) if raw_conn else None) or raw_conn or ""
+
     db_type = (c.db_type or "").lower().strip()
     success = False
     msg = ""
@@ -187,12 +206,12 @@ def retest_connection(
         if db_type == "postgresql":
             success, msg = db_connection_service.test_postgresql(
                 c.host, c.port or 5432, c.username or "", pwd, c.database or "postgres",
-                connection_string=c.connection_string
+                connection_string=decrypted_conn or None
             )
             if success:
                 schema = db_connection_service.get_postgresql_schema(
                     c.host, c.port or 5432, c.username or "", pwd, c.database or "postgres",
-                    connection_string=c.connection_string
+                    connection_string=decrypted_conn or None
                 )
 
         elif db_type in ("mysql", "mariadb"):
@@ -211,14 +230,15 @@ def retest_connection(
                 schema = db_connection_service.get_sqlite_schema(db_path)
 
         elif db_type == "mongodb":
-            conn_str = c.connection_string or c.host or ""
+            conn_str = decrypted_conn
             success, msg = db_connection_service.test_mongodb(conn_str)
             if success:
                 schema = db_connection_service.get_mongodb_schema(conn_str)
 
     except Exception as ex:
         success = False
-        msg = str(ex)
+        logger.error("Database connection retest failed (%s)", type(ex).__name__)
+        msg = "Database connection test failed"
 
     c.status = "connected" if success else "error"
     if schema:
@@ -252,6 +272,9 @@ def delete_connection(
     if not c:
         raise HTTPException(status_code=404, detail="Database connection not found.")
 
+    old_url = DatabaseConnectionFactory.get_connection_url(c)
+    if old_url:
+        invalidate_engine(old_url)
     db.delete(c)
     db.commit()
     return {"message": "Database connection deleted successfully", "id": connection_id}
@@ -276,6 +299,7 @@ def update_connection(
     if not c:
         raise HTTPException(status_code=404, detail="Database connection not found.")
 
+    old_url = DatabaseConnectionFactory.get_connection_url(c)
     update_dict = update_data.model_dump(exclude_unset=True)
     if "password" in update_dict and update_dict["password"]:
         c.password = encrypt_password(update_dict["password"])
@@ -286,6 +310,8 @@ def update_connection(
             setattr(c, key, value)
 
     db.commit()
+    if old_url:
+        invalidate_engine(old_url)
     db.refresh(c)
     return {
         "id": c.id,
@@ -364,16 +390,24 @@ def execute_connection_query(
         raise HTTPException(status_code=404, detail="Database connection not found.")
 
     decrypted_password = decrypt_password(c.password) if c.password else ""
-    return db_connection_service.execute_query(
-        db_type=c.db_type,
-        host=c.host,
-        port=c.port,
-        username=c.username,
-        password=decrypted_password,
-        database=c.database,
-        connection_string=c.connection_string,
-        query=query_req.query
-    )
+    raw_conn = c.connection_string or (c.host if c.host and ("://" in str(c.host) or "mongodb" in str(c.host)) else None)
+    decrypted_conn = (decrypt_password(raw_conn) if raw_conn else None) or raw_conn or ""
+    try:
+        return db_connection_service.execute_query(
+            db_type=c.db_type,
+            host=c.host,
+            port=c.port,
+            username=c.username,
+            password=decrypted_password,
+            database=c.database,
+            connection_string=decrypted_conn,
+            query=query_req.query
+        )
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Query was rejected by the read-only policy or is invalid.") from None
+    except Exception as exc:
+        logger.error("Database query execution failed (%s)", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Database query failed.") from None
 
 
 @router.post("/{connection_id}/ai-query")
@@ -426,6 +460,8 @@ def execute_ai_query(
         generated_query = f"SELECT * FROM {ai_req.table_name} LIMIT 50"
 
     decrypted_password = decrypt_password(c.password) if c.password else ""
+    raw_conn = c.connection_string or (c.host if c.host and ("://" in str(c.host) or "mongodb" in str(c.host)) else None)
+    decrypted_conn = (decrypt_password(raw_conn) if raw_conn else None) or raw_conn or ""
     results = db_connection_service.execute_query(
         db_type=c.db_type,
         host=c.host,
@@ -433,7 +469,7 @@ def execute_ai_query(
         username=c.username,
         password=decrypted_password,
         database=c.database,
-        connection_string=c.connection_string,
+        connection_string=decrypted_conn,
         query=generated_query
     )
     return {"query": generated_query, "results": results}

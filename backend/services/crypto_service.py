@@ -17,12 +17,16 @@ from cryptography.fernet import Fernet, InvalidToken
 logger = logging.getLogger(__name__)
 
 ENCRYPTION_PREFIX = "v1:"
-DEFAULT_DEV_FALLBACK = "dataspeakai-default-encryption-dev-key-32b"
 
 
 def _get_fernet() -> Fernet:
     """Derives a deterministic 32-byte urlsafe base64 key for Fernet symmetric encryption."""
-    key_material = os.getenv("DATA_ENCRYPTION_KEY") or os.getenv("SECRET_KEY") or DEFAULT_DEV_FALLBACK
+    key_material = os.getenv("DATA_ENCRYPTION_KEY") or os.getenv("SECRET_KEY")
+    if not key_material:
+        environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+        if environment in {"production", "prod"}:
+            raise RuntimeError("Credential encryption requires a configured production key.")
+        raise RuntimeError("Credential encryption key is not configured.")
     # Hash material to 32 bytes via SHA-256, then base64 urlsafe encode for Fernet specification
     digest = hashlib.sha256(key_material.encode("utf-8")).digest()
     fernet_key = base64.urlsafe_b64encode(digest)

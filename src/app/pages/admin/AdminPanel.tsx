@@ -167,7 +167,7 @@ export function AdminPanel() {
       const [statsRes, tenantsRes, healthRes] = await Promise.all([
         fetch(`${API_BASE_URL}/api/admin/stats`, { headers }),
         fetch(`${API_BASE_URL}/api/admin/tenants`, { headers }),
-        fetch(`${API_BASE_URL}/api/analytics/admin/system-health`, { headers }),
+        fetch(`${API_BASE_URL}/api/admin/system-health`, { headers }),
       ]);
 
       // Check for security policy boundary enforcement (HTTP 403 Forbidden)
