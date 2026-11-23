@@ -3,6 +3,7 @@ import logging
 from sqlalchemy.orm import Session
 from typing import List
 import models, schemas
+import auth
 from database import get_db
 from dependencies import get_current_user, require_source_manager, require_query_executor
 import time
@@ -35,7 +36,7 @@ def get_accessible_connection(
         models.DatabaseConnection.tenant_id == current_user.tenant_id
     )
 
-    if not (current_user.role in ("Admin", "Developer") or getattr(current_user, "is_platform_admin", False)):
+    if not auth.can_manage_sources(current_user):
         query = query.join(
             models.UserDatabaseAccess,
             models.DatabaseConnection.id == models.UserDatabaseAccess.database_id
@@ -55,7 +56,7 @@ def get_databases(
     if not current_user.tenant_id:
         raise HTTPException(status_code=404, detail="User has no associated tenant")
         
-    if current_user.role in ("Admin", "Developer") or getattr(current_user, "is_platform_admin", False):
+    if auth.can_manage_sources(current_user):
         databases = db.query(models.DatabaseConnection).filter(models.DatabaseConnection.tenant_id == current_user.tenant_id).all()
     else:
         # Filter by UserDatabaseAccess

@@ -2,6 +2,7 @@ import os
 import sys
 import pytest
 from unittest.mock import MagicMock, patch
+from types import SimpleNamespace, ModuleType
 
 backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backend"))
 if backend_dir not in sys.path:

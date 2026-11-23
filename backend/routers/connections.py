@@ -13,8 +13,10 @@ import logging
 from urllib.parse import urlparse, unquote
 
 import models, schemas
+import auth
 from database import get_db, SessionLocal
-from dependencies import get_current_user
+from dependencies import get_current_user, require_source_manager, require_query_executor
+from routers.databases import get_accessible_connection
 from services.db_utils import encrypt_password, decrypt_password, get_connection_url
 from services.connection_factory import DatabaseConnectionFactory
 from services.db_pool import get_engine, invalidate_engine
@@ -37,12 +39,16 @@ def list_connections(
     if not current_user.tenant_id:
         return {"connections": [], "total": 0}
 
-    conns = (
-        db.query(models.DatabaseConnection)
-        .filter(models.DatabaseConnection.tenant_id == current_user.tenant_id)
-        .order_by(models.DatabaseConnection.created_at.desc())
-        .all()
+    query = db.query(models.DatabaseConnection).filter(
+        models.DatabaseConnection.tenant_id == current_user.tenant_id
     )
+    if not auth.can_manage_sources(current_user):
+        query = query.join(
+            models.UserDatabaseAccess,
+            models.DatabaseConnection.id == models.UserDatabaseAccess.database_id
+        ).filter(models.UserDatabaseAccess.user_id == current_user.id)
+
+    conns = query.order_by(models.DatabaseConnection.created_at.desc()).all()
 
     result = []
     for c in conns:
@@ -71,16 +77,7 @@ def get_connection(
     db: Session = Depends(get_db)
 ):
     """Fetch a single connection for the tenant."""
-    c = (
-        db.query(models.DatabaseConnection)
-        .filter(
-            models.DatabaseConnection.id == connection_id,
-            models.DatabaseConnection.tenant_id == current_user.tenant_id,
-        )
-        .first()
-    )
-    if not c:
-        raise HTTPException(status_code=404, detail="Database connection not found.")
+    c = get_accessible_connection(connection_id, current_user, db)
 
     return {
         "id": c.id,
@@ -104,17 +101,7 @@ def get_connection_schema(
     db: Session = Depends(get_db)
 ):
     """Fetch stored schema catalog for a connection."""
-    c = (
-        db.query(models.DatabaseConnection)
-        .filter(
-            models.DatabaseConnection.id == connection_id,
-            models.DatabaseConnection.tenant_id == current_user.tenant_id,
-        )
-        .first()
-    )
-    if not c:
-        raise HTTPException(status_code=404, detail="Database connection not found.")
-
+    c = get_accessible_connection(connection_id, current_user, db)
     return c.tables_metadata or {}
 
 
@@ -126,16 +113,7 @@ def get_connection_tables(
     db: Session = Depends(get_db)
 ):
     """Fetch list of table names for a connection."""
-    c = (
-        db.query(models.DatabaseConnection)
-        .filter(
-            models.DatabaseConnection.id == connection_id,
-            models.DatabaseConnection.tenant_id == current_user.tenant_id,
-        )
-        .first()
-    )
-    if not c:
-        raise HTTPException(status_code=404, detail="Database connection not found.")
+    c = get_accessible_connection(connection_id, current_user, db)
 
     if (c.db_type or "").lower() == "mongodb":
         try:
@@ -257,20 +235,11 @@ def retest_connection(
 @router.delete("/{connection_id}")
 def delete_connection(
     connection_id: int,
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_source_manager),
     db: Session = Depends(get_db)
 ):
     """Delete a database connection for the tenant."""
-    c = (
-        db.query(models.DatabaseConnection)
-        .filter(
-            models.DatabaseConnection.id == connection_id,
-            models.DatabaseConnection.tenant_id == current_user.tenant_id,
-        )
-        .first()
-    )
-    if not c:
-        raise HTTPException(status_code=404, detail="Database connection not found.")
+    c = get_accessible_connection(connection_id, current_user, db)
 
     old_url = DatabaseConnectionFactory.get_connection_url(c)
     if old_url:
@@ -280,30 +249,28 @@ def delete_connection(
     return {"message": "Database connection deleted successfully", "id": connection_id}
 
 
-@router.put("/{connection_id}")
+@router.put("/{connection_id}", response_model=schemas.DatabaseConnectionResponse)
 def update_connection(
     connection_id: int,
     update_data: schemas.ConnectionUpdate,
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_source_manager),
     db: Session = Depends(get_db)
 ):
-    """Update a database connection for the tenant."""
-    c = (
-        db.query(models.DatabaseConnection)
-        .filter(
-            models.DatabaseConnection.id == connection_id,
-            models.DatabaseConnection.tenant_id == current_user.tenant_id,
-        )
-        .first()
-    )
-    if not c:
-        raise HTTPException(status_code=404, detail="Database connection not found.")
+    """Update a database connection for the tenant with SSRF validation, encryption, and credential redaction."""
+    c = get_accessible_connection(connection_id, current_user, db)
 
     old_url = DatabaseConnectionFactory.get_connection_url(c)
     update_dict = update_data.model_dump(exclude_unset=True)
     if "password" in update_dict and update_dict["password"]:
         c.password = encrypt_password(update_dict["password"])
         update_dict.pop("password")
+
+    if "connection_string" in update_dict and update_dict["connection_string"]:
+        raw_cs = update_dict["connection_string"]
+        factory = DatabaseConnectionFactory(current_user.tenant_id)
+        factory.validate_connection_string(raw_cs)
+        c.connection_string = encrypt_password(raw_cs)
+        update_dict.pop("connection_string")
 
     for key, value in update_dict.items():
         if hasattr(c, key) and value is not None:
@@ -313,40 +280,18 @@ def update_connection(
     if old_url:
         invalidate_engine(old_url)
     db.refresh(c)
-    return {
-        "id": c.id,
-        "name": c.name,
-        "db_type": c.db_type,
-        "host": c.host,
-        "port": c.port,
-        "username": c.username,
-        "database": c.database,
-        "connection_string": c.connection_string,
-        "description": getattr(c, "description", None),
-        "status": c.status,
-        "tables_metadata": c.tables_metadata,
-        "created_at": c.created_at
-    }
+    return schemas.DatabaseConnectionResponse.model_validate(c)
 
 
 @router.post("/{connection_id}/preview")
 def preview_connection_table(
     connection_id: int,
     preview_req: schemas.TablePreviewRequest,
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_query_executor),
     db: Session = Depends(get_db)
 ):
     """Fetch first N rows from table."""
-    c = (
-        db.query(models.DatabaseConnection)
-        .filter(
-            models.DatabaseConnection.id == connection_id,
-            models.DatabaseConnection.tenant_id == current_user.tenant_id,
-        )
-        .first()
-    )
-    if not c:
-        raise HTTPException(status_code=404, detail="Database connection not found.")
+    c = get_accessible_connection(connection_id, current_user, db)
 
     target_table = preview_req.table_name or preview_req.table
     if not target_table:
@@ -374,20 +319,11 @@ def preview_connection_table(
 def execute_connection_query(
     connection_id: int,
     query_req: schemas.DBQueryRequest,
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_query_executor),
     db: Session = Depends(get_db)
 ):
     """Execute raw query on connected DB."""
-    c = (
-        db.query(models.DatabaseConnection)
-        .filter(
-            models.DatabaseConnection.id == connection_id,
-            models.DatabaseConnection.tenant_id == current_user.tenant_id,
-        )
-        .first()
-    )
-    if not c:
-        raise HTTPException(status_code=404, detail="Database connection not found.")
+    c = get_accessible_connection(connection_id, current_user, db)
 
     decrypted_password = decrypt_password(c.password) if c.password else ""
     raw_conn = c.connection_string or (c.host if c.host and ("://" in str(c.host) or "mongodb" in str(c.host)) else None)
@@ -414,20 +350,11 @@ def execute_connection_query(
 def execute_ai_query(
     connection_id: int,
     ai_req: schemas.AIQueryRequest,
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_query_executor),
     db: Session = Depends(get_db)
 ):
     """Execute AI query on connected DB."""
-    c = (
-        db.query(models.DatabaseConnection)
-        .filter(
-            models.DatabaseConnection.id == connection_id,
-            models.DatabaseConnection.tenant_id == current_user.tenant_id,
-        )
-        .first()
-    )
-    if not c:
-        raise HTTPException(status_code=404, detail="Database connection not found.")
+    c = get_accessible_connection(connection_id, current_user, db)
 
     schema = {}
     if c.tables_metadata:
@@ -462,14 +389,21 @@ def execute_ai_query(
     decrypted_password = decrypt_password(c.password) if c.password else ""
     raw_conn = c.connection_string or (c.host if c.host and ("://" in str(c.host) or "mongodb" in str(c.host)) else None)
     decrypted_conn = (decrypt_password(raw_conn) if raw_conn else None) or raw_conn or ""
-    results = db_connection_service.execute_query(
-        db_type=c.db_type,
-        host=c.host,
-        port=c.port,
-        username=c.username,
-        password=decrypted_password,
-        database=c.database,
-        connection_string=decrypted_conn,
-        query=generated_query
-    )
+    try:
+        results = db_connection_service.execute_query(
+            db_type=c.db_type,
+            host=c.host,
+            port=c.port,
+            username=c.username,
+            password=decrypted_password,
+            database=c.database,
+            connection_string=decrypted_conn,
+            query=generated_query
+        )
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Generated query was rejected by read-only policy.") from None
+    except Exception as exc:
+        logger.error("AI query execution failed (%s)", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Database query failed.") from None
+
     return {"query": generated_query, "results": results}
