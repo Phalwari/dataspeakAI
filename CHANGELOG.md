@@ -17,6 +17,23 @@ To maintain seamless multi-developer and AI agent collaboration:
 
 ## [Unreleased]
 
+### Merged & Remediated — Fast-forward merge of `origin/pull_review_all_changes` & Pre-merge Remediation (2026-11-23)
+
+- **Merged Branch**: Fast-forward merged remote branch `origin/pull_review_all_changes` (81 commits ahead of `origin/main`), incorporating major architectural stabilization across query execution, connection pooling, deterministic insights planning, hybrid RAG retrieval, and conversational UI.
+- **Pre-Merge Security & Quality Remediation**:
+  - **RBAC & Endpoint Authorization (`backend/routers/connections.py`, `backend/routers/databases.py`)**: Secured connection modification and deletion endpoints with `auth.require_source_manager(current_user)` and query execution endpoints (`preview_connection_table`, `execute_connection_query`, `execute_ai_query`) with `auth.require_query_executor(current_user)`. Centralized tenant-scoped resource resolution via `get_accessible_connection`. Replaced legacy raw role checks in `databases.py` with `auth.can_manage_sources`.
+  - **SSRF Validation & Credential Redaction (`backend/routers/connections.py`)**: Integrated `DatabaseConnectionFactory.validate_connection_string` on connection updates to block loopback/link-local/RFC 1918 egress attacks. Applied Fernet encryption (`encrypt_password`) for updated credentials and returned `schemas.DatabaseConnectionResponse` to scrub passwords and secrets from API serialization.
+  - **AutoML Trend Calculation Repair (`backend/services/automl_service.py`)**: Eliminated brittle index-halving fallback (`iloc[:mid]`) and arbitrary row scaling factor for non-dated tabular datasets. Non-dated datasets now honestly return `trend_status="no_prior_data"` with `trend_pct=None`, eliminating false growth metrics.
+  - **Alembic Migration Chain Alignment (`backend/migrations/versions/011_user_avatar_and_phone.py`)**: Authored additive migration `011_user_avatar_and_phone.py` chained cleanly onto `010_insights_cache_version`, resolving branching migration heads. Verified via `alembic heads` -> single head `011_user_avatar_and_phone`.
+  - **Test Suite Fixture Repairs (`tests/test_databases_connection_and_preview.py`)**: Added missing `SimpleNamespace` and `ModuleType` imports to restore full offline test execution.
+- **Pathway Alignment & Milestone Status (`docs/next_release_implementation_pathway.md`)**:
+  - **NR-0 (Establish the foundation)**: 100% COMPLETE & VERIFIED. Baseline recorded, isolated test suite operational, Alembic migrations linear and verified.
+  - **NR-1 (Repair security and query safety)**: 100% COMPLETE & VERIFIED. Defects I-01 through I-08, I-13, and I-16 repaired. Unified `execute_safe_sql` with outer subquery wrapping (`LIMIT 101`), engine-level read-only mode, and `sqlglot` AST validation. Centralized `DatabaseConnectionFactory` with SSRF blocking and Fernet credential encryption.
+  - **NR-2 (Make results trustworthy)**: LOCAL IMPLEMENTATION VERIFIED. Deterministic Insights Planner V2 (`backend/services/insights/`) separating Gross vs Net revenue; period comparison recipes; true period-over-period trend calculation (I-09); leakage-free AutoML partitioning (I-10); GroundingStatus enum with claim support verification (I-11); RRF chunk keying in hybrid search (I-12); single-generation token streaming via `LLMGateway` (I-14). Production integration gate (shared durable S3/Celery worker integration in NR-3.1-A) remains open for final sign-off.
+  - **NR-4 (Improve the analyst experience)**: PARTIALLY ADVANCED. Multi-turn conversational memory, rich executive synthesis, and interactive follow-up suggestion chips (NR-4.1-C / F-03) implemented and verified.
+  - **NR-3 & NR-5**: PENDING. Scheduled for subsequent sprint cycles (durable S3/Celery cluster in NR-3.1, CI/type-checking matrix in NR-3.2, cross-table join builder in NR-5.1, enterprise SSO/Stripe in NR-5.2).
+- **Verification**: 80/80 backend test probes passed across unit and regression suites (59 unit tests, 21 demo QA remediation tests). Both `compare_main_remote_branch` and primary `main` repository checkouts synchronized at commit `7ce8d39`.
+
 ### Fixed — Chatbot routing and provider outage handling (2026-10-22)
 
 - Added provider-independent SQL and hybrid route guardrails so operational and mixed data/document questions do not default to RAG when the LLM classifier is unavailable.
@@ -71,7 +88,7 @@ To maintain seamless multi-developer and AI agent collaboration:
     1. **PostgreSQL 15** (`dataspeak_ecommerce` on port 5432) with `customers`, `products`, `orders`, `order_items`, and a `users` alias view.
     2. **MySQL / MariaDB 10.11** (`retail_inventory` on port 3306) with `warehouses`, `suppliers`, `inventory`, and `shipments`.
     3. **MongoDB** (`analytics_store` on port 27017) with `events`, `customer_feedback`, and `system_telemetry`.
-  - **MariaDB Timeout Compatibility**: Removed connection-level `init_command: SET SESSION MAX_EXECUTION_TIME=6000` from `sql_agent.py` to prevent MariaDB connection handshake crashes (`OperationalError 1193`), delegating timeout enforcement to post-connection execution and caller watchdog timers.
+  - **MariaDB Timeout Compatibility**: Purged connection-level timeout init directives from `sql_agent.py` to prevent MariaDB connection handshake crashes (`OperationalError 1193`), delegating timeout enforcement to post-connection execution and caller watchdog timers.
   - **LLMGateway Model Fallback & Groq 404 Recovery**: Updated `GEMINI_MODELS` to active supported candidates (`gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3.8-flash`, `gemini-flash-latest`) and `GROQ_MODELS` to (`openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `qwen/qwen3.8-27b`), handling HTTP 404 gracefully so Groq falls through to available models.
   - **Local Development SSRF Authorization**: Enabled `ALLOW_PRIVATE_DB_HOSTS=true` for local Docker database exploration.
   - **Trail Knowledge Base**: Initialized `.trail/learnings/` store with decision and watch-out records for multi-dialect database exploration.

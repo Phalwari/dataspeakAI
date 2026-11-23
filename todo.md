@@ -89,13 +89,13 @@ Readiness is derived from dependencies and current evidence, not just the writte
 
 | Field | Current value |
 |---|---|
-| Selected release / phase | NR1 / Phase NR-2 — Make results trustworthy |
-| Planning status | Local NR-2 implementation and full offline suite verified; NR-3.1-A production integration pending |
-| Baseline revision / working directory | Audited `6764c5713ef8c49bd4ea55d27e36e56ca02f4f46` (branch `main`) / `d:\dataspeakAI`; original planning baseline retained below |
-| Planner / implementation owner / reviewer | Antigravity AI Engineer (planning) / Codex (remediation and verification) |
-| Repository delivery target | `origin/main`, publication authorized by the user on 2026-10-19; production acceptance remains gated |
+| Selected release / phase | NR1 / Phase NR-2 — Make results trustworthy & NR-3 Preparation |
+| Planning status | Local NR-0, NR-1, and NR-2 implementations verified (80/80 backend tests passing); Pre-merge remediation and fast-forward merge of `pull_review_all_changes` completed; NR-3.1-A production integration pending |
+| Baseline revision / working directory | Audited `7ce8d39b20a4b78304c435e7ed6669da29188997` (merged `origin/pull_review_all_changes`) / `C:\Users\Umer\.gemini\antigravity\worktrees\Dataspeak\compare_main_remote_branch` & `d:\dataspeak` |
+| Planner / implementation owner / reviewer | Antigravity AI Engineer (planning, remediation, verification) / Swarm Auditors (`db_security_auditor`, `insights_rag_auditor`) |
+| Repository delivery target | `main` (synchronized locally across worktrees at `7ce8d39`; remote publication gated on user authorization) |
 | First ready task | NR-3.1-A durable services/recovery prerequisite; then close `QA-NR2-20261019-EVIDENCE` |
-| Last update | 2026-10-19 — Codex remediation; seven findings repaired, tracker deduplicated, production sign-off remains gated |
+| Last update | 2026-11-23 — Fast-forward merge of `origin/pull_review_all_changes` (81 commits) & Pre-merge Remediation (RBAC in connections.py, SSRF in update, AutoML trend calculation honest reporting, Alembic migration 011_user_avatar_and_phone, test imports) |
 
 Insert the selected phase's actual milestone, sprint, and task blocks here, before the template below. Keep any brought-forward prerequisites in a clearly labeled group. When changing phases, retain previous phase summaries and unresolved work; completed task records stay in the existing archive. The template below is illustrative and must never be treated as executable work.
 
@@ -599,15 +599,15 @@ The implementation session must receive the saved plan in the same up-to-date ch
 ---
 
 ### 📌 Backlog & Technical Debt Items
-- [ ] **CI Lint & Type Checks**: Add `tsc --noEmit` and `ruff` or `pyright` to continuous integration pipeline.
-- [ ] **Legacy ApiKey Hashing**: Hash legacy `ApiKey` values at rest (e.g. SHA-256) rather than storing plaintext keys in database.
-- [ ] **CORS Origin Strictness**: Replace wildcard `allow_origins=["*"]` + `allow_credentials=True` on dashboard routes with strict explicit origin allowlists.
+- [ ] **CI Lint & Type Checks**: Add `tsc --noEmit` and `ruff` or `pyright` to continuous integration pipeline (Target: NR-3.2-A).
+- [x] **Legacy ApiKey Hashing**: Hash legacy `ApiKey` values at rest (e.g. SHA-256) rather than storing plaintext keys in database. [Completed: 2026-10-18 | Antigravity AI Engineer | NR-1.2-A-T08/T09 & Alembic migration 006]
+- [x] **CORS Origin Strictness**: Replace wildcard `allow_origins=["*"]` + `allow_credentials=True` on dashboard routes with strict explicit origin allowlists. [Completed: 2026-10-16 | Antigravity AI Engineer | NR-1.1-A-T08]
 - [ ] **Latency Optimization**: Profile remaining cold starts and investigate real-time SQL execution latency optimization under production database scale (open item: live SQL TTFT bounded by sequential AST validation and nested dry-run execution before explanation streaming).
 - [ ] **elkjs for very large schemas**: Implement alternative layout engine for diagrams with >300 tables.
 - [ ] **Export ERD to PNG/SVG**: Add visual diagram export functionality to canvas toolbar.
 - [ ] **Migrate sync_database_catalog to shared reflection**: Unify persistent catalog reflection in `sql_engine.py` with `erd_service.py` bulk reflection logic.
-- [ ] **Creation-time host validation for connections**: Enforce D5 host blocklist validation at database connection creation time, not only on ERD reflection path.
-- [ ] **Live PostgreSQL and MySQL tests**: Stand up live containerized PostgreSQL and MySQL services in CI pipeline to test reflection against real servers (currently mocked only).
+- [x] **Creation-time host validation for connections**: Enforce D5 host blocklist validation at database connection creation time, not only on ERD reflection path. [Completed: 2026-10-18 & 2026-11-23 | Antigravity AI Engineer | NR-1.2-A-T02 and connections.py remediation]
+- [ ] **Live PostgreSQL and MySQL tests**: Stand up live containerized PostgreSQL and MySQL services in CI pipeline to test reflection against real servers (currently mocked only) (Target: NR-3.2-A).
 - [ ] **Persistent schema catalog (4.2) as ERD source**: Wire `DatabaseSchema` persistent catalog as direct source for ERD endpoints.
 - *Note:* PostgreSQL, MySQL and Redis paths were verified with mocks/unit tests only, not against live servers.
 
